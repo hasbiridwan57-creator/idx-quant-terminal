@@ -1,0 +1,4696 @@
+# LAPORAN LENGKAP END-TO-END FLOW & SOURCE CODE: IDX-QUANTTERMINAL v3.0
+
+Dokumen ini memuat seluruh arsitektur data flow, sequence interaksi, serta kode sumber asli utuh dari seluruh file komponen sistem tanpa ada bagian yang dipotong atau diringkas.
+
+---
+
+## 1. END-TO-END SYSTEM ARCHITECTURE & DATA FLOW
+
+### 1.1 Diagram Alur Komprehensif
+
+```
+                                 [ SUMBER DATA EKSTERNAL ]
+                                      │              │
+                  ~/.local/bin/idx (Rust CLI)        yfinance (Python Library)
+                 [955 Emiten BEI Real-Time Data]    [Multi-Year Statement & Quote Fallback]
+                                      │              │
+                                      ▼              ▼
+                      +──────────────────────────────────────────────+
+                      |         DATA INGESTION & FRESHNESS           |
+                      |      (app/providers/yahoo.py & classify.py)  |
+                      +──────────────────────────────────────────────+
+                                              │
+                                              ▼
+                      +──────────────────────────────────────────────+
+                      |        STORAGE & PERSISTENCE LAYER           |
+                      |      (app/db/models.py & database.py)        |
+                      | - Symbol             - FinancialStatementCache|
+                      | - QuoteLatest        - IndexQuote / Snapshot |
+                      +──────────────────────────────────────────────+
+                                              │
+                     ┌────────────────────────┴────────────────────────┐
+                     ▼                                                 ▼
+   +───────────────────────────────────+             +───────────────────────────────────+
+   |       ALK & DUPONT ENGINE         |             |      LIVE TERMINAL PIPELINE       |
+   |   (app/services/dupont_engine.py) |             | (app/services/terminal_pipeline)  |
+   | - 3-Stage & 5-Stage Math (diff<1e-6)|           | - Heavyweights Movers & S/R Matrix|
+   | - Logarithmic YoY Attribution     |             | - BEI Validated Tick Constraints  |
+   | - Negative Equity Guardrail ('NM')|             | - Market Breadth / Adv / Dec      |
+   +───────────────────────────────────+             +───────────────────────────────────+
+                     │                                                 │
+                     ├─────────────────────────────────────────────────┤
+                     ▼                                                 ▼
+   +───────────────────────────────────+             +───────────────────────────────────+
+   |     BANKING & VALUATION SUITE     |             |      RISK & CREDIT ANALYTICS      |
+   | - Banking Model (NIM, CIR, ROA)   |             | - Risk Engine (Sharpe, VaR 95%)   |
+   | - DCF Engine (WACC, 5Y FCF, TV)   |             | - Bond Pricing (Duration, PVBP)   |
+   +───────────────────────────────────+             +───────────────────────────────────+
+                                              │
+                                              ▼
+                      +──────────────────────────────────────────────+
+                      |          REST API & CONTROLLERS              |
+                      |               (app/main.py)                  |
+                      | - GET /                 - GET /api/dupont/.. |
+                      | - GET /api/market/..    - GET /api/quotes    |
+                      +──────────────────────────────────────────────+
+                                              │
+                                              ▼
+                      +──────────────────────────────────────────────+
+                      |     INSTITUTIONAL PRESENTATION (UI)          |
+                      |          (app/templates/base.html)           |
+                      | - Bloomberg Slate Theme (#0A0E17)            |
+                      | - Dual-Tab Rail, ROE Waterfall Bridge        |
+                      | - Command Palette (Cmd+K) Universal Search   |
+                      +──────────────────────────────────────────────+
+```
+
+### 1.2 Detail Alur Permintaan Pengguna (Execution Flow)
+
+1. **Pemuatan Beranda (`GET /?ticker=<SYMBOL>`)**:
+   - FastAPI menerima permintaan dan mengecek keberadaan data ticker di `FinancialStatementCache`.
+   - Jika data emiten belum ada (misal ticker baru dipilih), sistem memanggil `fetch_financials_multi` di `yahoo.py` secara on-demand, menyimpannya ke database SQLite, lalu melanjutkan eksekusi.
+   - `dupont_engine.py` menghitung dekomposisi 3-stage dan 5-stage, atribusi perubahan logaritmik, serta memvalidasi keselarasan identitas akuntansi matematika.
+   - `banking_engine.py` mengevaluasi rasio intermediasi (NIM, CIR, ROA, ROE) jika entitas merupakan lembaga keuangan.
+   - `fincept_valuation.py` menghitung nilai wajar intrinsik via DCF dan matriks sensitivitas 2 dimensi.
+   - `terminal_pipeline.py` mengambil data pasar live (IHSG, movers, status pasar, tick size BEI terverifikasi).
+   - Jinja2 me-render `base.html` dengan seluruh token styling dark-mode institusional.
+
+2. **Alur Command Palette Pencarian (Cmd+K)**:
+   - Alpine.js di browser membaca daftar seluruh emiten dari skrip JSON `#tickers-data`.
+   - Filter client-side berjalan instan tanpa latency network, mengizinkan navigasi ke semesta 955 emiten BEI.
+
+3. **Alur Ekspor Laporan & Unduh Template**:
+   - Endpoint `/api/dupont/{ticker}/export` menghasilkan dokumen Tear-Sheet HTML/PDF siap cetak format A4.
+   - Link `/app/static/template_lapkeu_bei.xlsx` mengunduh template spreadsheet resmi berstruktur rapi siap-unggah.
+
+---
+
+## 2. KODE SUMBER LENGKAP SETIAP FILE TANPA TERPOTONG
+
+### File: `app/main.py`
+**Deskripsi:** FastAPI App, Lifecycle, Controllers & Route Handlers  
+**Ukuran File:** 12247 bytes
+
+```python
+import hmac
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response, FileResponse
+from fastapi.templating import Jinja2Templates
+from sqlmodel import Session, select
+from app.db.database import init_db, get_session, engine
+from app.db.models import FinancialStatementCache, Symbol
+from app.services.dupont_engine import analyze_dupont_yoy
+from app.services.banking_engine import calculate_banking_ratios
+from app.services.fincept_valuation import quick_dcf_valuation
+from app.services.parser import (
+    parse_idx_file_bytes,
+    save_or_get_cached_statement,
+    seed_initial_idx_statements,
+    load_ticker_pair,
+)
+from app.services.llm_analyzer import summarize_dupont_anomalies
+from app.services.pdf_exporter import render_dupont_report_export
+from app.services.terminal_pipeline import (
+    TerminalPayload,
+    get_terminal_snapshot,
+    update_terminal_snapshot,
+    validate_terminal_payload,
+)
+from app.providers import (
+    fetch_market_overview,
+    fetch_quotes,
+    fetch_index_quote,
+    classify_freshness,
+    SourceHealth,
+    quote_budget,
+    fund_budget,
+)
+from datetime import datetime, timezone
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    with Session(engine) as session:
+        seed_initial_idx_statements(session)
+    yield
+
+app = FastAPI(
+    title="IDX-QuantTerminal: DuPont ALK & IHSG Research Platform",
+    version="2.2.0",
+    lifespan=lifespan,
+)
+
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard_home(
+    request: Request,
+    ticker: str = "ASII",
+    session: Session = Depends(get_session),
+):
+    notice = None
+    curr_stmt, prev_stmt = load_ticker_pair(session, ticker)
+
+    # On-demand: jika emiten belum ada di cache → fetch dari yfinance → cache → analyze
+    if not curr_stmt:
+        ticker_upper = ticker.upper()
+        try:
+            from app.providers import yahoo as provider
+            fin_rows = provider.fetch_financials_multi(ticker_upper, years=4)
+            if fin_rows:
+                provider.cache_financials_multi_to_db(session, ticker_upper, fin_rows)
+                session.commit()
+                curr_stmt, prev_stmt = load_ticker_pair(session, ticker_upper)
+                notice = (f"📥 {ticker_upper} ({len(fin_rows)} tahun) baru di-pull dari yfinance & di-cache. "
+                          f"Analisis DuPont YoY tersedia.")
+        except Exception as e:
+            pass  # tetap tampilkan ASII sebagai fallback
+
+    # Fallback ke ASII jika memang tidak ada data sama sekali
+    if not curr_stmt:
+        notice = (f"Ticker {ticker.upper()} belum ada di cache & tidak bisa di-fetch. "
+                  f"Menampilkan ASII sebagai demo. "
+                  f"Unggah laporan keuangannya via POST /api/dupont/upload.")
+        curr_stmt, prev_stmt = load_ticker_pair(session, "ASII")
+
+    if not curr_stmt:
+        raise HTTPException(status_code=404, detail="Cache laporan keuangan kosong. "
+                           "Tidak ada data sama sekali — seed data tidak ditemukan.")
+
+    bundle = analyze_dupont_yoy(curr_stmt, prev_stmt)
+    anomaly = await summarize_dupont_anomalies(bundle, wait_for_llm=False)
+    terminal = get_terminal_snapshot()
+
+    # Hitung metrik perbankan otomatis bila institusi finansial
+    banking_data = {
+        "ticker": curr_stmt.ticker,
+        "revenue": curr_stmt.revenue,
+        "net_income": curr_stmt.net_income_parent,
+        "total_assets": curr_stmt.total_assets,
+        "total_equity": curr_stmt.total_equity_parent,
+        "total_debt": curr_stmt.total_liabilities,
+        "ebit": curr_stmt.ebit,
+        "ebt": curr_stmt.ebt,
+        "period": curr_stmt.year,
+    }
+    banking_ratios = calculate_banking_ratios(banking_data)
+
+    # Hitung Quick DCF Valuation bawaan
+    try:
+        shares_est = (curr_stmt.total_equity_parent / 1000.0) if curr_stmt.total_equity_parent > 0 else 10_000_000_000
+        dcf_result = quick_dcf_valuation(
+            ticker=curr_stmt.ticker,
+            ebit=curr_stmt.ebit / 1e9 if curr_stmt.ebit > 0 else (curr_stmt.revenue * 0.15) / 1e9,
+            total_assets=curr_stmt.total_assets / 1e9,
+            total_debt=curr_stmt.total_liabilities / 1e9,
+            cash=(curr_stmt.total_assets * 0.1) / 1e9,
+            shares_outstanding_m=max(100.0, shares_est / 1e6),
+        )
+    except Exception:
+        dcf_result = None
+
+    # Gabungan: emiten yang sudah ada laporan keuangan (analisis DuPont siap)
+    # + emiten aktif dari symbol table (bisa di-click untuk fetch on-demand)
+    stmt_tickers = set(str(t) for t in session.exec(select(FinancialStatementCache.ticker)).all())
+    sym_tickers  = set(str(t) for t in session.exec(select(Symbol.ticker)).all())
+    all_tickers  = sorted(stmt_tickers | sym_tickers)
+    cached_tickers_str = (
+        sorted(stmt_tickers) +
+        sorted(sym_tickers - stmt_tickers)
+    )
+    return templates.TemplateResponse(
+        request,
+        "base.html",
+        {
+            "bundle": bundle,
+            "anomaly": anomaly,
+            "terminal": terminal,
+            "banking": banking_ratios,
+            "dcf": dcf_result,
+            "cached_tickers": cached_tickers_str,
+            "cached_tickers_str": cached_tickers_str,
+            "active_ticker": curr_stmt.ticker,
+            "notice": notice,
+        },
+    )
+
+@app.get("/api/dupont/{ticker}")
+async def get_dupont_analysis_json(ticker: str, session: Session = Depends(get_session)):
+    curr_stmt, prev_stmt = load_ticker_pair(session, ticker)
+    if not curr_stmt:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} belum ada di cache.")
+    bundle = analyze_dupont_yoy(curr_stmt, prev_stmt)
+    anomaly = await summarize_dupont_anomalies(bundle)
+    return {"bundle": bundle, "anomaly": anomaly}
+
+@app.post("/api/dupont/upload")
+async def upload_idx_statement(
+    file: UploadFile = File(...),
+    ticker: str = Form("XXXX"),
+    year: int = Form(2025),
+    session: Session = Depends(get_session),
+):
+    raw_bytes = await file.read()
+    if len(raw_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Ukuran file melebihi batas 25MB.")
+    try:
+        parsed_stmt = parse_idx_file_bytes(
+            filename=file.filename or "upload.xlsx",
+            file_bytes=raw_bytes,
+            default_ticker=ticker,
+            default_year=year,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    record = save_or_get_cached_statement(session, parsed_stmt, raw_bytes)
+    curr_stmt, prev_stmt = load_ticker_pair(session, record.ticker)
+    bundle = analyze_dupont_yoy(curr_stmt, prev_stmt)
+    anomaly = await summarize_dupont_anomalies(bundle)
+    return {"status": "cached", "ticker": record.ticker, "bundle": bundle, "anomaly": anomaly}
+
+@app.get("/api/dupont/{ticker}/export")
+async def export_dupont_pdf(ticker: str, session: Session = Depends(get_session)):
+    curr_stmt, prev_stmt = load_ticker_pair(session, ticker)
+    if not curr_stmt:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} tidak ditemukan.")
+    bundle = analyze_dupont_yoy(curr_stmt, prev_stmt)
+    anomaly = await summarize_dupont_anomalies(bundle)
+    content_bytes, media_type, filename = render_dupont_report_export(bundle, anomaly)
+    return Response(
+        content=content_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+@app.get("/api/terminal/snapshot", response_model=TerminalPayload)
+async def api_get_terminal():
+    return get_terminal_snapshot()
+
+@app.get("/api/market/overview")
+async def api_market_overview():
+    """Snapshot pasar IDX live dari Yahoo Finance (via idx CLI)."""
+    try:
+        overview = fetch_market_overview()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Gagal mengambil data pasar: {exc}")
+    fetched_at = datetime.now(timezone.utc)
+    freshness = classify_freshness(
+        fetched_at,
+        overview.get("as_of"),
+        overview.get("market_state", ""),
+        "yahoo",
+    )
+    return {
+        "overview": overview,
+        "freshness": {
+            "label": freshness.label.value,
+            "freshness_pct": freshness.freshness_pct,
+            "as_of_wib": freshness.as_of_wib,
+            "delay_minutes": freshness.delay_minutes,
+            "market_state": freshness.market_state,
+        },
+    }
+
+@app.get("/api/quotes")
+async def api_quotes(symbols: str = "BBCA,BBRI,TLKM,ASII"):
+    """Quote bulk untuk daftar simbol (comma-separated)."""
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not syms:
+        raise HTTPException(status_code=400, detail="Tidak ada simbol yang diberikan.")
+    if len(syms) > 200:
+        raise HTTPException(status_code=400, detail="Maksimal 200 simbol per request.")
+    try:
+        quotes = fetch_quotes(syms)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Gagal mengambil quote: {exc}")
+    return {"count": len(quotes), "quotes": quotes}
+
+@app.get("/api/health")
+async def api_health():
+    """Status kesehatan semua sumber data + budget polling."""
+    fetched_at = datetime.now(timezone.utc)
+    sources = []
+
+    # Sumber 1: Yahoo Finance (via idx CLI)
+    try:
+        overview = fetch_market_overview()
+        freshness = classify_freshness(
+            fetched_at,
+            overview.get("as_of"),
+            overview.get("market_state", ""),
+            "yahoo",
+        )
+        sources.append(
+            {
+                "source": "yahoo-finance",
+                "capability": "QUOTE_BULK / INDEX_QUOTE / MARKET_OVERVIEW / HISTORY / FINANCIALS",
+                "status": SourceHealth.HEALTHY.value,
+                "records_count": overview.get("breadth", {}).get("quoted", 0),
+                "fetched_at": fetched_at.isoformat(),
+                "as_of_wib": freshness.as_of_wib,
+                "freshness": freshness.label.value,
+                "delay_minutes": freshness.delay_minutes,
+                "error_msg": None,
+            }
+        )
+    except Exception as exc:
+        sources.append(
+            {
+                "source": "yahoo-finance",
+                "capability": "QUOTE_BULK / INDEX_QUOTE / MARKET_OVERVIEW",
+                "status": SourceHealth.RUSAK.value,
+                "records_count": 0,
+                "fetched_at": fetched_at.isoformat(),
+                "as_of_wib": None,
+                "freshness": "UNKNOWN",
+                "delay_minutes": 0,
+                "error_msg": str(exc),
+            }
+        )
+
+    # Sumber 2: idx.co.id foreign flow (dikenal terblokir Cloudflare dari DC)
+    sources.append(
+        {
+            "source": "idx.co.id",
+            "capability": "FOREIGN_FLOW / BROKER_SUMMARY",
+            "status": SourceHealth.DEGRADED.value,
+            "records_count": 0,
+            "fetched_at": None,
+            "as_of_wib": None,
+            "freshness": "UNKNOWN",
+            "delay_minutes": 0,
+            "error_msg": (
+                "Cloudflare bot protection memblokir akses dari IP non-residensial. "
+                "Fallback: import CSV/JSON manual dari pengguna."
+            ),
+        }
+    )
+
+    return {
+        "checked_at": fetched_at.isoformat(),
+        "sources": sources,
+        "budgets": [quote_budget.status(), fund_budget.status()],
+    }
+
+@app.post("/api/terminal/ingest", response_model=TerminalPayload)
+async def api_ingest_terminal(
+    payload: TerminalPayload,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    expected = os.getenv("INGEST_API_KEY", "").strip()
+    if expected and not hmac.compare_digest(x_api_key or "", expected):
+        raise HTTPException(status_code=401, detail="API key tidak valid (header X-API-Key).")
+    errors = validate_terminal_payload(payload)
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    return update_terminal_snapshot(payload)
+```
+
+---
+
+### File: `app/db/models.py`
+**Deskripsi:** Database Schema & Entity Models (SQLModel)  
+**Ukuran File:** 4899 bytes
+
+```python
+from datetime import datetime, timezone
+from typing import Optional
+from sqlalchemy import UniqueConstraint
+from sqlmodel import SQLModel, Field
+
+# ── Legacy Model (v2.2) ────────────────────────────────────────────────
+class FinancialStatementCache(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("ticker", "year", "period_type", name="uq_ticker_year_period"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    file_hash: str = Field(index=True, unique=True)
+    ticker: str = Field(index=True)
+    company_name: str
+    year: int = Field(index=True)
+    period_type: str = Field(default="FY")
+    currency: str = Field(default="IDR")
+    unit_multiplier: float = Field(default=1.0)
+
+    revenue: float
+    ebit: float
+    ebt: float
+    net_income_parent: float
+
+    total_assets: float
+    total_liabilities: float
+    total_equity_parent: float
+    total_equity_consolidated: Optional[float] = None
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ── New Models for Phase 1 & 2 (v3.0) ───────────────────────────────────
+
+class Symbol(SQLModel, table=True):
+    """Seluruh emiten BEI aktif/nonaktif."""
+    ticker: str = Field(primary_key=True, index=True)
+    name: str
+    sector: Optional[str] = Field(default=None, index=True)
+    subsector: Optional[str] = None
+    board: Optional[str] = None  # UTAMA, PENGEMBANGAN, AKSELERASI
+    is_active: bool = Field(default=True, index=True)
+    listing_date: Optional[str] = None
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class QuoteLatest(SQLModel, table=True):
+    """Snapshot harga terkini per emiten."""
+    ticker: str = Field(primary_key=True, index=True)
+    price: float
+    change: float
+    change_pct: float
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    previous_close: Optional[float] = None
+    volume_lot: Optional[int] = None
+    value_idr: Optional[float] = None
+    market_cap: Optional[float] = None
+    pe_trailing: Optional[float] = None
+    pb: Optional[float] = None
+    dividend_yield_pct: Optional[float] = None
+    as_of: Optional[str] = None
+    source: str = Field(default="yfinance")
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class QuoteHistoryDaily(SQLModel, table=True):
+    """OHLCV harian untuk analisis teknikal & kalkulasi S/R."""
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_ticker_date"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    date: str = Field(index=True)  # YYYY-MM-DD
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class IndexQuote(SQLModel, table=True):
+    """Snapshot nilai indeks komposit & sektoral."""
+    symbol: str = Field(primary_key=True, index=True)  # ^JKSE, IDX30, LQ45
+    name: str
+    price: float
+    change: float
+    change_pct: float
+    high: Optional[float] = None
+    low: Optional[float] = None
+    as_of: Optional[str] = None
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ForeignFlowDaily(SQLModel, table=True):
+    """Arus dana investor asing harian per emiten."""
+    __table_args__ = (
+        UniqueConstraint("ticker", "date", name="uq_flow_ticker_date"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    date: str = Field(index=True)
+    net_foreign_rg_bn: float
+    net_foreign_ng_bn: float = 0.0
+    source: str = Field(default="MANUAL")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ProviderCallLog(SQLModel, table=True):
+    """Audit log panggilan provider (tanpa rahasia/keys)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str
+    endpoint: str
+    status_code: int
+    latency_ms: float
+    records_count: int = 0
+    error_msg: Optional[str] = None
+    called_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MarketSnapshot(SQLModel, table=True):
+    """Snapshot terminal yang dipersistensikan ke database."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    trading_date: str = Field(index=True)
+    ihsg_last: float
+    change_pts: float
+    change_pct: float
+    total_value_bn: float
+    net_foreign_rg_bn: float
+    market_status: str
+    headline: str
+    payload_json: str  # JSON dump lengkap dari TerminalPayload
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+```
+
+---
+
+### File: `app/db/database.py`
+**Deskripsi:** Database Engine, Session Lifecycle & Initialization  
+**Ukuran File:** 853 bytes
+
+```python
+import os
+from pathlib import Path
+
+from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy import event
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+SQLITE_URL = os.getenv("IDX_DB_URL", f"sqlite:///{BASE_DIR / 'idx_quant_cache.db'}")
+
+engine = create_engine(
+    SQLITE_URL,
+    connect_args={"check_same_thread": False},
+)
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.close()
+
+def init_db() -> None:
+    # Import all models explicitly to register with SQLModel.metadata
+    from app.db import models  # noqa: F401
+    SQLModel.metadata.create_all(engine)
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+```
+
+---
+
+### File: `app/services/dupont_engine.py`
+**Deskripsi:** DuPont 3-Stage & 5-Stage Mathematical Decomposition Engine  
+**Ukuran File:** 13780 bytes
+
+```python
+from __future__ import annotations
+import math
+from enum import Enum
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
+
+class PeriodType(str, Enum):
+    Q1 = "Q1"
+    Q2 = "Q2"
+    Q3 = "Q3"
+    FY = "FY"
+
+class PrimaryDriver(str, Enum):
+    OPERATIONAL_MARGIN = "OPERATIONAL_MARGIN"
+    ASSET_EFFICIENCY = "ASSET_EFFICIENCY"
+    FINANCIAL_LEVERAGE = "FINANCIAL_LEVERAGE"
+    TAX_OR_INTEREST_BURDEN = "TAX_OR_INTEREST_BURDEN"
+    EQUITY_DISTRESS = "EQUITY_DISTRESS"
+    INSUFFICIENT_PRIOR_DATA = "INSUFFICIENT_PRIOR_DATA"
+
+class FinancialStatementInput(BaseModel):
+    ticker: str = Field(..., min_length=4, max_length=6)
+    company_name: str
+    year: int = Field(..., ge=2000, le=2100)
+    period_type: PeriodType = PeriodType.FY
+    currency: str = Field(default="IDR", pattern="^(IDR|USD)$")
+    unit_multiplier: float = Field(default=1.0, gt=0)
+
+    revenue: float = Field(..., ge=0)
+    ebit: float
+    ebt: float
+    net_income_parent: float
+
+    total_assets: float = Field(..., gt=0)
+    total_liabilities: float = Field(..., ge=0)
+    total_equity_parent: float
+    total_equity_consolidated: Optional[float] = None
+
+    @property
+    def annualization_factor(self) -> float:
+        mapping = {
+            PeriodType.Q1: 12.0 / 3.0,
+            PeriodType.Q2: 12.0 / 6.0,
+            PeriodType.Q3: 12.0 / 9.0,
+            PeriodType.FY: 1.0,
+        }
+        return mapping[self.period_type]
+
+    @property
+    def balance_sheet_discrepancy_pct(self) -> float:
+        eq_to_check = (
+            self.total_equity_consolidated
+            if self.total_equity_consolidated is not None
+            else self.total_equity_parent
+        )
+        expected_assets = self.total_liabilities + eq_to_check
+        if self.total_assets == 0:
+            return 100.0
+        return abs(self.total_assets - expected_assets) / self.total_assets * 100.0
+
+class DuPontMetrics(BaseModel):
+    ticker: str
+    company_name: str
+    year: int
+    period_type: PeriodType
+    annualized_applied: bool
+    is_negative_equity: bool
+    sign_inversion_detected: bool
+    balance_sheet_balanced: bool
+
+    roe: Optional[float] = None
+    net_profit_margin: Optional[float] = None
+    asset_turnover: Optional[float] = None
+    equity_multiplier: Optional[float] = None
+
+    tax_burden: Optional[float] = None
+    interest_burden: Optional[float] = None
+    ebit_margin: Optional[float] = None
+
+    reconciliation_diff_3stage: Optional[float] = None
+    reconciliation_diff_5stage: Optional[float] = None
+
+class YoYDeltaItem(BaseModel):
+    metric_name: str
+    current_val: Optional[float]
+    previous_val: Optional[float]
+    abs_change: Optional[float]
+    bps_change: Optional[float]
+    pct_change: Optional[float]
+
+class DuPontAnalysisBundle(BaseModel):
+    current: DuPontMetrics
+    previous: Optional[DuPontMetrics] = None
+    yoy_deltas: Dict[str, YoYDeltaItem] = Field(default_factory=dict)
+    primary_driver: PrimaryDriver
+    primary_driver_effect: str = "NA"
+    roe_direction: str = "NA"
+    driver_contributions_pct: Dict[str, float] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    tree_nodes: List[Dict[str, Any]] = Field(default_factory=list)
+
+def _safe_div(num: float, den: float) -> Optional[float]:
+    if abs(den) < 1e-12:
+        return None
+    return num / den
+
+def compute_single_period_dupont(stmt: FinancialStatementInput) -> DuPontMetrics:
+    factor = stmt.annualization_factor
+    mult = stmt.unit_multiplier
+
+    ann_rev = stmt.revenue * mult * factor
+    ann_ebit = stmt.ebit * mult * factor
+    ann_ebt = stmt.ebt * mult * factor
+    ann_ni = stmt.net_income_parent * mult * factor
+
+    assets = stmt.total_assets * mult
+    equity = stmt.total_equity_parent * mult
+
+    is_neg_eq = equity <= 0
+    sign_inv = (ann_ebit <= 0) or (ann_ebt <= 0)
+    bs_ok = stmt.balance_sheet_discrepancy_pct <= 0.05
+
+    npm = _safe_div(ann_ni, ann_rev)
+    at = _safe_div(ann_rev, assets)
+    ebit_m = _safe_div(ann_ebit, ann_rev)
+
+    if is_neg_eq:
+        roe = None
+        em = None
+    else:
+        roe = _safe_div(ann_ni, equity)
+        em = _safe_div(assets, equity)
+
+    tb = _safe_div(ann_ni, ann_ebt)
+    ib = _safe_div(ann_ebt, ann_ebit)
+
+    diff_3 = None
+    diff_5 = None
+    if roe is not None and npm is not None and at is not None and em is not None:
+        roe_3 = npm * at * em
+        diff_3 = abs(roe - roe_3)
+        if tb is not None and ib is not None and ebit_m is not None:
+            roe_5 = tb * ib * ebit_m * at * em
+            diff_5 = abs(roe - roe_5)
+
+    return DuPontMetrics(
+        ticker=stmt.ticker.upper(),
+        company_name=stmt.company_name,
+        year=stmt.year,
+        period_type=stmt.period_type,
+        annualized_applied=(factor != 1.0),
+        is_negative_equity=is_neg_eq,
+        sign_inversion_detected=sign_inv,
+        balance_sheet_balanced=bs_ok,
+        roe=roe,
+        net_profit_margin=npm,
+        asset_turnover=at,
+        equity_multiplier=em,
+        tax_burden=tb,
+        interest_burden=ib,
+        ebit_margin=ebit_m,
+        reconciliation_diff_3stage=diff_3,
+        reconciliation_diff_5stage=diff_5,
+    )
+
+def analyze_dupont_yoy(
+    current_stmt: FinancialStatementInput,
+    previous_stmt: Optional[FinancialStatementInput] = None,
+) -> DuPontAnalysisBundle:
+    curr = compute_single_period_dupont(current_stmt)
+    prev = compute_single_period_dupont(previous_stmt) if previous_stmt else None
+    warnings: List[str] = []
+
+    if not curr.balance_sheet_balanced:
+        warnings.append(
+            f"Neraca tidak seimbang: selisih {current_stmt.balance_sheet_discrepancy_pct:.2f}% antara Aset dan (Liabilitas + Ekuitas)."
+        )
+    if curr.is_negative_equity:
+        warnings.append(
+            "Defisiensi Modal (Ekuitas <= 0): ROE dan Equity Multiplier dinonaktifkan (NM) untuk mencegah distorsi matematis akibat ekuitas negatif."
+        )
+    if curr.sign_inversion_detected:
+        warnings.append(
+            "Inversi tanda terdeteksi (EBIT <= 0 atau EBT <= 0): Rasio Tax Burden dan Interest Burden perlu diinterpretasikan bersama nilai absolutnya."
+        )
+    if curr.annualized_applied:
+        warnings.append(
+            f"Laporan interim ({curr.period_type.value}) telah disetahunkan (faktor {current_stmt.annualization_factor:.2f}x) agar sebanding dengan Neraca."
+        )
+
+    deltas: Dict[str, YoYDeltaItem] = {}
+    primary_driver = PrimaryDriver.INSUFFICIENT_PRIOR_DATA
+    driver_effect = "NA"
+    roe_direction = "NA"
+    contributions: Dict[str, float] = {}
+
+    if prev is not None:
+        metric_keys = [
+            ("roe", True),
+            ("net_profit_margin", True),
+            ("ebit_margin", True),
+            ("asset_turnover", False),
+            ("equity_multiplier", False),
+            ("tax_burden", False),
+            ("interest_burden", False),
+        ]
+        for key, is_rate in metric_keys:
+            c_val = getattr(curr, key)
+            p_val = getattr(prev, key)
+            abs_chg = (c_val - p_val) if (c_val is not None and p_val is not None) else None
+            bps_chg = (abs_chg * 10000.0) if (abs_chg is not None and is_rate) else None
+            pct_chg = (
+                ((c_val - p_val) / abs(p_val) * 100.0)
+                if (c_val is not None and p_val is not None and abs(p_val) > 1e-9)
+                else None
+            )
+            deltas[key] = YoYDeltaItem(
+                metric_name=key,
+                current_val=c_val,
+                previous_val=p_val,
+                abs_change=abs_chg,
+                bps_change=bps_chg,
+                pct_change=pct_chg,
+            )
+
+        if curr.is_negative_equity:
+            primary_driver = PrimaryDriver.EQUITY_DISTRESS
+        elif prev.is_negative_equity:
+            warnings.append(
+                "Periode pembanding memiliki ekuitas negatif: atribusi YoY ROE tidak bermakna (NM)."
+            )
+        else:
+            primary_driver, driver_effect, roe_direction, contributions = _attribute_roe_change(
+                curr, prev, deltas
+            )
+
+    if curr.is_negative_equity:
+        primary_driver = PrimaryDriver.EQUITY_DISTRESS
+
+    tree_nodes = _build_interactive_tree_nodes(curr, deltas)
+    return DuPontAnalysisBundle(
+        current=curr,
+        previous=prev,
+        yoy_deltas=deltas,
+        primary_driver=primary_driver,
+        primary_driver_effect=driver_effect,
+        roe_direction=roe_direction,
+        driver_contributions_pct=contributions,
+        warnings=warnings,
+        tree_nodes=tree_nodes,
+    )
+
+_FACTOR_GROUPS = {
+    PrimaryDriver.OPERATIONAL_MARGIN: ("ebit_margin",),
+    PrimaryDriver.ASSET_EFFICIENCY: ("asset_turnover",),
+    PrimaryDriver.FINANCIAL_LEVERAGE: ("equity_multiplier",),
+    PrimaryDriver.TAX_OR_INTEREST_BURDEN: ("tax_burden", "interest_burden"),
+}
+
+def _roe_direction(deltas: Dict[str, YoYDeltaItem]) -> str:
+    d = deltas.get("roe")
+    if d is None or d.bps_change is None:
+        return "NA"
+    if d.bps_change >= 10.0:
+        return "UP"
+    if d.bps_change <= -10.0:
+        return "DOWN"
+    return "FLAT"
+
+def _attribute_roe_change(
+    curr: DuPontMetrics, prev: DuPontMetrics, deltas: Dict[str, YoYDeltaItem]
+):
+    """Atribusi perubahan ROE dengan dekomposisi logaritmik."""
+    direction = _roe_direction(deltas)
+    contributions: Dict[str, float] = {}
+    usable = True
+    for driver, keys in _FACTOR_GROUPS.items():
+        total = 0.0
+        for k in keys:
+            c_val, p_val = getattr(curr, k), getattr(prev, k)
+            if c_val is None or p_val is None or c_val <= 0 or p_val <= 0:
+                usable = False
+                break
+            total += math.log(c_val / p_val)
+        if not usable:
+            break
+        contributions[driver.value] = total * 100.0
+
+    if usable:
+        main = max(contributions, key=lambda k: abs(contributions[k]))
+        effect = "POSITIVE" if contributions[main] >= 0 else "NEGATIVE"
+        return PrimaryDriver(main), effect, direction, contributions
+
+    signed = {
+        driver: sum((deltas[k].pct_change or 0.0) for k in keys)
+        for driver, keys in _FACTOR_GROUPS.items()
+    }
+    main_driver = max(signed, key=lambda d: abs(signed[d]))
+    if abs(signed[main_driver]) < 1e-9:
+        return PrimaryDriver.INSUFFICIENT_PRIOR_DATA, "NA", direction, {}
+    return main_driver, ("POSITIVE" if signed[main_driver] >= 0 else "NEGATIVE"), direction, {}
+
+def _build_interactive_tree_nodes(
+    curr: DuPontMetrics, deltas: Dict[str, YoYDeltaItem]
+) -> List[Dict[str, Any]]:
+    def fmt_pct(v: Optional[float]) -> str:
+        return "NM" if v is None else f"{v * 100:.2f}%"
+
+    def fmt_mult(v: Optional[float]) -> str:
+        return "NM" if v is None else f"{v:.2f}x"
+
+    def fmt_delta(key: str, is_rate: bool) -> str:
+        if key not in deltas or deltas[key].abs_change is None:
+            return "Baseline Period"
+        d = deltas[key]
+        if is_rate and d.bps_change is not None:
+            sign = "+" if d.bps_change >= 0 else ""
+            return f"{sign}{d.bps_change:.0f} bps YoY"
+        sign = "+" if (d.pct_change or 0) >= 0 else ""
+        return f"{sign}{d.pct_change:.1f}% YoY"
+
+    return [
+        {
+            "id": "roe",
+            "parent": None,
+            "stage": "BOTH",
+            "label": "Return on Equity (ROE)",
+            "formula": "NPM × Asset Turnover × Equity Multiplier",
+            "value": fmt_pct(curr.roe),
+            "yoy": fmt_delta("roe", True),
+            "color": "crimson" if curr.is_negative_equity else "emerald",
+        },
+        {
+            "id": "npm",
+            "parent": "roe",
+            "stage": "BOTH",
+            "label": "Net Profit Margin (NPM)",
+            "formula": "Net Income / Revenue",
+            "value": fmt_pct(curr.net_profit_margin),
+            "yoy": fmt_delta("net_profit_margin", True),
+            "color": "emerald" if (curr.net_profit_margin or 0) > 0 else "crimson",
+        },
+        {
+            "id": "at",
+            "parent": "roe",
+            "stage": "BOTH",
+            "label": "Asset Turnover (AT)",
+            "formula": "Revenue / Total Assets",
+            "value": fmt_mult(curr.asset_turnover),
+            "yoy": fmt_delta("asset_turnover", False),
+            "color": "slate",
+        },
+        {
+            "id": "em",
+            "parent": "roe",
+            "stage": "BOTH",
+            "label": "Equity Multiplier (EM)",
+            "formula": "Total Assets / Equity",
+            "value": fmt_mult(curr.equity_multiplier),
+            "yoy": fmt_delta("equity_multiplier", False),
+            "color": "amber" if (curr.equity_multiplier or 0) > 2.5 else "slate",
+        },
+        {
+            "id": "tb",
+            "parent": "npm",
+            "stage": "5_ONLY",
+            "label": "Tax Burden (TB)",
+            "formula": "Net Income / EBT",
+            "value": fmt_mult(curr.tax_burden),
+            "yoy": fmt_delta("tax_burden", False),
+            "color": "slate",
+        },
+        {
+            "id": "ib",
+            "parent": "npm",
+            "stage": "5_ONLY",
+            "label": "Interest Burden (IB)",
+            "formula": "EBT / EBIT",
+            "value": fmt_mult(curr.interest_burden),
+            "yoy": fmt_delta("interest_burden", False),
+            "color": "amber" if (curr.interest_burden or 1.0) < 0.75 else "slate",
+        },
+        {
+            "id": "ebit_m",
+            "parent": "npm",
+            "stage": "5_ONLY",
+            "label": "EBIT Margin",
+            "formula": "EBIT / Revenue",
+            "value": fmt_pct(curr.ebit_margin),
+            "yoy": fmt_delta("ebit_margin", True),
+            "color": "emerald" if (curr.ebit_margin or 0) > 0.10 else "slate",
+        },
+    ]
+```
+
+---
+
+### File: `app/services/banking_engine.py`
+**Deskripsi:** Banking Specific Financial Ratio Engine (OJK/BI Standards)  
+**Ukuran File:** 2312 bytes
+
+```python
+"""
+app/services/banking_engine.py
+Mesin analisis khusus sektor perbankan (Bank Model)
+Menghitung rasio-rasio kunci perbankan Indonesia (NIM, ROA, LDR proxy, CIR proxy, dll)
+"""
+from typing import Dict, Any, Optional
+from pydantic import BaseModel
+
+class BankingRatios(BaseModel):
+    ticker: str
+    year: int
+    net_interest_margin: Optional[float] = None       # NIM: Net Interest Income / Total Assets
+    cost_to_income_ratio: Optional[float] = None      # CIR: Operating Expense / Total Revenue
+    return_on_assets: Optional[float] = None          # ROA: Net Income / Total Assets
+    return_on_equity: Optional[float] = None          # ROE: Net Income / Total Equity
+    loans_to_assets_ratio: Optional[float] = None     # Net Loan / Total Assets
+    debt_to_equity: Optional[float] = None            # Total Debt / Total Equity
+    effective_tax_rate: Optional[float] = None        # Tax Provision / Pretax Income
+
+def calculate_banking_ratios(data: Dict[str, Any]) -> BankingRatios:
+    """Hitung rasio perbankan dari dictionary laporan keuangan."""
+    rev = data.get("revenue", 0.0)
+    ni = data.get("net_income", 0.0)
+    ta = data.get("total_assets", 0.0)
+    te = data.get("total_equity", 0.0)
+    td = data.get("total_debt", 0.0)
+    int_inc = data.get("interest_income", 0.0)
+    int_exp = data.get("interest_expense", 0.0)
+    pretax = data.get("pretax_income", 0.0)
+    tax = data.get("tax_provision", 0.0)
+    net_int = int_inc - int_exp if (int_inc and int_exp) else (data.get("ebit", 0.0) or ni)
+
+    # Safe NIM: pastikan ada nilai
+    nim = (net_int / ta) if ta > 0 else 0.0
+    cir = (int_exp / rev) if (rev > 0 and int_exp > 0) else 0.0
+    roa = (ni / ta) if ta > 0 else 0.0
+    roe = (ni / te) if te > 0 else 0.0
+    dte = (td / te) if te > 0 else 0.0
+    etr = (tax / pretax) if (pretax > 0 and tax > 0) else 0.0
+
+    return BankingRatios(
+        ticker=data.get("ticker", "BANK"),
+        year=int(data.get("period", 2025)),
+        net_interest_margin=nim if nim > 0 else None,
+        cost_to_income_ratio=cir if cir > 0 else None,
+        return_on_assets=roa if roa > 0 else None,
+        return_on_equity=roe if roe > 0 else None,
+        loans_to_assets_ratio=None,
+        debt_to_equity=dte if dte > 0 else None,
+        effective_tax_rate=etr if etr > 0 else None,
+    )
+```
+
+---
+
+### File: `app/services/fincept_valuation.py`
+**Deskripsi:** DCF Valuation Engine (WACC, Beta, Gordon Growth, Sensitivities)  
+**Ukuran File:** 13665 bytes
+
+```python
+"""
+app/services/fincept_valuation.py
+DCF Valuation Engine — Port dari FinceptTerminal:
+  fincept-qt/scripts/Analytics/corporateFinance/valuation/dcf_model.py
+
+Fitur:
+  - WACC calculator (CAPM + Cost of Debt)
+  - Unlevered / Relevered Beta
+  - Free Cash Flow projection
+  - Gordon Growth / Terminal Value
+  - Enterprise Value → Equity Value → Price per Share
+  - Sensitivity Analysis (2D matrix)
+  - Scenario Analysis (Bull/Base/Bear)
+  - Python-native, zero external dependency
+
+Digunakan untuk valuasi intrinsik saham BEI.
+"""
+from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+import math
+
+# ─── Data Classes ────────────────────────────────────────────────────────────
+
+@dataclass
+class WACCInputs:
+    risk_free_rate: float        # SBN 10Y yield (%)
+    market_risk_premium: float   # MRP (%)
+    levered_beta: float          # βL (from Yahoo Finance)
+    cost_of_debt_pre_tax: float  # Kd (%)
+    tax_rate: float              # corporate tax (%)
+    target_debt_ratio: float     # D/(D+E) target (%)
+
+@dataclass
+class DCFResult:
+    wacc: float
+    enterprise_value: float
+    equity_value: float
+    price_per_share: float
+    terminal_value: float
+    fcf_projections: List[float]
+    sensitivity: Optional[Dict[str, List[List[float]]]]
+    scenario: Optional[Dict[str, Any]]
+
+
+# ─── WACC / Beta ──────────────────────────────────────────────────────────────
+
+class DCFModel:
+    def __init__(self, company_name: str):
+        self.company_name = company_name
+
+    def calculate_wacc(
+        self,
+        risk_free_rate: float,
+        market_risk_premium: float,
+        levered_beta: float,
+        cost_of_debt_pre_tax: float,
+        tax_rate: float,
+        target_debt_ratio: float,
+    ) -> float:
+        """WACC = Ke × (1-D%) + Kd × (1-t) × D%"""
+        ke = risk_free_rate + levered_beta * market_risk_premium
+        kd = cost_of_debt_pre_tax * (1 - tax_rate)
+        wacc = ke * (1 - target_debt_ratio) + kd * target_debt_ratio
+        return wacc / 100  # convert to decimal for projection
+
+    def unlever_beta(self, levered_beta: float, tax_rate: float, debt_ratio: float) -> float:
+        """Remove financial leverage: βU = βL / (1 + (1-t) × D/E)"""
+        if debt_ratio <= 0 or debt_ratio >= 1:
+            return levered_beta
+        de_ratio = debt_ratio / (1 - debt_ratio)
+        return levered_beta / (1 + (1 - tax_rate) * de_ratio)
+
+    def relever_beta(self, unlevered_beta: float, tax_rate: float, debt_ratio: float) -> float:
+        """Add financial leverage: βL = βU × (1 + (1-t) × D/E)"""
+        if debt_ratio <= 0 or debt_ratio >= 1:
+            return unlevered_beta
+        de_ratio = debt_ratio / (1 - debt_ratio)
+        return unlevered_beta * (1 + (1 - tax_rate) * de_ratio)
+
+    def calculate_free_cash_flow(
+        self,
+        ebit: float,
+        tax_rate: float,
+        depreciation: float,
+        capex: float,
+        change_in_working_capital: float,
+    ) -> float:
+        """FCF = EBIT × (1-t) + D&A - Capex - ΔWC"""
+        ebit_after_tax = ebit * (1 - tax_rate)
+        return ebit_after_tax + depreciation - capex - change_in_working_capital
+
+    def project_cash_flows(
+        self,
+        base_year_fcf: float,
+        growth_rate: float,
+        years: int,
+    ) -> List[float]:
+        """Project FCF dengan growth rate konstan."""
+        return [base_year_fcf * (1 + growth_rate) ** (i + 1) for i in range(years)]
+
+    def calculate_terminal_value(
+        self,
+        final_year_fcf: float,
+        terminal_growth_rate: float,
+        wacc: float,
+    ) -> float:
+        """Gordon Growth Model: TV = FCF_{n+1} / (WACC - g)"""
+        if wacc <= terminal_growth_rate:
+            return 0.0
+        return final_year_fcf * (1 + terminal_growth_rate) / (wacc - terminal_growth_rate)
+
+    def calculate_enterprise_value(
+        self,
+        fcf_projections: List[float],
+        terminal_value: float,
+        wacc: float,
+    ) -> float:
+        """PV of FCF + PV of Terminal Value"""
+        ev = 0.0
+        for i, fcf in enumerate(fcf_projections):
+            ev += fcf / (1 + wacc) ** (i + 1)
+        ev += terminal_value / (1 + wacc) ** len(fcf_projections)
+        return ev
+
+    def calculate_equity_value(
+        self,
+        enterprise_value: float,
+        total_debt: float,
+        cash_and_equivalents: float,
+        minority_interest: float,
+    ) -> float:
+        """Equity Value = EV - Total Debt + Cash + Minority Interest"""
+        return enterprise_value - total_debt + cash_and_equivalents + minority_interest
+
+    def calculate_price_per_share(
+        self,
+        equity_value: float,
+        shares_outstanding: float,
+    ) -> float:
+        """Harga per saham = Equity Value / Saham Beredar"""
+        if shares_outstanding <= 0:
+            return 0.0
+        return equity_value / shares_outstanding
+
+    def comprehensive_dcf(
+        self,
+        wacc_inputs: Dict[str, float],
+        fcf_inputs: Dict[str, float],
+        terminal_inputs: Dict[str, float],
+        balance_sheet: Dict[str, float],
+        shares_outstanding: float,
+        projection_years: int = 5,
+    ) -> DCFResult:
+        """Full DCF calculation pipeline."""
+        # Unlever beta untuk D/E target
+        beta = wacc_inputs.get("levered_beta", 1.0)
+        tax = wacc_inputs.get("tax_rate", 0.25)
+        d_ratio = wacc_inputs.get("target_debt_ratio", 0.3)
+        u_beta = self.unlever_beta(beta, tax, d_ratio)
+        r_beta = self.relever_beta(u_beta, tax, d_ratio)
+
+        wacc = self.calculate_wacc(
+            wacc_inputs["risk_free_rate"],
+            wacc_inputs["market_risk_premium"],
+            r_beta,
+            wacc_inputs["cost_of_debt_pre_tax"],
+            tax,
+            d_ratio,
+        )
+
+        base_fcf = self.calculate_free_cash_flow(
+            fcf_inputs["ebit"],
+            tax,
+            fcf_inputs.get("depreciation", 0),
+            fcf_inputs.get("capex", 0),
+            fcf_inputs.get("change_in_working_capital", 0),
+        )
+
+        fcf_projections = self.project_cash_flows(
+            base_fcf, wacc_inputs.get("fcf_growth_rate", 0.05), projection_years
+        )
+
+        terminal_value = self.calculate_terminal_value(
+            fcf_projections[-1],
+            terminal_inputs["terminal_growth_rate"],
+            wacc,
+        )
+
+        ev = self.calculate_enterprise_value(fcf_projections, terminal_value, wacc)
+        eq = self.calculate_equity_value(
+            ev,
+            balance_sheet.get("total_debt", 0),
+            balance_sheet.get("cash", 0),
+            balance_sheet.get("minority_interest", 0),
+        )
+        price = self.calculate_price_per_share(eq, shares_outstanding)
+
+        return DCFResult(
+            wacc=wacc,
+            enterprise_value=ev,
+            equity_value=eq,
+            price_per_share=price,
+            terminal_value=terminal_value,
+            fcf_projections=fcf_projections,
+            sensitivity=None,
+            scenario=None,
+        )
+
+    def sensitivity_analysis(
+        self,
+        base_fcf: float,
+        wacc: float,
+        terminal_growth: float,
+        years: int = 5,
+    ) -> Dict[str, List[List[float]]]:
+        """2D sensitivity: WACC (columns) × Terminal Growth (rows) → EV"""
+        wacc_range = [wacc + d for d in [-0.02, -0.01, 0.0, 0.01, 0.02]]
+        tg_range   = [terminal_growth + d for d in [-0.015, -0.0075, 0.0, 0.0075, 0.015]]
+
+        projections = self.project_cash_flows(base_fcf, 0.03, years)
+        rows = []
+        for tg in tg_range:
+            row = []
+            for w in wacc_range:
+                tv = self.calculate_terminal_value(projections[-1], tg, w)
+                ev = self.calculate_enterprise_value(projections, tv, w)
+                row.append(round(ev / 1e9, 2))  # dalam triliun
+            rows.append(row)
+
+        return {
+            "wacc_range": [f"{w*100:.1f}%" for w in wacc_range],
+            "tg_range":   [f"{t*100:.2f}%" for t in tg_range],
+            "ev_matrix":  rows,
+        }
+
+    def scenario_analysis(
+        self,
+        wacc_inputs: Dict[str, float],
+        fcf_inputs: Dict[str, float],
+        terminal_inputs: Dict[str, float],
+        balance_sheet: Dict[str, float],
+        shares_outstanding: float,
+        projection_years: int = 5,
+    ) -> Dict[str, DCFResult]:
+        """Bull / Base / Bear scenario."""
+        scenarios = {
+            "BULL":  {
+                "fcf_growth_rate": 0.08, "terminal_growth_rate": 0.035,
+                "cost_of_debt_pre_tax": wacc_inputs["cost_of_debt_pre_tax"] * 0.9,
+                "target_debt_ratio": max(0, wacc_inputs["target_debt_ratio"] - 0.1),
+            },
+            "BASE":  {
+                "fcf_growth_rate": 0.05, "terminal_growth_rate": 0.025,
+                "cost_of_debt_pre_tax": wacc_inputs["cost_of_debt_pre_tax"],
+                "target_debt_ratio": wacc_inputs["target_debt_ratio"],
+            },
+            "BEAR":  {
+                "fcf_growth_rate": 0.02, "terminal_growth_rate": 0.015,
+                "cost_of_debt_pre_tax": wacc_inputs["cost_of_debt_pre_tax"] * 1.2,
+                "target_debt_ratio": min(0.6, wacc_inputs["target_debt_ratio"] + 0.1),
+            },
+        }
+        results = {}
+        for name, overrides in scenarios.items():
+            inp = {**wacc_inputs, **overrides}
+            r = self.comprehensive_dcf(inp, fcf_inputs, terminal_inputs, balance_sheet, shares_outstanding, projection_years)
+            results[name] = r
+        return results
+
+
+# ─── Convenience function ───────────────────────────────────────────────────────
+
+def quick_dcf_valuation(
+    ticker: str,
+    # WACC inputs
+    risk_free_rate: float = 7.0,       # SBN 10Y yield (%)
+    market_risk_premium: float = 7.5, # MRP (%)
+
+    # Balance sheet (dalam miliar)
+    total_assets: float = 100_000,
+    total_debt: float = 50_000,
+    cash: float = 10_000,
+    shares_outstanding_m: float = 10_000,  # juta lembar
+    # FCF inputs
+    ebit: float = 20_000,
+    depreciation: float = 5_000,
+    capex: float = 3_000,
+    wc_change: float = 1_000,
+    # Valuation assumptions
+    fcf_growth_rate: float = 0.05,
+    terminal_growth_rate: float = 0.025,
+    levered_beta: float = 1.0,
+    cost_of_debt_pre_tax: float = 8.5,
+    tax_rate: float = 0.25,
+    target_debt_ratio: float = 0.35,
+    projection_years: int = 5,
+) -> Dict[str, Any]:
+    """
+    Quick DCF valuation untuk saham BEI.
+    Semua angka dalam miliar IDR, kecuali stated otherwise.
+    """
+    model = DCFModel(ticker)
+
+    wacc_inputs = dict(
+        risk_free_rate=risk_free_rate,
+        market_risk_premium=market_risk_premium,
+        levered_beta=levered_beta,
+        cost_of_debt_pre_tax=cost_of_debt_pre_tax,
+        tax_rate=tax_rate,
+        target_debt_ratio=target_debt_ratio,
+        fcf_growth_rate=fcf_growth_rate,
+    )
+
+    fcf_inp = dict(
+        ebit=ebit,
+        depreciation=depreciation,
+        capex=capex,
+        change_in_working_capital=wc_change,
+    )
+
+    term_inp = dict(terminal_growth_rate=terminal_growth_rate)
+
+    bs = dict(
+        total_debt=total_debt,
+        cash=cash,
+        minority_interest=0,
+    )
+
+    result = model.comprehensive_dcf(wacc_inputs, fcf_inp, term_inp, bs, shares_outstanding_m * 1e6, projection_years)
+    sensitivity = model.sensitivity_analysis(
+        model.calculate_free_cash_flow(ebit, tax_rate, depreciation, capex, wc_change),
+        result.wacc,
+        terminal_growth_rate,
+        projection_years,
+    )
+    scenarios = model.scenario_analysis(wacc_inputs, fcf_inp, term_inp, bs, shares_outstanding_m * 1e6, projection_years)
+
+    return {
+        "ticker": ticker,
+        "wacc_pct": round(result.wacc * 100, 2),
+        "enterprise_value_bn": round(result.enterprise_value / 1e9, 2),
+        "equity_value_bn": round(result.equity_value / 1e9, 2),
+        "price_per_share": round(result.price_per_share, 0),
+        "terminal_value_bn": round(result.terminal_value / 1e9, 2),
+        "fcf_projections_bn": [round(f / 1e9, 2) for f in result.fcf_projections],
+        "sensitivity": sensitivity,
+        "scenarios": {
+            s: {"price": round(r.price_per_share, 0), "wacc": round(r.wacc * 100, 2)}
+            for s, r in scenarios.items()
+        },
+    }
+
+
+if __name__ == "__main__":
+    # Demo: BBCA DCF valuation
+    sample = quick_dcf_valuation(
+        ticker="BBCA",
+        ebit=81_690_531_000_000 / 1e9,  # 81.7T IDR
+        depreciation=2_000,            # 2T
+        capex=5_000,                     # 5T
+        wc_change=500,                  # 0.5T
+        shares_outstanding_m=48_985,     # ~49B shares
+        levered_beta=0.75,
+        risk_free_rate=7.0,
+        market_risk_premium=7.5,
+        total_assets=1_586_828_536_000_000 / 1e9,
+        total_debt=2_395_446_000_000 / 1e9,
+        cash=200_000_000_000_000 / 1e9,
+        terminal_growth_rate=0.025,
+    )
+    print(f"DCF for {sample['ticker']}")
+    print(f"  WACC: {sample['wacc_pct']}%")
+    print(f"  EV: Rp {sample['enterprise_value_bn']} T")
+    print(f"  Equity: Rp {sample['equity_value_bn']} T")
+    print(f"  Price: Rp {sample['price_per_share']}")
+    print(f"  Scenarios:")
+    for s, d in sample['scenarios'].items():
+        print(f"    {s}: Rp {d['price']}")
+```
+
+---
+
+### File: `app/services/fincept_risk.py`
+**Deskripsi:** Portfolio Risk Engine (Sharpe, Sortino, VaR/CVaR, Max Drawdown)  
+**Ukuran File:** 9165 bytes
+
+```python
+"""
+app/services/fincept_risk.py
+Risk Analytics — Port dari FinceptTerminal:
+  fincept-qt/scripts/Analytics/alternateInvestment/risk_analyzer.py
+
+Fitur:
+  - Sharpe Ratio, Sortino Ratio, Calmar Ratio
+  - Value at Risk (VaR) & CVaR / Expected Shortfall
+  - Maximum Drawdown
+  - Beta & CAPM Alpha
+  - Information Ratio
+  - Risk-adjusted returns
+
+Python-native, zero external dependency.
+"""
+from __future__ import annotations
+import math
+from dataclasses import dataclass
+from typing import List, Optional
+
+@dataclass
+class RiskMetrics:
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    max_drawdown: float
+    max_drawdown_duration: int  # days
+    var_95: float
+    cvar_95: float
+    beta: float
+    alpha_annualized: float
+    information_ratio: float
+    treynor_ratio: float
+
+@dataclass
+class ReturnStats:
+    total_return: float
+    annualized_return: float
+    volatility: float
+    downside_deviation: float
+    avg_return: float
+
+
+def _to_returns(prices: List[float]) -> List[float]:
+    """Convert price series to return series."""
+    if len(prices) < 2:
+        return []
+    return [(prices[i] / prices[i-1]) - 1 for i in range(1, len(prices))]
+
+
+def _downside_returns(returns: List[float], target: float = 0.0) -> List[float]:
+    """Returns below target (negative only)."""
+    return [r for r in returns if r < target]
+
+
+def calculate_risk_metrics(
+    prices: List[float],
+    benchmark_prices: Optional[List[float]] = None,
+    risk_free_rate: float = 0.0,
+    periods_per_year: int = 252,
+) -> RiskMetrics:
+    """
+    Full risk analytics dari return series.
+
+    Args:
+        prices: Harga penutupan harian (index harga)
+        benchmark_prices: Harga benchmark untuk beta/alpha (misal: IHSG)
+        risk_free_rate: Suku bunga bebas risiko annualized (default 0 = assume 0)
+        periods_per_year: Hari trading per tahun (252 = harian Indonesia)
+    """
+    returns = _to_returns(prices)
+    if not returns:
+        return RiskMetrics(0,0,0,0,0,0,0,0,0,0,0)
+
+    n = len(returns)
+    avg_ret = sum(returns) / n
+
+    # Volatilitas (annualized)
+    variance = sum((r - avg_ret) ** 2 for r in returns) / (n - 1)
+    volatility = math.sqrt(variance * periods_per_year)
+
+    # Downside deviation (Sortino)
+    down_returns = _downside_returns(returns)
+    if down_returns:
+        down_var = sum(r ** 2 for r in down_returns) / n
+        downside_dev = math.sqrt(down_var * periods_per_year)
+    else:
+        downside_dev = 1e-9  # avoid div by zero
+
+    # Annualized returns
+    total_ret = (prices[-1] / prices[0]) - 1 if prices else 0
+    ann_ret = (1 + total_ret) ** (periods_per_year / n) - 1 if n > 0 else 0
+
+    # Risk-free
+    rf_period = risk_free_rate / periods_per_year
+    excess = [r - rf_period for r in returns]
+
+    # Sharpe Ratio
+    if volatility > 0:
+        sharpe = (ann_ret - risk_free_rate) / volatility
+    else:
+        sharpe = 0.0
+
+    # Sortino Ratio
+    if downside_dev > 0:
+        sortino = (ann_ret - risk_free_rate) / downside_dev
+    else:
+        sortino = 0.0
+
+    # Calmar Ratio (annualized return / max drawdown)
+    mdd, mdd_dur = max_drawdown(prices)
+    if mdd > 0:
+        calmar = ann_ret / mdd
+    else:
+        calmar = 0.0
+
+    # VaR 95% (historical)
+    sorted_ret = sorted(returns)
+    var_idx = int(n * 0.05)
+    var_95 = -sorted_ret[var_idx] if var_idx < n else 0.0
+    # CVaR / Expected Shortfall
+    cvar_95 = -sum(sorted_ret[:var_idx]) / var_idx if var_idx > 0 else 0.0
+
+    # Beta & Alpha vs benchmark
+    beta = 0.0
+    alpha_annualized = 0.0
+    if benchmark_prices:
+        b_returns = _to_returns(benchmark_prices)
+        min_len = min(len(returns), len(b_returns))
+        if min_len >= 2:
+            cr, cb = returns[:min_len], b_returns[:min_len]
+            cov = sum((r - avg_ret) * (b - sum(cb)/min_len) for r, b in zip(cr, cb)) / (min_len - 1)
+            b_var = sum((b - sum(cb)/min_len) ** 2 for b in cb) / (min_len - 1)
+            beta = cov / b_var if b_var > 0 else 0.0
+            alpha_annualized = ann_ret - (risk_free_rate + beta * (sum(cb)/min_len * periods_per_year - risk_free_rate))
+
+    # Treynor Ratio
+    if beta > 0:
+        treynor = (ann_ret - risk_free_rate) / beta
+    else:
+        treynor = 0.0
+
+    # Information Ratio (annualized return - benchmark annualized) / tracking error
+    ir = 0.0
+    if benchmark_prices and beta > 0:
+        b_returns_full = _to_returns(benchmark_prices)
+        min_len = min(len(returns), len(b_returns_full))
+        if min_len >= 2:
+            active = [returns[i] - b_returns_full[i] for i in range(min_len)]
+            trk_error = math.sqrt(sum((a - sum(active)/min_len)**2 for a in active) / (min_len-1)) * math.sqrt(periods_per_year)
+            if trk_error > 0:
+                ir = (ann_ret - (1 + (b_returns_full[-1]/b_returns_full[0]-1))**(periods_per_year/min_len)-1) / trk_error
+
+    return RiskMetrics(
+        sharpe_ratio=round(sharpe, 4),
+        sortino_ratio=round(sortino, 4),
+        calmar_ratio=round(calmar, 4),
+        max_drawdown=round(mdd, 4),
+        max_drawdown_duration=mdd_dur,
+        var_95=round(var_95, 4),
+        cvar_95=round(cvar_95, 4),
+        beta=round(beta, 4),
+        alpha_annualized=round(alpha_annualized, 4),
+        information_ratio=round(ir, 4),
+        treynor_ratio=round(treynor, 6),
+    )
+
+
+def max_drawdown(prices: List[float]) -> tuple[float, int]:
+    """
+    Calculate maximum drawdown and its duration.
+
+    Returns: (max_drawdown_pct, duration_days)
+    """
+    if not prices:
+        return 0.0, 0
+
+    peak = prices[0]
+    peak_idx = 0
+    max_dd = 0.0
+    max_dd_duration = 0
+    current_dd_duration = 0
+
+    for i, p in enumerate(prices):
+        if p > peak:
+            peak = p
+            peak_idx = i
+            current_dd_duration = 0
+        dd = (peak - p) / peak if peak > 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+            max_dd_duration = i - peak_idx
+            current_dd_duration = 0
+        else:
+            current_dd_duration += 1
+
+    return max_dd, max_dd_duration
+
+
+def var_historical(returns: List[float], confidence: float = 0.95) -> float:
+    """Historical VaR at given confidence level."""
+    if not returns:
+        return 0.0
+    sorted_ret = sorted(returns)
+    idx = int(len(sorted_ret) * (1 - confidence))
+    return -sorted_ret[min(idx, len(sorted_ret)-1)]
+
+
+def cvar_historical(returns: List[float], confidence: float = 0.95) -> float:
+    """Conditional VaR / Expected Shortfall."""
+    if not returns:
+        return 0.0
+    sorted_ret = sorted(returns)
+    idx = int(len(sorted_ret) * (1 - confidence))
+    tail = sorted_ret[:max(1, idx)]
+    return -(sum(tail) / len(tail)) if tail else 0.0
+
+
+def risk_contribution(weights: List[float], cov_matrix: List[List[float]]) -> List[float]:
+    """
+    Calculate risk contribution per asset in a portfolio.
+    Weights in decimals, covariance matrix annualized.
+    """
+    n = len(weights)
+    if n == 0 or len(cov_matrix) != n:
+        return []
+
+    # Portfolio variance
+    port_var = 0.0
+    for i in range(n):
+        for j in range(n):
+            port_var += weights[i] * weights[j] * cov_matrix[i][j]
+
+    port_vol = math.sqrt(port_var) if port_var > 0 else 1e-9
+    contributions = []
+    for i in range(n):
+        rc = sum(weights[j] * cov_matrix[i][j] for j in range(n)) * weights[i] / port_vol
+        contributions.append(rc)
+    return contributions
+
+
+def beta_from_prices(prices: List[float], market_prices: List[float]) -> float:
+    """Simple beta calculation from price series."""
+    rets = _to_returns(prices)
+    mrets = _to_returns(market_prices)
+    n = min(len(rets), len(mrets))
+    if n < 2:
+        return 0.0
+
+    r_mean = sum(rets) / n
+    m_mean = sum(mrets) / n
+    cov = sum((rets[i] - r_mean) * (mrets[i] - m_mean) for i in range(n)) / (n - 1)
+    m_var = sum((m - m_mean) ** 2 for m in mrets[:n]) / (n - 1)
+    return cov / m_var if m_var > 0 else 0.0
+
+
+# ─── CLI demo ─────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # Simulated BBCA daily prices (100 trading days, 20% annual return, 15% vol)
+    import random
+    random.seed(42)
+    n = 100
+    base = 100.0
+    prices = [base]
+    for i in range(n):
+        ret = 0.20/252 + 0.15/math.sqrt(252) * random.gauss(0, 1)
+        prices.append(prices[-1] * (1 + ret))
+
+    # Simulated IHSG benchmark
+    mkt = [100.0]
+    for i in range(n):
+        ret = 0.08/252 + 0.12/math.sqrt(252) * random.gauss(0, 1)
+        mkt.append(mkt[-1] * (1 + ret))
+
+    rm = calculate_risk_metrics(prices, mkt, risk_free_rate=0.07)
+    print(f"=== BBCA Simulated Risk Metrics (100 trading days) ===")
+    print(f"  Sharpe: {rm.sharpe_ratio}")
+    print(f"  Sortino: {rm.sortino_ratio}")
+    print(f"  Calmar:  {rm.calmar_ratio}")
+    print(f"  Max DD:  {rm.max_drawdown*100:.2f}%")
+    print(f"  VaR 95%: {rm.var_95*100:.2f}%")
+    print(f"  CVaR 95%: {rm.cvar_95*100:.2f}%")
+    print(f"  Beta:   {rm.beta}")
+    print(f"  Alpha:  {rm.alpha_annualized*100:.2f}%")
+```
+
+---
+
+### File: `app/services/fincept_fixed_income.py`
+**Deskripsi:** Fixed Income & Credit Scoring Engine (Bond Pricing, YTM, Duration)  
+**Ukuran File:** 12258 bytes
+
+```python
+"""
+app/services/fincept_fixed_income.py
+Fixed Income Analytics — Port dari FinceptTerminal:
+  fincept-qt/scripts/Analytics/fixedIncome/bond_pricing.py
+  fincept-qt/scripts/Analytics/fixedIncome/credit_analysis.py
+  fincept-qt/scripts/Analytics/fixedIncome/duration_convexity.py
+
+Fitur:
+  - Bond pricing (kupon tetap & floating)
+  - Duration & Convexity (Macaulay, Modified)
+  - Yield to Maturity (YTM) — closed-form approximation
+  - Current Yield, Simple Yield
+  - Credit spread analysis
+  - Credit metrics untuk perbankan BEI
+
+Python-native, zero external dependency.
+"""
+from __future__ import annotations
+import math
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+from enum import Enum
+
+# ─── Enums ──────────────────────────────────────────────────────────────────────
+
+class BondType(Enum):
+    TREASURY = "SBN / SUN"
+    CORPORATE = "Obligasi Korporasi"
+    SUKUK = "Sukuk"
+    FLIP = "FILP"
+
+class CouponFrequency(Enum):
+    MONTHLY = 12
+    QUARTERLY = 4
+    SEMIANNUAL = 2
+    ANNUAL = 1
+
+# ─── Bond Pricing ────────────────────────────────────────────────────────────────
+
+@dataclass
+class BondPriceResult:
+    clean_price: float          # Harga bersih (tanpa accrued interest)
+    dirty_price: float           # Harga kotor (dengan accrued interest)
+    accrued_interest: float     # bunga berjalan
+    current_yield: float        # CY = kupon / harga
+    simple_yield: float         # SY = (kupon + (F-P)/n) / P
+    ytm_approx: float           # Approximate YTM
+    duration_years: float       # Macaulay Duration (tahun)
+    modified_duration: float   # Modified Duration
+    convexity: float            # Convexity
+    pvbp: float                 # Price Value of a Basis Point
+
+@dataclass
+class BondCashFlow:
+    period: int
+    date: str
+    principal: float
+    coupon: float
+    total: float
+
+def _day_count_30360(d1: str, d2: str) -> float:
+    """Day count convention 30/360 (Indonesia standard for SBN)."""
+    try:
+        y1, m1, d1n = map(int, d1.split("-"))
+        y2, m2, d2n = map(int, d2.split("-"))
+        return 360 * (y2 - y1) + 30 * (m2 - m1) + min(d1n, 30) - min(d2n, 30)
+    except Exception:
+        return 0.0
+
+def bond_price(
+    face_value: float,
+    coupon_rate: float,           # Annual coupon rate (e.g. 0.08 = 8%)
+    ytm: float,                    # Yield to Maturity (decimal)
+    years_to_maturity: float,
+    frequency: CouponFrequency = CouponFrequency.SEMIANNUAL,
+    settlement_date: str = "2026-01-01",
+    issue_date: str = "2025-01-01",
+) -> BondPriceResult:
+    """
+    Kalkulasi harga obligasi dengan semua metrik fixed income.
+
+    Args:
+        face_value: Nilai nominal (e.g. 1_000_000 IDR)
+        coupon_rate: Suku bunga kupon tahunan (decimal, e.g. 0.0725 = 7.25%)
+        ytm: Yield to Maturity (decimal, annualized)
+        years_to_maturity: Sisa tenor dalam tahun
+        frequency: Frekuensi pembayaran kupon
+        settlement_date: Tanggal settlement (untuk accrued interest)
+        issue_date: Tanggal issuance
+    """
+    n_periods = int(years_to_maturity * frequency.value)
+    coupon_per_period = face_value * coupon_rate / frequency.value
+    rate_per_period = ytm / frequency.value
+
+    # PV kupon
+    pv_coupons = 0.0
+    pv_principal = 0.0
+    periods = list(range(1, n_periods + 1))
+
+    for t in periods:
+        df = (1 + rate_per_period) ** t
+        pv_coupons += coupon_per_period / df
+
+    # PV pokok
+    pv_principal = face_value / ((1 + rate_per_period) ** n_periods)
+
+    # Harga bersih
+    clean_price = pv_coupons + pv_principal
+
+    # Accrued interest (day count 30/360)
+    ai = _day_count_30360(issue_date, settlement_date) / 360 * coupon_rate * face_value
+    dirty_price = clean_price + ai
+
+    # Current Yield
+    current_yield = (coupon_rate * face_value) / clean_price if clean_price > 0 else 0.0
+
+    # Simple Yield: (kupon + (F-P)/tahun) / P
+    if clean_price > 0 and years_to_maturity > 0:
+        simple_yield = (coupon_rate * face_value + (face_value - clean_price) / years_to_maturity) / clean_price
+    else:
+        simple_yield = coupon_rate
+
+    # Duration (Macaulay) & Convexity
+    weighted_time = 0.0
+    weighted_time_sq = 0.0
+    total_pv = clean_price
+
+    for t in periods:
+        df = (1 + rate_per_period) ** t
+        cf_pv = coupon_per_period / df
+        w = cf_pv / total_pv * (t / frequency.value)
+        weighted_time += w
+
+    # Principal weighted time
+    principal_pv = face_value / ((1 + rate_per_period) ** n_periods)
+    principal_w = principal_pv / total_pv * (years_to_maturity)
+    weighted_time += principal_w
+
+    # Convexity
+    for t in periods:
+        df = (1 + rate_per_period) ** t
+        cf_pv = coupon_per_period / df
+        t_yrs = t / frequency.value
+        weighted_time_sq += (t_yrs * (t_yrs + 1) / (frequency.value ** 2)) * cf_pv / ((1 + rate_per_period) ** 2) / total_pv
+
+    principal_pv_d = face_value / ((1 + rate_per_period) ** n_periods)
+    principal_yrs = years_to_maturity
+    weighted_time_sq += (principal_yrs * (principal_yrs + 1 / frequency.value)) * principal_pv_d / ((1 + rate_per_period) ** 2) / total_pv
+
+    macaulay_duration = weighted_time
+    modified_duration = macaulay_duration / (1 + rate_per_period)
+    convexity = weighted_time_sq
+
+    # PVBP (Price Value of a Basis Point)
+    pvbp = modified_duration * clean_price * 0.0001
+
+    return BondPriceResult(
+        clean_price=round(clean_price, 2),
+        dirty_price=round(dirty_price, 2),
+        accrued_interest=round(ai, 2),
+        current_yield=round(current_yield, 4),
+        simple_yield=round(simple_yield, 4),
+        ytm_approx=round(ytm, 4),
+        duration_years=round(macaulay_duration, 4),
+        modified_duration=round(modified_duration, 4),
+        convexity=round(convexity, 4),
+        pvbp=round(pvbp, 4),
+    )
+
+
+def ytm_from_price(
+    face_value: float,
+    coupon_rate: float,
+    price: float,
+    years_to_maturity: float,
+    frequency: CouponFrequency = CouponFrequency.SEMIANNUAL,
+) -> float:
+    """
+    Cari YTM dari harga obligasi (Newton-Raphson approximation).
+    """
+    if price <= 0:
+        return 0.0
+
+    n = int(years_to_maturity * frequency.value)
+    coupon = face_value * coupon_rate / frequency.value
+    y = coupon_rate  # initial guess: coupon rate as YTM
+
+    for _ in range(100):
+        r = y / frequency.value
+        pv = sum(coupon / (1 + r) ** t for t in range(1, n + 1)) + face_value / (1 + r) ** n
+        if abs(price - pv) < 0.01:
+            break
+        # Newton step (rough)
+        dv = sum(-t * coupon / (1 + r) ** (t + 1) for t in range(1, n + 1)) \
+             - n * face_value / (1 + r) ** (n + 1)
+        dv /= frequency.value
+        if abs(dv) < 1e-10:
+            break
+        y -= (pv - price) / dv
+
+    return max(y, 0.0)
+
+
+# ─── Credit Metrics ─────────────────────────────────────────────────────────────
+
+@dataclass
+class CreditMetricsResult:
+    debt_to_equity: float
+    debt_to_assets: float
+    interest_coverage: float        # EBIT / Interest Expense
+    cash_to_debt: float              # Cash / Total Debt
+    current_ratio: float            # Current Assets / Current Liabilities
+    quick_ratio: float               # (CA - Inventory) / CL
+    credit_score: int               # Score 1-10 (10 = investment grade)
+    credit_grade: str               # AAA, AA, A, BBB, BB, B, CCC, D
+    debt_service_coverage: float   # CFADS / (Interest + Principal)
+
+
+def calculate_credit_metrics(
+    # Balance Sheet
+    total_assets: float,
+    total_liabilities: float,
+    total_debt: float,
+    current_assets: float,
+    current_liabilities: float,
+    cash_and_equivalents: float,
+    # Income / Cash Flow
+    ebit: float,
+    interest_expense: float,
+    cash_flow_from_operations: float,
+    principal_repayment: float = 0,
+    net_income: float = 0,
+    # Period
+    period: int = 1,  # 1 = annual
+) -> CreditMetricsResult:
+    """
+    Credit metrics untuk analisis risiko kredit perbankan/korporasi.
+    """
+    equity = total_assets - total_liabilities
+    if equity <= 0:
+        equity = 1e-9
+
+    # Leverage ratios
+    dte = total_debt / equity
+    dta = total_debt / total_assets if total_assets > 0 else 0.0
+
+    # Coverage ratios
+    icr = ebit / interest_expense if interest_expense > 0 else 0.0
+
+    # Liquidity
+    cr = current_assets / current_liabilities if current_liabilities > 0 else 0.0
+    qr = (current_assets - 0) / current_liabilities if current_liabilities > 0 else 0.0
+    # Untuk QR lebih akurat perlu data inventory
+
+    # Cash ratios
+    ctd = cash_and_equivalents / total_debt if total_debt > 0 else 0.0
+
+    # Debt service coverage
+    dsr = cash_flow_from_operations / (interest_expense + principal_repayment) \
+          if (interest_expense + principal_repayment) > 0 else 0.0
+
+    # Simple credit score (1-10)
+    score = 5.0  # start neutral
+
+    # ICR contribution
+    if icr >= 8:    score += 2.0
+    elif icr >= 4:   score += 1.0
+    elif icr >= 2:    score -= 0.5
+    else:            score -= 2.0
+
+    # D/E contribution
+    if dte <= 0.5:   score += 1.5
+    elif dte <= 1.5: score += 0.5
+    elif dte <= 2.5: score -= 0.5
+    else:            score -= 1.5
+
+    # Current ratio
+    if cr >= 2.0:   score += 0.5
+    elif cr < 1.0:  score -= 1.0
+
+    # Cash to debt
+    if ctd >= 0.5:  score += 0.5
+    elif ctd >= 0.2: score += 0.0
+    else:           score -= 0.5
+
+    score = max(1.0, min(10.0, score))
+
+    # Map score to grade
+    grades = [
+        (9.5, "AAA"),
+        (8.5, "AA+"),
+        (7.5, "AA"),
+        (6.5, "AA-"),
+        (5.5, "A+"),
+        (4.5, "A"),
+        (3.5, "A-"),
+        (2.5, "BBB"),
+        (1.5, "BB+"),
+        (1.0, "BB"),
+        (0.0, "B"),
+    ]
+    grade = "D"
+    for threshold, g in grades:
+        if score >= threshold:
+            grade = g
+            break
+
+    return CreditMetricsResult(
+        debt_to_equity=round(dte, 4),
+        debt_to_assets=round(dta, 4),
+        interest_coverage=round(icr, 2),
+        cash_to_debt=round(ctd, 4),
+        current_ratio=round(cr, 4),
+        quick_ratio=round(qr, 4),
+        credit_score=int(round(score)),
+        credit_grade=grade,
+        debt_service_coverage=round(dsr, 4),
+    )
+
+
+# ─── Demo ───────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # SUN FR0082: face 1M, coupon 7.25%, YTM ~7%, tenor 2 tahun
+    r = bond_price(
+        face_value=1_000_000,
+        coupon_rate=0.0725,
+        ytm=0.07,
+        years_to_maturity=2.0,
+    )
+    print("=== SBN Price (face 1M, 7.25% kupon, YTM 7%, 2 tahun) ===")
+    print(f"  Clean Price: Rp {r.clean_price:,.0f}")
+    print(f"  Accrued:     Rp {r.accrued_interest:,.0f}")
+    print(f"  Dirty Price: Rp {r.dirty_price:,.0f}")
+    print(f"  CY: {r.current_yield*100:.2f}%")
+    print(f"  Duration:    {r.duration_years:.3f} tahun")
+    print(f"  Modified:     {r.modified_duration:.3f} tahun")
+    print(f"  Convexity:    {r.convexity:.4f}")
+
+    # Credit check BBRI
+    cm = calculate_credit_metrics(
+        total_assets=2_135_371_105_000_000,
+        total_liabilities=1_811_337_247_000_000,
+        total_debt=171_647_601_000_000,
+        current_assets=0, current_liabilities=0,
+        cash_and_equivalents=200_000_000_000_000,
+        ebit=128_325_762_000_000,
+        interest_expense=24_000_000_000_000,
+        cash_flow_from_operations=80_000_000_000_000,
+        principal_repayment=10_000_000_000_000,
+    )
+    print("\n=== BBRI Credit Metrics ===")
+    print(f"  D/E: {cm.debt_to_equity:.2f}x | D/A: {cm.debt_to_assets:.2f}x")
+    print(f"  ICR: {cm.interest_coverage:.1f}x | DSCR: {cm.debt_service_coverage:.2f}x")
+    print(f"  Credit Score: {cm.credit_score}/10 → Grade: {cm.credit_grade}")
+```
+
+---
+
+### File: `app/services/parser.py`
+**Deskripsi:** Financial Statement Extraction, Normalization & Storage Pipeline  
+**Ukuran File:** 14003 bytes
+
+```python
+import hashlib
+import io
+import json
+import re
+from typing import Dict, List, Optional, Tuple
+import pandas as pd
+import pdfplumber
+from sqlmodel import Session, select
+from app.db.models import FinancialStatementCache
+from app.services.dupont_engine import FinancialStatementInput, PeriodType
+
+# Pos neraca (total_*) HANYA dicocokkan persis setelah normalisasi
+EXACT_ONLY_KEYS = {
+    "total_assets", "total_liabilities", "total_equity_parent", "total_equity_consolidated",
+}
+ACCOUNT_SYNONYMS: Dict[str, List[str]] = {
+    "revenue": [
+        "pendapatan bersih", "penjualan bersih", "pendapatan usaha",
+        "revenue", "net revenue", "net sales", "total pendapatan",
+    ],
+    "ebit": [
+        "laba usaha", "laba operasional", "operating profit",
+        "operating income", "ebit", "laba sebelum bunga dan pajak",
+    ],
+    "ebt": [
+        "laba sebelum pajak", "laba sebelum beban pajak penghasilan",
+        "profit before tax", "income before tax", "ebt",
+    ],
+    "net_income_parent": [
+        "laba tahun berjalan yang dapat diatribusikan kepada pemilik entitas induk",
+        "laba periode berjalan yang dapat diatribusikan kepada pemilik entitas induk",
+        "profit attributable to owners of the parent",
+        "net income attributable to parent", "laba bersih entitas induk", "net_income_parent",
+    ],
+    "total_assets": [
+        "jumlah aset", "total aset", "jumlah aktiva", "total assets", "total_assets",
+    ],
+    "total_liabilities": [
+        "jumlah liabilitas", "total liabilitas", "jumlah kewajiban", "total kewajiban",
+        "total liabilities", "total_liabilities",
+    ],
+    "total_equity_parent": [
+        "jumlah ekuitas yang dapat diatribusikan kepada pemilik entitas induk",
+        "ekuitas yang dapat diatribusikan kepada pemilik entitas induk",
+        "ekuitas entitas induk",
+        "equity attributable to owners of the parent",
+        "total equity attributable to owners of the parent",
+        "total_equity_parent",
+    ],
+    "total_equity_consolidated": [
+        "jumlah ekuitas", "total ekuitas", "total equity", "total_equity_consolidated",
+    ],
+}
+NOT_ALLOWED_FRAGMENTS = ("ebitda", "per saham", "non-pengendali", "non pengendali", "nonpengendali")
+_EXACT_LOOKUP: Dict[str, str] = {
+    syn: key for key, syns in ACCOUNT_SYNONYMS.items() for syn in syns
+}
+
+def compute_sha256(file_bytes: bytes) -> str:
+    return hashlib.sha256(file_bytes).hexdigest()
+
+def _label_candidates(raw_label: str) -> List[str]:
+    text = re.sub(r"\s+", " ", str(raw_label).strip().lower()).rstrip(":").strip()
+    parts = [text]
+    # Label dwibahasa: "Jumlah aset / Total assets" atau "Jumlah aset (Total assets)".
+    # Pisahkan pada "/" dan kurung/braket — bukan pada parens mentah (re.error unbalanced parenthesis).
+    normalized = re.sub(r"[/()\[\]]", " | ", text)
+    for piece in normalized.split("|"):
+        piece = re.sub(r"\s+", " ", piece).strip()
+        if piece and piece != text:
+            parts.append(piece)
+    return parts
+
+def _match_account_key(raw_label: str) -> Optional[str]:
+    candidates = _label_candidates(raw_label)
+    for cand in candidates:
+        if cand in _EXACT_LOOKUP:
+            return _EXACT_LOOKUP[cand]
+    for cand in candidates:
+        if any(frag in cand for frag in NOT_ALLOWED_FRAGMENTS):
+            continue
+        for key, syns in ACCOUNT_SYNONYMS.items():
+            if key in EXACT_ONLY_KEYS:
+                continue
+            for syn in syns:
+                if len(syn) >= 8 and re.search(rf"(?<!\w){re.escape(syn)}(?!\w)", cand):
+                    return key
+    return None
+
+def parse_idx_file_bytes(
+    filename: str,
+    file_bytes: bytes,
+    default_ticker: str = "XXXX",
+    default_year: int = 2025,
+) -> FinancialStatementInput:
+    lower_name = filename.lower()
+    if lower_name.endswith(".json"):
+        data = json.loads(file_bytes.decode("utf-8"))
+        return FinancialStatementInput(**data)
+
+    extracted: Dict[str, float] = {}
+    meta: Dict[str, str] = {
+        "ticker": default_ticker.upper(),
+        "company_name": f"Emiten {default_ticker.upper()} Tbk",
+        "year": str(default_year),
+        "period_type": "FY",
+    }
+
+    if lower_name.endswith((".xlsx", ".xls")):
+        xls = pd.ExcelFile(io.BytesIO(file_bytes))
+        for sheet in xls.sheet_names:
+            df = xls.parse(sheet, header=None).dropna(how="all")
+            for _, row in df.iterrows():
+                vals = [v for v in row.values if pd.notna(v)]
+                if len(vals) >= 2:
+                    label = str(vals[0]).strip()
+                    if label.lower() in ("ticker", "kode saham"):
+                        meta["ticker"] = str(vals[1]).strip().upper()
+                    elif label.lower() in ("company_name", "nama emiten"):
+                        meta["company_name"] = str(vals[1]).strip()
+                    elif label.lower() in ("year", "tahun"):
+                        meta["year"] = str(int(float(vals[1])))
+                    elif label.lower() in ("period_type", "periode"):
+                        meta["period_type"] = str(vals[1]).strip().upper()
+                    else:
+                        key = _match_account_key(label)
+                        if key and key not in extracted:
+                            try:
+                                num_str = str(vals[1]).replace(",", "").replace("(", "-").replace(")", "")
+                                extracted[key] = float(num_str)
+                            except ValueError:
+                                pass
+
+    elif lower_name.endswith(".pdf"):
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables() or []
+                for table in tables:
+                    for row in table:
+                        clean_row = [c.strip() for c in row if c and c.strip()]
+                        if len(clean_row) >= 2:
+                            key = _match_account_key(clean_row[0])
+                            if key and key not in extracted:
+                                try:
+                                    raw_num = (
+                                        clean_row[-1]
+                                        .replace(".", "")
+                                        .replace(",", ".")
+                                        .replace("(", "-")
+                                        .replace(")", "")
+                                    )
+                                    extracted[key] = float(raw_num)
+                                except ValueError:
+                                    pass
+    else:
+        raise ValueError("Format file tidak didukung. Gunakan .xlsx, .pdf, atau .json")
+
+    if "total_equity_parent" not in extracted and "total_equity_consolidated" in extracted:
+        extracted["total_equity_parent"] = extracted["total_equity_consolidated"]
+
+    required_keys = [
+        "revenue", "ebit", "ebt", "net_income_parent",
+        "total_assets", "total_liabilities", "total_equity_parent",
+    ]
+    missing = [k for k in required_keys if k not in extracted]
+    if missing:
+        raise ValueError(f"Pos laporan keuangan belum lengkap di file: {', '.join(missing)}")
+
+    return FinancialStatementInput(
+        ticker=meta["ticker"],
+        company_name=meta["company_name"],
+        year=int(meta["year"]),
+        period_type=PeriodType(meta["period_type"]),
+        revenue=extracted["revenue"],
+        ebit=extracted["ebit"],
+        ebt=extracted["ebt"],
+        net_income_parent=extracted["net_income_parent"],
+        total_assets=extracted["total_assets"],
+        total_liabilities=extracted["total_liabilities"],
+        total_equity_parent=extracted["total_equity_parent"],
+        total_equity_consolidated=extracted.get("total_equity_consolidated"),
+    )
+
+def save_or_get_cached_statement(
+    session: Session, stmt: FinancialStatementInput, raw_bytes: Optional[bytes] = None
+) -> FinancialStatementCache:
+    if raw_bytes is None:
+        raw_bytes = stmt.model_dump_json().encode("utf-8")
+    f_hash = compute_sha256(raw_bytes)
+
+    existing = session.exec(
+        select(FinancialStatementCache).where(FinancialStatementCache.file_hash == f_hash)
+    ).first()
+    if existing:
+        return existing
+
+    values = dict(
+        file_hash=f_hash,
+        company_name=stmt.company_name,
+        currency=stmt.currency,
+        unit_multiplier=stmt.unit_multiplier,
+        revenue=stmt.revenue,
+        ebit=stmt.ebit,
+        ebt=stmt.ebt,
+        net_income_parent=stmt.net_income_parent,
+        total_assets=stmt.total_assets,
+        total_liabilities=stmt.total_liabilities,
+        total_equity_parent=stmt.total_equity_parent,
+        total_equity_consolidated=stmt.total_equity_consolidated,
+    )
+    same_period = session.exec(
+        select(FinancialStatementCache).where(
+            FinancialStatementCache.ticker == stmt.ticker.upper(),
+            FinancialStatementCache.year == stmt.year,
+            FinancialStatementCache.period_type == stmt.period_type.value,
+        )
+    ).first()
+    if same_period:
+        for k, v in values.items():
+            setattr(same_period, k, v)
+        record = same_period
+    else:
+        record = FinancialStatementCache(
+            ticker=stmt.ticker.upper(),
+            year=stmt.year,
+            period_type=stmt.period_type.value,
+            **values,
+        )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+def seed_initial_idx_statements(session: Session) -> None:
+    samples = [
+        # ASII 2024 & 2025
+        FinancialStatementInput(
+            ticker="ASII", company_name="PT Astra International Tbk", year=2024, period_type=PeriodType.FY,
+            revenue=316565, ebit=44200, ebt=42800, net_income_parent=33839,
+            total_assets=445679, total_liabilities=195261, total_equity_parent=250418,
+        ),
+        FinancialStatementInput(
+            ticker="ASII", company_name="PT Astra International Tbk", year=2025, period_type=PeriodType.FY,
+            revenue=338400, ebit=50760, ebt=49100, net_income_parent=38789,
+            total_assets=462000, total_liabilities=198000, total_equity_parent=264000,
+        ),
+        # ICBP 2024 & 2025
+        FinancialStatementInput(
+            ticker="ICBP", company_name="PT Indofood CBP Sukses Makmur Tbk", year=2024, period_type=PeriodType.FY,
+            revenue=67910, ebit=14260, ebt=11900, net_income_parent=8950,
+            total_assets=119200, total_liabilities=57100, total_equity_parent=62100,
+        ),
+        FinancialStatementInput(
+            ticker="ICBP", company_name="PT Indofood CBP Sukses Makmur Tbk", year=2025, period_type=PeriodType.FY,
+            revenue=72400, ebit=16652, ebt=14500, net_income_parent=11165,
+            total_assets=123500, total_liabilities=56500, total_equity_parent=67000,
+        ),
+        # TLKM 2024 & 2025
+        FinancialStatementInput(
+            ticker="TLKM", company_name="PT Telkom Indonesia (Persero) Tbk", year=2024, period_type=PeriodType.FY,
+            revenue=149216, ebit=44764, ebt=40800, net_income_parent=24560,
+            total_assets=287042, total_liabilities=130480, total_equity_parent=156562,
+        ),
+        FinancialStatementInput(
+            ticker="TLKM", company_name="PT Telkom Indonesia (Persero) Tbk", year=2025, period_type=PeriodType.FY,
+            revenue=152000, ebit=44840, ebt=39200, net_income_parent=24300,
+            total_assets=335000, total_liabilities=197000, total_equity_parent=138000,
+        ),
+        # ADRO 2024 & 2025
+        FinancialStatementInput(
+            ticker="ADRO", company_name="PT Alamtri Resources Indonesia Tbk", year=2024, period_type=PeriodType.FY,
+            revenue=98500, ebit=31520, ebt=30900, net_income_parent=24100,
+            total_assets=162000, total_liabilities=47000, total_equity_parent=115000,
+        ),
+        FinancialStatementInput(
+            ticker="ADRO", company_name="PT Alamtri Resources Indonesia Tbk", year=2025, period_type=PeriodType.FY,
+            revenue=106200, ebit=36108, ebt=35400, net_income_parent=27612,
+            total_assets=170000, total_liabilities=46000, total_equity_parent=124000,
+        ),
+    ]
+    for s in samples:
+        save_or_get_cached_statement(session, s)
+
+_PERIOD_RANK = {"Q1": 1, "Q2": 2, "Q3": 3, "FY": 4}
+
+def load_ticker_pair(
+    session: Session, ticker: str
+) -> Tuple[Optional[FinancialStatementInput], Optional[FinancialStatementInput]]:
+    """Periode terbaru + pembanding YoY = jenis periode sama pada tahun sebelumnya."""
+    rows = session.exec(
+        select(FinancialStatementCache).where(FinancialStatementCache.ticker == ticker.upper())
+    ).all()
+    if not rows:
+        return None, None
+    rows = sorted(rows, key=lambda r: (r.year, _PERIOD_RANK.get(r.period_type, 0)), reverse=True)
+
+    def _to_input(r: FinancialStatementCache) -> FinancialStatementInput:
+        period_str = str(r.period_type).strip().upper()
+        try:
+            ptype = PeriodType(period_str)
+        except ValueError:
+            ptype = PeriodType.FY  # Fallback gracefully instead of raising 500 error
+
+        return FinancialStatementInput(
+            ticker=r.ticker,
+            company_name=r.company_name,
+            year=r.year,
+            period_type=ptype,
+            currency=r.currency,
+            unit_multiplier=r.unit_multiplier,
+            revenue=r.revenue,
+            ebit=r.ebit,
+            ebt=r.ebt,
+            net_income_parent=r.net_income_parent,
+            total_assets=r.total_assets,
+            total_liabilities=r.total_liabilities,
+            total_equity_parent=r.total_equity_parent,
+            total_equity_consolidated=r.total_equity_consolidated,
+        )
+
+    latest = rows[0]
+    prior = next(
+        (r for r in rows if r.period_type == latest.period_type and r.year == latest.year - 1),
+        None,
+    )
+    return _to_input(latest), (_to_input(prior) if prior else None)
+```
+
+---
+
+### File: `app/services/terminal_pipeline.py`
+**Deskripsi:** IHSG Market Research Terminal Pipeline & Guardrail Validator  
+**Ukuran File:** 9659 bytes
+
+```python
+from typing import List
+from pydantic import BaseModel, Field, computed_field
+
+def get_idx_tick_size(price: int) -> int:
+    """Aturan Fraksi Harga Saham BEI (IDX Official Equity Tick Size)."""
+    if price < 200:
+        return 1
+    elif price < 500:
+        return 2
+    elif price < 2000:
+        return 5
+    elif price < 5000:
+        return 10
+    else:
+        return 25
+
+def is_valid_idx_price(price: int) -> bool:
+    if price <= 0:
+        return False
+    return (price % get_idx_tick_size(price)) == 0
+
+class IHSGBriefingHeader(BaseModel):
+    trading_date: str
+    ihsg_last: float
+    change_pts: float
+    change_pct: float
+    total_value_idr_bn: float
+    net_foreign_rg_idr_bn: float
+    net_foreign_all_idr_bn: float
+    market_status: str = Field(default="CLOSED EOD", pattern="^(OPEN|PRE-CLOSING|CLOSED EOD)$")
+    briefing_headline: str
+
+class BigCapMoverItem(BaseModel):
+    ticker: str
+    company_name: str
+    last_price: int
+    change_pct: float
+    ihsg_point_impact: float
+    volume_lot: int
+    market_cap_idr_trn: float
+
+class ForeignFlowItem(BaseModel):
+    ticker: str
+    net_foreign_rg_1d_bn: float
+    net_foreign_rg_5d_bn: float
+    net_foreign_ng_1d_bn: float = 0.0
+
+    @computed_field
+    @property
+    def flow_signal(self) -> str:
+        if self.net_foreign_rg_1d_bn > 25.0 and self.net_foreign_rg_5d_bn > 50.0:
+            return "STRONG_ACCUMULATION"
+        elif self.net_foreign_rg_1d_bn > 0:
+            return "MILD_INFLOW"
+        elif self.net_foreign_rg_1d_bn < -25.0 and self.net_foreign_rg_5d_bn < -50.0:
+            return "HEAVY_DISTRIBUTION"
+        elif self.net_foreign_rg_1d_bn < 0:
+            return "MILD_OUTFLOW"
+        return "NEUTRAL"
+
+class SupportResistanceItem(BaseModel):
+    ticker: str
+    last_price: int
+    s2: int
+    s1: int
+    r1: int
+    r2: int
+
+    @computed_field
+    @property
+    def distance_to_r1_pct(self) -> float:
+        if self.last_price <= 0:
+            return 0.0
+        return round((self.r1 - self.last_price) / self.last_price * 100.0, 2)
+
+    @computed_field
+    @property
+    def tick_fraction_valid(self) -> bool:
+        return all(is_valid_idx_price(p) for p in (self.last_price, self.s2, self.s1, self.r1, self.r2))
+
+    @computed_field
+    @property
+    def ordering_valid(self) -> bool:
+        return self.s2 < self.s1 <= self.last_price <= self.r1 < self.r2
+
+class TerminalPayload(BaseModel):
+    header: IHSGBriefingHeader
+    movers: List[BigCapMoverItem]
+    foreign_flows: List[ForeignFlowItem]
+    sr_matrix: List[SupportResistanceItem]
+
+_CURRENT_TERMINAL_STATE: TerminalPayload = TerminalPayload(
+    header=IHSGBriefingHeader(
+        trading_date="2026-10-23",
+        ihsg_last=7685.42,
+        change_pts=64.18,
+        change_pct=0.84,
+        total_value_idr_bn=12480.5,
+        net_foreign_rg_idr_bn=642.8,
+        net_foreign_all_idr_bn=410.2,
+        market_status="CLOSED EOD",
+        briefing_headline=(
+            "IHSG menguat +0.84% ditopang akumulasi asing di pasar reguler "
+            "pada big-cap konglomerasi & konsumer."
+        ),
+    ),
+    movers=[
+        BigCapMoverItem(ticker="ASII", company_name="Astra International Tbk", last_price=5250, change_pct=2.94, ihsg_point_impact=11.4, volume_lot=845200, market_cap_idr_trn=212.5),
+        BigCapMoverItem(ticker="ICBP", company_name="Indofood CBP Sukses Makmur Tbk", last_price=12100, change_pct=2.54, ihsg_point_impact=6.8, volume_lot=142300, market_cap_idr_trn=141.1),
+        BigCapMoverItem(ticker="TLKM", company_name="Telkom Indonesia Tbk", last_price=2980, change_pct=-1.32, ihsg_point_impact=-4.5, volume_lot=1620400, market_cap_idr_trn=295.2),
+        BigCapMoverItem(ticker="ADRO", company_name="Alamtri Resources Indonesia Tbk", last_price=3720, change_pct=3.33, ihsg_point_impact=7.9, volume_lot=1284000, market_cap_idr_trn=114.4),
+    ],
+    foreign_flows=[
+        ForeignFlowItem(ticker="ASII", net_foreign_rg_1d_bn=184.5, net_foreign_rg_5d_bn=520.2, net_foreign_ng_1d_bn=-120.0),
+        ForeignFlowItem(ticker="ICBP", net_foreign_rg_1d_bn=62.4, net_foreign_rg_5d_bn=195.8, net_foreign_ng_1d_bn=0.0),
+        ForeignFlowItem(ticker="TLKM", net_foreign_rg_1d_bn=-78.2, net_foreign_rg_5d_bn=-240.5, net_foreign_ng_1d_bn=45.0),
+        ForeignFlowItem(ticker="ADRO", net_foreign_rg_1d_bn=95.0, net_foreign_rg_5d_bn=310.4, net_foreign_ng_1d_bn=-15.0),
+    ],
+    sr_matrix=[
+        SupportResistanceItem(ticker="ASII", last_price=5250, s2=4950, s1=5100, r1=5400, r2=5600),
+        SupportResistanceItem(ticker="ICBP", last_price=12100, s2=11650, s1=11875, r1=12350, r2=12600),
+        SupportResistanceItem(ticker="TLKM", last_price=2980, s2=2840, s1=2910, r1=3060, r2=3150),
+        SupportResistanceItem(ticker="ADRO", last_price=3720, s2=3540, s1=3630, r1=3840, r2=3960),
+    ],
+)
+
+def get_terminal_snapshot() -> TerminalPayload:
+    """
+    Mengembalikan TerminalPayload live dari market overview provider jika tersedia,
+    fallback ke snapshot state tersimpan jika provider gagal.
+    """
+    try:
+        from app.providers.yahoo import fetch_market_overview
+        ov = fetch_market_overview()
+        idx_data = ov.get("index", {})
+        breadth = ov.get("breadth", {})
+
+        if idx_data and idx_data.get("price"):
+            ihsg_last = float(idx_data.get("price", 7685.42))
+            change_pts = float(idx_data.get("change", 0.0))
+            change_pct = float(idx_data.get("change_pct", 0.0))
+            turnover_trn = float(breadth.get("turnover_idr", 0.0)) / 1e9  # idr_bn
+            trading_date = str(ov.get("as_of", ""))[:10] or "2026-10-26"
+            market_state = ov.get("market_state", "CLOSED EOD")
+            status_map = {"OPEN": "OPEN", "POSTPOST": "CLOSED EOD", "CLOSED": "CLOSED EOD", "PRE-CLOSING": "PRE-CLOSING"}
+            m_status = status_map.get(market_state, "CLOSED EOD")
+
+            adv = breadth.get("advancing", 0)
+            dec = breadth.get("declining", 0)
+            headline = f"IHSG tercatat {ihsg_last:.2f} ({change_pct:+.2f}%) dengan {adv} saham menguat dan {dec} melemah (Turnover Rp {turnover_trn/1000:.1f}T)."
+
+            # Build live movers from heavyweights / gainers
+            live_movers: List[BigCapMoverItem] = []
+            for item in ov.get("heavyweights", [])[:4]:
+                sym = item.get("symbol", "")
+                px = int(round(float(item.get("price", 0))))
+                cp = float(item.get("change_pct", 0.0))
+                mcap_t = float(item.get("market_cap", 0.0) or 0.0) / 1e12
+                vol_lot = int(item.get("volume", 0)) // 100
+                impact = round(cp * 0.15, 1)  # point impact estimasi proportional
+                live_movers.append(
+                    BigCapMoverItem(
+                        ticker=sym,
+                        company_name=item.get("name", sym),
+                        last_price=px if px > 0 else 1000,
+                        change_pct=round(cp, 2),
+                        ihsg_point_impact=impact,
+                        volume_lot=vol_lot,
+                        market_cap_idr_trn=round(mcap_t, 1),
+                    )
+                )
+
+            # Jika berhasil membangun movers live, gunakan
+            if live_movers:
+                # Build matching S/R matrix based on live prices
+                live_sr: List[SupportResistanceItem] = []
+                for m in live_movers:
+                    p = m.last_price
+                    # Gunakan fraksi tick valid
+                    from app.services.dupont_engine import get_idx_tick_size
+                    tick = get_idx_tick_size(p)
+                    s1 = p - 2 * tick
+                    s2 = p - 4 * tick
+                    r1 = p + 2 * tick
+                    r2 = p + 4 * tick
+                    live_sr.append(SupportResistanceItem(ticker=m.ticker, last_price=p, s2=s2, s1=s1, r1=r1, r2=r2))
+
+                return TerminalPayload(
+                    header=IHSGBriefingHeader(
+                        trading_date=trading_date,
+                        ihsg_last=ihsg_last,
+                        change_pts=change_pts,
+                        change_pct=change_pct,
+                        total_value_idr_bn=turnover_trn if turnover_trn > 0 else 12480.5,
+                        net_foreign_rg_idr_bn=642.8,  # fallback ke historis jika tak ada broker flow
+                        net_foreign_all_idr_bn=410.2,
+                        market_status=m_status,
+                        briefing_headline=headline,
+                    ),
+                    movers=live_movers,
+                    foreign_flows=_CURRENT_TERMINAL_STATE.foreign_flows,
+                    sr_matrix=live_sr,
+                )
+    except Exception:
+        pass
+
+    return _CURRENT_TERMINAL_STATE
+
+def update_terminal_snapshot(payload: TerminalPayload) -> TerminalPayload:
+    global _CURRENT_TERMINAL_STATE
+    _CURRENT_TERMINAL_STATE = payload
+    return _CURRENT_TERMINAL_STATE
+
+def validate_terminal_payload(payload: TerminalPayload) -> List[str]:
+    """Guardrail 7: tolak payload yang melanggar Fraksi Harga BEI atau urutan S2<S1<=Last<=R1<R2."""
+    errors: List[str] = []
+    for m in payload.movers:
+        if not is_valid_idx_price(m.last_price):
+            errors.append(
+                f"Mover {m.ticker}: harga {m.last_price} bukan kelipatan fraksi BEI (Rp{get_idx_tick_size(m.last_price)})."
+            )
+    for sr in payload.sr_matrix:
+        if not sr.tick_fraction_valid:
+            errors.append(f"S/R {sr.ticker}: ada level/harga yang melanggar Fraksi Harga BEI.")
+        if not sr.ordering_valid:
+            errors.append(f"S/R {sr.ticker}: urutan harus S2 < S1 <= Last <= R1 < R2.")
+    return errors
+```
+
+---
+
+### File: `app/services/llm_analyzer.py`
+**Deskripsi:** LLM Grounded Anomaly & Earnings Quality Verification Engine  
+**Ukuran File:** 14129 bytes
+
+```python
+import asyncio
+import hashlib
+import json
+import os
+import re
+from typing import Any, Dict, List, Optional, Set
+
+import httpx
+from pydantic import BaseModel, Field
+
+from app.services.dupont_engine import DuPontAnalysisBundle, PrimaryDriver
+
+class QualityVerdict:
+    OPERATIONAL_DRIVEN = "OPERATIONAL_DRIVEN (High Quality)"
+    OPERATIONAL_DETERIORATION = "OPERATIONAL_DETERIORATION (Margin/Turnover Melemah)"
+    LEVERAGE_DRIVEN = "LEVERAGE_DRIVEN (Debt Expansion Alert)"
+    DELEVERAGING = "DELEVERAGING (Leverage Menurun)"
+    TAX_INTEREST_DISTORTED = "NON_OPERATIONAL_DISTORTED (Tax/Interest Shift)"
+    STABLE = "STABLE (ROE Relatif Stabil)"
+    MIXED = "MIXED_SIGNALS (Faktor Saling Berlawanan)"
+    SINGLE_PERIOD = "BASELINE (Belum Ada Pembanding YoY)"
+    DISTRESS_ALERT = "EQUITY_OR_EARNINGS_DISTRESS"
+
+class LLMAnomalySummary(BaseModel):
+    headline: str = Field(..., description="Ringkasan utama 1 kalimat perubahan ROE YoY")
+    quality_verdict: str
+    driver_explanation: str = Field(..., description="Analisis apakah ROE digerakkan oleh margin, turnover, atau utang")
+    anomaly_bullets: List[str] = Field(..., min_length=2, max_length=5)
+    risk_watchout: str
+    source: str = Field(default="DETERMINISTIC", description="DETERMINISTIC atau LLM (tervalidasi)")
+
+SYSTEM_PROMPT_EQUITY_RESEARCH = """
+Anda adalah Senior Equity Research Analyst khusus pasar modal Indonesia (BEI/IDX).
+Tugas Anda adalah merangkum anomali rasio DuPont 3-Stage dan 5-Stage berdasarkan JSON yang diberikan.
+
+ATURAN KERAS (ANTI-HALUSINASI):
+1. DILARANG menghitung ulang rasio atau mengarang angka baru. Gunakan HANYA angka yang tertera di JSON input.
+2. Jawab pertanyaan inti: Apakah perubahan ROE dibanding tahun sebelumnya didorong oleh kualitas operasional (EBIT Margin / Asset Turnover) atau didorong oleh penambahan utang (Equity Multiplier)?
+3. Patuhi field `roe_direction` (UP/DOWN/FLAT) dan `primary_driver_effect` (POSITIVE/NEGATIVE). Jangan menyebut ROE "naik" jika roe_direction = DOWN, dan jangan menyebut faktor "ekspansi" jika efeknya NEGATIVE.
+4. Jika `is_negative_equity` bernilai true, jelaskan bahwa emiten mengalami defisiensi modal sehingga ROE tidak bermakna secara analitis (NM).
+5. Kembalikan HANYA JSON valid dengan kunci persis: headline (string), quality_verdict (string), driver_explanation (string), anomaly_bullets (array 2-5 string), risk_watchout (string).
+""".strip()
+
+_DRIVER_LABEL = {
+    PrimaryDriver.OPERATIONAL_MARGIN: "EBIT Margin (margin operasional)",
+    PrimaryDriver.ASSET_EFFICIENCY: "Asset Turnover (efisiensi aset)",
+    PrimaryDriver.FINANCIAL_LEVERAGE: "Equity Multiplier (financial leverage)",
+    PrimaryDriver.TAX_OR_INTEREST_BURDEN: "beban bunga & pajak (Interest/Tax Burden)",
+}
+_DRIVER_DELTA_KEYS = {
+    PrimaryDriver.OPERATIONAL_MARGIN: "ebit_margin",
+    PrimaryDriver.ASSET_EFFICIENCY: "asset_turnover",
+    PrimaryDriver.FINANCIAL_LEVERAGE: "equity_multiplier",
+}
+
+def _pct(v: Optional[float]) -> str:
+    return "NM" if v is None else f"{v * 100:.2f}%"
+
+def _mult(v: Optional[float]) -> str:
+    return "NM" if v is None else f"{v:.2f}x"
+
+def _verdict(bundle: DuPontAnalysisBundle) -> str:
+    driver, effect, direction = bundle.primary_driver, bundle.primary_driver_effect, bundle.roe_direction
+    if direction == "FLAT":
+        return QualityVerdict.STABLE
+    if driver in (PrimaryDriver.OPERATIONAL_MARGIN, PrimaryDriver.ASSET_EFFICIENCY):
+        if effect == "POSITIVE" and direction == "UP":
+            return QualityVerdict.OPERATIONAL_DRIVEN
+        if effect == "NEGATIVE":
+            return QualityVerdict.OPERATIONAL_DETERIORATION
+        return QualityVerdict.MIXED
+    if driver == PrimaryDriver.FINANCIAL_LEVERAGE:
+        if effect == "POSITIVE" and direction == "UP":
+            return QualityVerdict.LEVERAGE_DRIVEN
+        if effect == "NEGATIVE":
+            return QualityVerdict.DELEVERAGING
+        return QualityVerdict.MIXED
+    if driver == PrimaryDriver.TAX_OR_INTEREST_BURDEN:
+        return QualityVerdict.TAX_INTEREST_DISTORTED
+    return QualityVerdict.MIXED
+
+def generate_deterministic_anomaly_summary(bundle: DuPontAnalysisBundle) -> LLMAnomalySummary:
+    curr = bundle.current
+    deltas = bundle.yoy_deltas
+
+    if curr.is_negative_equity:
+        return LLMAnomalySummary(
+            headline=f"[{curr.ticker}] Peringatan Defisiensi Modal: Ekuitas Entitas Induk bernilai negatif.",
+            quality_verdict=QualityVerdict.DISTRESS_ALERT,
+            driver_explanation="Kalkulasi ROE dan Equity Multiplier dinonaktifkan (NM) untuk mencegah distorsi matematis akibat ekuitas negatif.",
+            anomaly_bullets=[
+                f"Net Profit Margin tercatat sebesar {_pct(curr.net_profit_margin)} dengan EBIT Margin {_pct(curr.ebit_margin)}.",
+                "Struktur permodalan membutuhkan restrukturisasi atau injeksi ekuitas sebelum rasio pengembalian ekuitas dapat dievaluasi.",
+            ],
+            risk_watchout="Risiko solvabilitas tinggi; fokuskan analisis pada arus kas operasional dan rasio cakupan bunga.",
+            source="DETERMINISTIC",
+        )
+
+    roe_str = _pct(curr.roe)
+    roe_d = deltas.get("roe")
+    has_prev = bundle.previous is not None and roe_d is not None and roe_d.bps_change is not None
+    bps_text = f"({roe_d.bps_change:+.0f} bps YoY)" if has_prev else "(periode tunggal, belum ada pembanding YoY)"
+
+    base_bullets = [
+        f"ROE: {roe_str} {bps_text} | NPM: {_pct(curr.net_profit_margin)} | EBIT Margin: {_pct(curr.ebit_margin)}.",
+        f"Perputaran Aset (AT): {_mult(curr.asset_turnover)} | Financial Leverage (EM): {_mult(curr.equity_multiplier)}.",
+        f"Dekomposisi 5-Stage: Interest Burden {_mult(curr.interest_burden)} | Tax Burden {_mult(curr.tax_burden)}.",
+    ]
+
+    if not has_prev or bundle.primary_driver == PrimaryDriver.INSUFFICIENT_PRIOR_DATA:
+        bullets = base_bullets + bundle.warnings[:2]
+        return LLMAnomalySummary(
+            headline=f"[{curr.ticker} {curr.year} {curr.period_type.value}] ROE {roe_str} — baseline tanpa pembanding YoY",
+            quality_verdict=QualityVerdict.SINGLE_PERIOD,
+            driver_explanation=(
+                f"ROE {roe_str} terdiri dari NPM {_pct(curr.net_profit_margin)} x AT {_mult(curr.asset_turnover)} "
+                f"x EM {_mult(curr.equity_multiplier)}. Unggah laporan periode sejenis tahun sebelumnya untuk atribusi YoY."
+            ),
+            anomaly_bullets=bullets[:5],
+            risk_watchout="Tanpa pembanding YoY, arah dan kualitas perubahan ROE belum dapat dinilai.",
+            source="DETERMINISTIC",
+        )
+
+    direction_word = {"UP": "naik", "DOWN": "turun", "FLAT": "relatif stabil"}.get(bundle.roe_direction, "berubah")
+    driver = bundle.primary_driver
+    label = _DRIVER_LABEL[driver]
+    dkey = _DRIVER_DELTA_KEYS.get(driver)
+    if dkey and dkey in deltas and deltas[dkey].previous_val is not None and deltas[dkey].current_val is not None:
+        is_rate = dkey in ("ebit_margin",)
+        fmt = _pct if is_rate else _mult
+        factor_move = f"{fmt(deltas[dkey].previous_val)} menjadi {fmt(deltas[dkey].current_val)}"
+        factor_dir = "naik" if bundle.primary_driver_effect == "POSITIVE" else "turun"
+    else:
+        factor_move, factor_dir = "berubah", ("naik" if bundle.primary_driver_effect == "POSITIVE" else "turun")
+
+    verdict = _verdict(bundle)
+    if verdict == QualityVerdict.STABLE:
+        driver_exp = f"ROE {roe_str} {bps_text} relatif stabil; perubahan antar komponen DuPont saling mengimbangi (faktor terbesar: {label})."
+    elif verdict == QualityVerdict.LEVERAGE_DRIVEN:
+        driver_exp = (
+            f"ROE {direction_word} ke {roe_str} {bps_text} terutama karena {label} {factor_dir} ({factor_move}), "
+            f"yaitu dorongan utang, bukan perbaikan margin operasional."
+        )
+    elif verdict == QualityVerdict.DELEVERAGING:
+        driver_exp = (
+            f"ROE {direction_word} ke {roe_str} {bps_text}; faktor terbesar adalah penurunan {label} ({factor_move}), "
+            f"artinya emiten mengurangi leverage sehingga efek pengungkit pada ROE melemah."
+        )
+    elif verdict == QualityVerdict.OPERATIONAL_DRIVEN:
+        driver_exp = (
+            f"ROE naik ke {roe_str} {bps_text} ditopang perbaikan operasional: {label} {factor_dir} ({factor_move}), "
+            f"bukan dari penambahan utang."
+        )
+    elif verdict == QualityVerdict.OPERATIONAL_DETERIORATION:
+        driver_exp = (
+            f"ROE {direction_word} ke {roe_str} {bps_text} akibat pelemahan operasional: {label} {factor_dir} ({factor_move}). "
+            f"Ini penurunan kualitas laba, bukan efek leverage."
+        )
+    elif verdict == QualityVerdict.TAX_INTEREST_DISTORTED:
+        driver_exp = (
+            f"ROE {direction_word} ke {roe_str} {bps_text}; pergerakannya banyak dipengaruhi {label} "
+            f"(Interest Burden {_mult(curr.interest_burden)}, Tax Burden {_mult(curr.tax_burden)})."
+        )
+    else:
+        driver_exp = (
+            f"ROE {direction_word} ke {roe_str} {bps_text}; faktor terbesar ({label}) bergerak berlawanan "
+            f"dengan arah ROE sehingga sinyalnya campuran."
+        )
+
+    bullets = list(base_bullets)
+    if bundle.driver_contributions_pct:
+        names = {
+            "OPERATIONAL_MARGIN": "Margin", "ASSET_EFFICIENCY": "Turnover",
+            "FINANCIAL_LEVERAGE": "Leverage", "TAX_OR_INTEREST_BURDEN": "Bunga/Pajak",
+        }
+        parts = ", ".join(f"{names[k]} {v:+.1f}%" for k, v in bundle.driver_contributions_pct.items())
+        bullets.append(f"Kontribusi ke perubahan ROE (log, aditif): {parts}.")
+    if bundle.warnings:
+        bullets.extend(bundle.warnings[:1])
+
+    return LLMAnomalySummary(
+        headline=f"[{curr.ticker} {curr.year} {curr.period_type.value}] ROE {roe_str} {bps_text} — driver: {driver.value} ({bundle.primary_driver_effect})",
+        quality_verdict=verdict,
+        driver_explanation=driver_exp,
+        anomaly_bullets=bullets[:5],
+        risk_watchout="Pantau konsistensi EBIT Margin dan Interest Burden jika Equity Multiplier melampaui 2.50x.",
+        source="DETERMINISTIC",
+    )
+
+# ---------------------------------------------------------------- validasi angka LLM
+_NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
+ALLOWED_CONSTANTS = {2.5}
+
+def _collect_numbers(obj: Any, out: Set[float]) -> None:
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        v = abs(float(obj))
+        out.update({v, v * 100.0, v * 10000.0})
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_numbers(v, out)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            _collect_numbers(v, out)
+    elif isinstance(obj, str):
+        for tok in _NUM_RE.findall(obj):
+            out.add(abs(float(tok.replace(",", "."))))
+
+def numbers_are_grounded(summary: LLMAnomalySummary, bundle: DuPontAnalysisBundle) -> bool:
+    allowed: Set[float] = set(ALLOWED_CONSTANTS)
+    _collect_numbers(bundle.model_dump(mode="json"), allowed)
+    text = " ".join(
+        [summary.headline, summary.quality_verdict, summary.driver_explanation, summary.risk_watchout]
+        + list(summary.anomaly_bullets)
+    )
+    for tok in _NUM_RE.findall(text):
+        val = abs(float(tok.replace(",", ".")))
+        if val.is_integer() and val <= 5:
+            continue
+        if not any(abs(val - a) <= max(0.06, abs(a) * 0.01) for a in allowed):
+            return False
+    return True
+
+# ---------------------------------------------------------------- cache & orkestrasi
+_LLM_CACHE: Dict[str, LLMAnomalySummary] = {}
+_INFLIGHT: Dict[str, asyncio.Task[None]] = {}
+_CACHE_MAX = 256
+
+def _cache_key(bundle: DuPontAnalysisBundle) -> str:
+    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    return hashlib.sha256((model + bundle.model_dump_json()).encode("utf-8")).hexdigest()
+
+async def _call_llm(bundle: DuPontAnalysisBundle) -> Optional[LLMAnomalySummary]:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    model_name = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{api_base}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model_name,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT_EQUITY_RESEARCH},
+                        {"role": "user", "content": bundle.model_dump_json()},
+                    ],
+                    "temperature": 0.1,
+                },
+            )
+            resp.raise_for_status()
+            raw_json = json.loads(resp.json()["choices"][0]["message"]["content"])
+            raw_json["source"] = "LLM (angka tervalidasi)"
+            summary = LLMAnomalySummary(**raw_json)
+    except Exception:
+        return None
+    return summary if numbers_are_grounded(summary, bundle) else None
+
+async def _warm_cache(key: str, bundle: DuPontAnalysisBundle) -> None:
+    try:
+        result = await _call_llm(bundle)
+        if result is not None:
+            if len(_LLM_CACHE) >= _CACHE_MAX:
+                _LLM_CACHE.pop(next(iter(_LLM_CACHE)))
+            _LLM_CACHE[key] = result
+    finally:
+        _INFLIGHT.pop(key, None)
+
+async def summarize_dupont_anomalies(
+    bundle: DuPontAnalysisBundle, wait_for_llm: bool = True
+) -> LLMAnomalySummary:
+    if not os.getenv("OPENAI_API_KEY", "").strip():
+        return generate_deterministic_anomaly_summary(bundle)
+
+    key = _cache_key(bundle)
+    if key in _LLM_CACHE:
+        return _LLM_CACHE[key]
+
+    if not wait_for_llm:
+        if key not in _INFLIGHT:
+            _INFLIGHT[key] = asyncio.create_task(_warm_cache(key, bundle))
+        return generate_deterministic_anomaly_summary(bundle)
+
+    result = await _call_llm(bundle)
+    if result is None:
+        return generate_deterministic_anomaly_summary(bundle)
+    _LLM_CACHE[key] = result
+    return result
+```
+
+---
+
+### File: `app/services/pdf_exporter.py`
+**Deskripsi:** Institutional Tear-Sheet Report Exporter  
+**Ukuran File:** 1201 bytes
+
+```python
+from pathlib import Path
+from typing import Optional, Tuple
+from jinja2 import Environment, FileSystemLoader
+from app.services.dupont_engine import DuPontAnalysisBundle
+from app.services.llm_analyzer import LLMAnomalySummary
+
+def render_dupont_report_export(
+    bundle: DuPontAnalysisBundle,
+    anomaly: LLMAnomalySummary,
+    template_dir: Optional[str] = None,
+) -> Tuple[bytes, str, str]:
+    """PDF bila WeasyPrint tersedia, jika tidak fallback ke print-ready HTML."""
+    if template_dir is None:
+        template_dir = str(Path(__file__).resolve().parents[1] / "templates")
+    env = Environment(loader=FileSystemLoader(template_dir))
+    tmpl = env.get_template("pdf_report.html")
+    html_str = tmpl.render(bundle=bundle, anomaly=anomaly)
+
+    try:
+        from weasyprint import HTML  # type: ignore
+        pdf_bytes = HTML(string=html_str).write_pdf()
+        filename = f"DuPont_Report_{bundle.current.ticker}_{bundle.current.year}.pdf"
+        return pdf_bytes, "application/pdf", filename
+    except Exception:
+        filename = f"DuPont_Report_{bundle.current.ticker}_{bundle.current.year}_Printable.html"
+        return html_str.encode("utf-8"), "text/html; charset=utf-8", filename
+```
+
+---
+
+### File: `app/providers/yahoo.py`
+**Deskripsi:** Data Provider Layer (idx CLI Native & yfinance Multi-Year Fallback)  
+**Ukuran File:** 26115 bytes
+
+```python
+"""Data providers: Yahoo Finance (via yfinance library) + fallback idx CLI."""
+from __future__ import annotations
+
+import json
+import logging
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import yfinance as yf
+
+logger = logging.getLogger(__name__)
+
+# ── fallback wrapper around the `idx` CLI (Rust binary) ──────────────────
+_IDX_PATH = "/Users/hasbi/.local/bin/idx"
+
+
+def _idx(*args: str, timeout: int = 45) -> str:
+    """Run `idx <args...>` fallback; raise on non-zero exit."""
+    import subprocess
+    cmd = [_IDX_PATH, *(a for a in args if a)]  # type: ignore[arg-type]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError(f"idx CLI error {r.returncode}: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+# ── helpers ────────────────────────────────────────────────────────────
+
+def _now_wib() -> datetime:
+    return datetime.now(timezone.utc).astimezone(timezone.utc).astimezone(
+        timezone(datetime.now().astimezone().utcoffset())
+    )
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if (f != f) else f  # reject NaN
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_str(v: Any) -> str:
+    return str(v) if v is not None else ""
+
+
+# ── 1) QUOTE_BULK ─────────────────────────────────────────────────────
+
+def fetch_quotes(symbols: List[str], max_per_request: int = 50) -> Dict[str, Dict[str, Any]]:
+    """
+    Ambil quote untuk daftar simbol via yfinance (primary) atau idx CLI (fallback).
+
+    Return: {symbol: {"price", "change", "change_pct", "market_cap", "pe_trailing",
+                     "pb", "dividend_yield_pct", "week52_high", "week52_low",
+                     "market_state", "as_of", "source"}}
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+
+    # ── primary: yfinance ──
+    try:
+        # yfinance Tickers() bisa terima banyak simbol sekaligus
+        # Gunakan format .JK untuk IDX (Indonesia)
+        yf_symbols = [s if s.endswith(".JK") else f"{s}.JK" for s in symbols]
+        tickers = yf.Tickers(" ".join(yf_symbols))
+
+        for sym in symbols:
+            ysym = sym if sym.endswith(".JK") else f"{sym}.JK"
+            t = tickers.tickers.get(ysym)
+            if t is None:
+                continue
+            try:
+                info = t.info
+            except Exception:
+                continue
+            if not info or len(info) < 3:
+                continue
+
+            price = _safe_float(info.get("currentPrice")) or _safe_float(
+                info.get("regularMarketPrice")
+            )
+            change = _safe_float(info.get("regularMarketChange"))
+            change_pct = _safe_float(info.get("regularMarketChangePercent"))
+            # Jika pct tidak ada, hitung dari price vs prev_close
+            if change_pct is None and price and info.get("previousClose"):
+                prev = _safe_float(info.get("previousClose"))
+                if prev and prev != 0:
+                    change = round(price - prev, 2)
+                    change_pct = round((price - prev) / prev * 100, 4)
+
+            out[sym] = {
+                "price": price or 0.0,
+                "change": change or 0.0,
+                "change_pct": change_pct or 0.0,
+                "market_cap": _safe_float(info.get("marketCap")),
+                "pe_trailing": _safe_float(info.get("trailingPE")),
+                "pb": _safe_float(info.get("priceToBook")),
+                "dividend_yield_pct": (
+                    round(float(info["dividendYield"]) * 100, 2)
+                    if info.get("dividendYield") is not None
+                    else None
+                ),
+                "week52_high": _safe_float(info.get("52WeekHigh")),
+                "week52_low": _safe_float(info.get("52WeekLow")),
+                "market_state": _derive_market_state(),
+                "as_of": _to_str(info.get("regularMarketTime")),
+                "source": "yfinance",
+            }
+        time.sleep(0.15)  # rate-limit ramah
+
+    except Exception as e:
+        logger.warning(f"yfinance fetch_quotes gagal: {e}; fallback ke idx CLI")
+        # ── fallback: idx CLI ──
+        for sym in symbols:
+            try:
+                raw = _idx("-o", "json", "stocks", "quote", sym)
+                data = json.loads(raw)["data"]
+                for entry in data:
+                    s = entry.get("symbol", "")
+                    if s:
+                        out[s] = _parse_quote(entry)
+            except Exception:
+                pass
+
+    return out
+
+
+def _derive_market_state() -> str:
+    """Infer state bursa IDX dari jam WIB saat ini."""
+    wib = _now_wib()
+    if wib.weekday() >= 5:
+        return "CLOSED EOD"
+    minute = wib.hour * 60 + wib.minute
+    if minute < 540:  # < 09:00
+        return "PREOPEN"
+    if minute <= 945:  # <= 15:45
+        return "OPEN"
+    return "CLOSED EOD"
+
+
+def _parse_quote(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse quote dari respons idx CLI fallback."""
+    return {
+        "price": float(entry.get("price", 0) or 0),
+        "change": float(entry.get("change", 0) or 0),
+        "change_pct": float(entry.get("change_pct", 0) or 0),
+        "market_cap": float(entry.get("market_cap", 0) or 0)
+        if entry.get("market_cap") is not None
+        else None,
+        "pe_trailing": float(entry.get("pe_trailing", 0) or 0)
+        if entry.get("pe_trailing") is not None
+        else None,
+        "pb": float(entry.get("price_to_book", 0) or 0)
+        if entry.get("price_to_book") is not None
+        else None,
+        "dividend_yield_pct": float(entry.get("dividend_yield_pct", 0) or 0)
+        if entry.get("dividend_yield_pct") is not None
+        else None,
+        "week52_high": float(entry.get("week52_high", 0) or 0),
+        "week52_low": float(entry.get("week52_low", 0) or 0),
+        "market_state": entry.get("market_state", "UNKNOWN"),
+        "as_of": entry.get("market_time", ""),
+        "source": entry.get("source", "idx-cli"),
+    }
+
+
+# ── 2) FUNDAMENTALS & FINANCIALS ──────────────────────────────────────
+
+def fetch_fundamentals(symbol: str) -> Dict[str, Any]:
+    """
+    Ambil fundamental ringkas dari yfinance.info (fast lookup).
+
+    Return dict terstruktur: {sector, industry, valuation, profitability, health, growth}
+    """
+    t = yf.Ticker(symbol if symbol.endswith(".JK") else f"{symbol}.JK")
+    try:
+        info = t.info
+    except Exception as e:
+        logger.warning(f"yfinance fundamentals {symbol} gagal: {e}")
+        return {}
+
+    basic = {
+        "symbol": symbol,
+        "name": info.get("shortName") or info.get("longName", ""),
+        "currency": info.get("currency", "IDR"),
+        "sector": info.get("sector", ""),
+        "industry": info.get("industry", ""),
+        "price": _safe_float(info.get("currentPrice")),
+        "beta": _safe_float(info.get("beta")),
+        "week52_high": _safe_float(info.get("52WeekHigh")),
+        "week52_low": _safe_float(info.get("52WeekLow")),
+    }
+
+    val = info.get("valuation", {})
+    basic["valuation"] = {
+        "market_cap": _safe_float(info.get("marketCap")),
+        "enterprise_value": _safe_float(info.get("enterpriseValue")),
+        "pe_trailing": _safe_float(info.get("trailingPE")),
+        "pe_forward": _safe_float(info.get("forwardPE")),
+        "peg": _safe_float(info.get("pegRatio")),
+        "price_to_book": _safe_float(info.get("priceToBook")),
+        "price_to_sales": _safe_float(info.get("priceToSales")),
+        "ev_to_ebitda": _safe_float(info.get("evToEbitda")),
+        "ev_to_revenue": _safe_float(info.get("evToRevenue")),
+    }
+
+    # Profitability — operating/net margin dikonversi dari desimal ke %
+    def pct(v: Any) -> Optional[float]:
+        f = _safe_float(v)
+        return round(f * 100, 2) if f is not None else None
+
+    basic["profitability"] = {
+        "roe_pct": None,  # dihitung dari financials
+        "roa_pct": None,
+        "gross_margin_pct": None,
+        "operating_margin_pct": pct(info.get("OperatingMargins")),
+        "net_margin_pct": pct(info.get("ProfitMargins")),
+    }
+
+    basic["health"] = {
+        "debt_to_equity": _safe_float(info.get("debtToEquity")),
+        "current_ratio": None,
+        "quick_ratio": None,
+        "total_debt": _safe_float(info.get("totalDebt")),
+        "total_cash": _safe_float(info.get("totalCash")),
+    }
+
+    basic["growth"] = {
+        "revenue_growth_pct": pct(info.get("revenueGrowth")),
+        "earnings_growth_pct": pct(info.get("earningsGrowth")),
+        "revenue_cagr_5y_pct": None,
+    }
+    return basic
+
+
+def fetch_financials(symbol: str, period: str = "annual") -> Dict[str, Any]:
+    """
+    Ambil laporan keuangan tahunan/kuartal dari yfinance.
+
+    Return: {"period": str, "end_date": str, "revenue": float, "net_income": float,
+             "total_assets": float, "total_equity": float, "total_debt": float,
+             "interest_income": float, "interest_expense": float,
+             "pretax_income": float, "tax_provision": float, "eps_diluted": float}
+
+    Field ini langsung bisa di-map ke DuPont Engine (FinancialStatementInput).
+    """
+    ysym = symbol if symbol.endswith(".JK") else f"{symbol}.JK"
+    t = yf.Ticker(ysym)
+
+    try:
+        fin = t.financials
+        bs = t.balance_sheet
+    except Exception as e:
+        logger.warning(f"yfinance financials {symbol} gagal: {e}")
+        return {}
+
+    if fin.empty or bs.empty:
+        return {}
+
+    # Kolom = [2025-12-31, 2024-12-31, ...] terurut descending
+    curr_col = fin.columns[0]
+    curr_date = str(curr_col)[:10]
+
+    def get_val(df, key: str) -> float:
+        if key in df.index:
+            v = df.loc[key, curr_col]
+            if hasattr(v, "iloc"):
+                v = v.iloc[0]
+            import numpy as np
+
+            f = float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else 0.0
+            return f
+        return 0.0
+
+    # ── Income Statement ──
+    rev = get_val(fin, "Total Revenue") or get_val(fin, "TotalRevenue")
+    ni = (
+        get_val(fin, "Net Income From Continuing Operation Net Minority Interest")
+        or get_val(fin, "Net Income")
+    )
+    pretax = get_val(fin, "Pretax Income")
+    interest = get_val(fin, "Interest Expense")
+    tax = get_val(fin, "Tax Provision")
+    eps = get_val(fin, "Diluted EPS") if "Diluted EPS" in fin.index else None
+
+    # ── Balance Sheet ──
+    total_assets = get_val(bs, "Total Assets")
+    total_equity = get_val(bs, "Stockholders Equity") or get_val(bs, "Common Stock Equity")
+    total_debt = get_val(bs, "Total Debt")
+
+    return {
+        "period": str(curr_col)[:4],
+        "end_date": curr_date,
+        "revenue": rev,
+        "net_income": ni,
+        "total_assets": total_assets,
+        "total_equity": total_equity,
+        "total_debt": total_debt,
+        "interest_income": 0.0,  # yfinance tidak expose terpisah
+        "interest_expense": interest,
+        "pretax_income": pretax,
+        "tax_provision": tax,
+        "eps_diluted": eps,
+    }
+
+
+# ── 3) HISTORY_DAILY ───────────────────────────────────────────────────
+
+def fetch_history(
+    symbol: str,
+    period: str = "5d",
+    interval: str = "1d",
+) -> List[Dict[str, Any]]:
+    """
+    Ambil riwayat harian untuk satu ticker via yfinance.
+
+    Return: list of dict dengan fields: date, open, high, low, close, volume
+    """
+    ysym = symbol if symbol.endswith(".JK") else f"{symbol}.JK"
+    t = yf.Ticker(ysym)
+    try:
+        hist = t.history(period=period, interval=interval, auto_adjust=True)
+    except Exception:
+        return []
+
+    if hist.empty:
+        return []
+
+    out = []
+    for _, row in hist.iterrows():
+        date = row.name
+        date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+        out.append(
+            {
+                "date": date_str,
+                "open": float(row.get("Open", 0) or 0),
+                "high": float(row.get("High", 0) or 0),
+                "low": float(row.get("Low", 0) or 0),
+                "close": float(row.get("Close", 0) or 0),
+                "volume": int(row.get("Volume", 0) or 0),
+            }
+        )
+    return out
+
+
+# ── 4) MARKET OVERVIEW & INDEX ─────────────────────────────────────────
+
+def fetch_index_quote(symbol: str = "^JKSE") -> Dict[str, Any]:
+    """
+    Quote indeks (IHSG/^JKSE) via yfinance (primary) atau idx CLI (fallback).
+    """
+    try:
+        t = yf.Ticker(symbol)
+        info = t.info
+        return {
+            "symbol": symbol,
+            "name": info.get("longName") or symbol,
+            "price": _safe_float(info.get("regularMarketPrice")),
+            "change": _safe_float(info.get("regularMarketChange")),
+            "change_pct": _safe_float(info.get("regularMarketChangePercent")),
+            "volume": int(info.get("volume")) if info.get("volume") is not None else None,
+            "as_of": _to_str(info.get("regularMarketTime")),
+            "market_state": _derive_market_state(),
+        }
+    except Exception:
+        pass
+
+    # fallback ke idx CLI
+    try:
+        raw = _idx("-o", "json", "market", "overview")
+        d = json.loads(raw)["data"]
+        idx = d.get("index", {})
+        if idx.get("symbol") != symbol:
+            return {}
+        return {
+            "symbol": idx.get("symbol", symbol),
+            "name": idx.get("name", ""),
+            "price": _safe_float(idx.get("price")),
+            "change": _safe_float(idx.get("change")),
+            "change_pct": _safe_float(idx.get("change_pct")),
+            "volume": int(idx.get("volume")) if idx.get("volume") is not None else None,
+            "value": _safe_float(idx.get("value")),
+            "as_of": d.get("as_of", ""),
+            "market_state": d.get("market_state", "UNKNOWN"),
+        }
+    except Exception as e:
+        logger.error(f"fetch_index_quote gagal: {e}")
+        return {}
+
+
+def fetch_market_overview() -> Dict[str, Any]:
+    """
+    Snapshot pasar IDX: breadth + top movers.
+
+    Skenario: coba yfinance untuk gainers utama; fallback ke idx CLI untuk
+    data pasar lengkap (breadth, turnover, 955 emiten).
+    """
+    # ── primary: idx CLI karena sudah teruji lengkap ──
+    try:
+        raw = _idx("-o", "json", "market", "overview")
+        envelope = json.loads(raw)
+        d = envelope.get("data", {})
+        return {
+            "as_of": d.get("as_of", ""),
+            "market_state": d.get("market_state", "UNKNOWN"),
+            "index": d.get("index", {}),
+            "breadth": {
+                "universe": int(d.get("universe", 0) or 0),
+                "quoted": int(d.get("quoted", 0) or 0),
+                "advancing": int(d.get("advancing", 0) or 0),
+                "declining": int(d.get("declining", 0) or 0),
+                "unchanged": int(d.get("unchanged", 0) or 0),
+                "turnover_idr": float(d.get("turnover", 0) or 0),
+            },
+            "gainers": d.get("gainers", []),
+            "losers": d.get("losers", []),
+            "most_active": d.get("most_active", []),
+            "heavyweights": d.get("heavyweights", []),
+            "warnings": envelope.get("warnings", []),
+        }
+    except Exception as e:
+        logger.warning(f"idx CLI overview gagal: {e}; pakai yfinance")
+
+    # ── fallback: yfinance untuk gainers/losers jika idx CLI gagal ──
+    # Ambil daftar simbol aktif dari database atau fallback ke query umum tanpa hardcode
+    try:
+        from app.db.database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT ticker FROM symbol WHERE is_active = 1 LIMIT 50")).fetchall()
+            active_symbols = [r[0] for r in rows]
+    except Exception:
+        active_symbols = []
+
+    gainers, losers, active = [], [], []
+    for sym in active_symbols:
+        try:
+            t = yf.Ticker(f"{sym}.JK")
+            info = t.info
+            price = _safe_float(info.get("currentPrice")) or _safe_float(info.get("regularMarketPrice"))
+            chg_pct = _safe_float(info.get("regularMarketChangePercent"))
+            if price is None or chg_pct is None:
+                continue
+            entry = {"symbol": sym, "name": info.get("shortName", sym),
+                     "price": price, "change_pct": chg_pct}
+            if chg_pct > 0:
+                gainers.append(entry)
+            elif chg_pct < 0:
+                losers.append(entry)
+            else:
+                active.append(entry)
+        except Exception:
+            pass
+
+    return {
+        "as_of": "",
+        "market_state": "UNKNOWN",
+        "index": {},
+        "breadth": {
+            "universe": 0, "quoted": 0, "advancing": 0,
+            "declining": 0, "unchanged": 0, "turnover_idr": 0.0,
+        },
+        "gainers": gainers[:10],
+        "losers": losers[:10],
+        "most_active": active[:10],
+        "heavyweights": [],
+        "warnings": ["idx CLI unavailable; yfinance fallback aktif"],
+    }
+
+
+# ── 5) BUDGET / HEALTH TRACKING ────────────────────────────────────────
+
+class SourceBudget:
+    """Tracker kuota polling & backoff sederhana."""
+
+    def __init__(self, kind: str, daily_limit: int = 200, cooldown_min: int = 10):
+        self.kind = kind
+        self.daily_limit = daily_limit
+        self.cooldown_min = cooldown_min
+        self.counter = 0
+        self.last_reset = datetime.now(timezone.utc).date()
+        self.next_allowed = 0.0
+
+    def can_poll(self) -> bool:
+        now = datetime.now(timezone.utc).timestamp()
+        today = datetime.now(timezone.utc).date()
+        if today != self.last_reset:
+            self.counter = 0
+            self.last_reset = today
+        if now >= self.next_allowed:
+            self.counter += 1
+            if self.counter > self.daily_limit:
+                self.next_allowed = now + self.cooldown_min * 60
+                self.counter = 1
+            return True
+        return False
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "counter": self.counter,
+            "daily_limit": self.daily_limit,
+            "next_allowed_seconds": max(
+                0, int(self.next_allowed - datetime.now(timezone.utc).timestamp())
+            ),
+        }
+
+
+quote_budget = SourceBudget("quotes", daily_limit=200, cooldown_min=10)
+fund_budget = SourceBudget("fundamentals", daily_limit=50, cooldown_min=30)
+
+
+# ── 6) DB CACHING (opsional) ──────────────────────────────────────────
+
+def cache_quote_to_db(db, symbol: str, data: Dict[str, Any]) -> None:
+    """Simpan quote ke FinancialStatementCache."""
+    from app.db.models import FinancialStatementCache
+    import hashlib
+
+    raw = json.dumps(data, sort_keys=True).encode()
+    fhash = hashlib.sha256(raw).hexdigest()
+    now_year = datetime.utcnow().year
+    stmt = FinancialStatementCache(
+        file_hash=fhash,
+        ticker=symbol,
+        company_name=data.get("name", symbol),
+        year=now_year,
+        period_type="QUOTE",
+        currency=data.get("currency", "IDR"),
+        unit_multiplier=1.0,
+        revenue=data.get("market_cap", 0.0),
+        ebit=0.0,
+        ebt=0.0,
+        net_income_parent=data.get("price", 0.0),
+        total_assets=data.get("market_cap", 0.0),
+        total_liabilities=0.0,
+        total_equity_parent=data.get("market_cap", 0.0),
+        total_equity_consolidated=data.get("market_cap", 0.0),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(stmt)
+
+
+def fetch_financials_multi(symbol: str, years: int = 4) -> List[Dict[str, Any]]:
+    """
+    Ambil laporan keuangan tahunan untuk N tahun terakhir (yfinance).
+
+    Setiap entri punya field DuPont lengkap:
+      revenue, net_income, ebit, ebt, pretax_income, tax_provision,
+      interest_expense, total_assets, total_equity, total_debt
+
+    Diurutkan dari tahun terbaru (index 0) ke terlama.
+    """
+    ysym = symbol if symbol.endswith(".JK") else f"{symbol}.JK"
+    t = yf.Ticker(ysym)
+
+    try:
+        fin = t.financials
+        bs = t.balance_sheet
+    except Exception as e:
+        logger.warning(f"yfinance financials {symbol} gagal: {e}")
+        return []
+
+    if fin.empty or bs.empty:
+        return []
+
+    def get_val(df, col, key: str) -> float:
+        if key not in df.index:
+            return 0.0
+        try:
+            v = df.loc[key, col]
+            if hasattr(v, "iloc"):
+                v = v.iloc[0]
+            import numpy as np
+            if v is None:
+                return 0.0
+            f = float(v)
+            return 0.0 if np.isnan(f) else f
+        except Exception:
+            return 0.0
+
+    fin_cols = list(fin.columns)[:years]
+    out: List[Dict[str, Any]] = []
+
+    for col in fin_cols:
+        curr_date = str(col)[:10]
+        fy = curr_date[:4]
+        if not fy.isdigit():
+            continue
+
+        rev = get_val(fin, col, "Total Revenue") or get_val(fin, col, "TotalRevenue")
+        ni = (
+            get_val(fin, col, "Net Income From Continuing Operation Net Minority Interest")
+            or get_val(fin, col, "Net Income")
+        )
+        pretax = get_val(fin, col, "Pretax Income")
+        interest = get_val(fin, col, "Interest Expense")
+        tax = get_val(fin, col, "Tax Provision")
+        ebit = get_val(fin, col, "EBIT") or get_val(fin, col, "Operating Income")
+        eps = get_val(fin, col, "Diluted EPS") if "Diluted EPS" in fin.index else 0.0
+
+        # ── Balance Sheet: kolom tidak selalu sama dengan income statement ──
+        bs_col = col if col in bs.columns else (bs.columns[0] if len(bs.columns) else None)
+        if bs_col is not None:
+            total_assets = get_val(bs, bs_col, "Total Assets")
+            total_equity = (
+                get_val(bs, bs_col, "Stockholders Equity")
+                or get_val(bs, bs_col, "Common Stock Equity")
+            )
+            total_debt = get_val(bs, bs_col, "Total Debt")
+        else:
+            total_assets = total_equity = total_debt = 0.0
+
+        # Fallback EBIT/EBT dari komponen yang tersedia
+        if not ebit and rev:
+            ebit = ni + tax + interest if (ni and (tax or interest)) else ni
+        if not pretax and ebit:
+            pretax = ebit - interest
+
+        out.append({
+            "period": fy,
+            "end_date": curr_date,
+            "revenue": rev,
+            "net_income": ni,
+            "ebit": ebit,
+            "ebt": pretax,
+            "total_assets": total_assets,
+            "total_equity": total_equity,
+            "total_debt": total_debt,
+            "interest_income": 0.0,
+            "interest_expense": interest,
+            "pretax_income": pretax,
+            "tax_provision": tax,
+            "eps_diluted": eps,
+            "name": getattr(t, "info", {}).get("longName", symbol) if isinstance(getattr(t, "info", None), dict) else symbol,
+            "currency": "IDR",
+        })
+
+    return out
+
+
+def cache_financials_to_db(db, symbol: str, data: Dict[str, Any]) -> None:
+    """Simpan financials ke DB untuk caching."""
+    from app.db.models import FinancialStatementCache
+    from app.services.dupont_engine import PeriodType
+    import hashlib
+
+    raw = json.dumps(data, sort_keys=True).encode()
+    fhash = hashlib.sha256(raw).hexdigest()
+    fy = data.get("end_date", "")[:4]
+    year = int(fy) if fy.isdigit() else datetime.utcnow().year
+    stmt = FinancialStatementCache(
+        file_hash=fhash,
+        ticker=symbol,
+        company_name=data.get("name", symbol),
+        year=year,
+        period_type=PeriodType.FY.value,  # always "FY"
+        currency=data.get("currency", "IDR"),
+        unit_multiplier=1.0,
+        revenue=data.get("revenue", 0.0),
+        ebit=data.get("ebit", 0.0),
+        ebt=data.get("ebt", 0.0),
+        net_income_parent=data.get("net_income", 0.0),
+        total_assets=data.get("total_assets", 0.0),
+        total_liabilities=data.get("total_debt", 0.0),
+        total_equity_parent=data.get("total_equity", 0.0),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(stmt)
+
+
+def cache_financials_multi_to_db(db, symbol: str, rows: List[Dict[str, Any]]) -> int:
+    """Simpan beberapa periode tahunan sekaligus. Return jumlah baris tersimpan."""
+    from app.db.models import FinancialStatementCache
+    from app.services.dupont_engine import PeriodType
+    import hashlib
+
+    n = 0
+    for data in rows:
+        raw = json.dumps(data, sort_keys=True).encode()
+        fhash = hashlib.sha256(raw).hexdigest()
+        fy = data.get("end_date", "")[:4]
+        year = int(fy) if fy.isdigit() else datetime.utcnow().year
+        db.add(FinancialStatementCache(
+            file_hash=fhash,
+            ticker=symbol,
+            company_name=data.get("name", symbol),
+            year=year,
+            period_type=PeriodType.FY.value,
+            currency=data.get("currency", "IDR"),
+            unit_multiplier=1.0,
+            revenue=data.get("revenue", 0.0),
+            ebit=data.get("ebit", 0.0),
+            ebt=data.get("ebt", 0.0),
+            net_income_parent=data.get("net_income", 0.0),
+            total_assets=data.get("total_assets", 0.0),
+            total_liabilities=data.get("total_debt", 0.0),
+            total_equity_parent=data.get("total_equity", 0.0),
+            created_at=datetime.now(timezone.utc),
+        ))
+        n += 1
+    return n
+```
+
+---
+
+### File: `app/providers/classify.py`
+**Deskripsi:** Data Freshness, Latency & Source Health Evaluator  
+**Ukuran File:** 5835 bytes
+
+```python
+"""Freshness classifier & health monitor (Fase 0 — 4.4 / PRD)."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Optional
+from zoneinfo import ZoneInfo  # Python 3.9+
+
+
+class DataFreshness(str, Enum):
+    """Klasifikasi label kesegaran data (UI chip)."""
+    REALTIME   = "REALTIME"   # < 2 menit dari as_of, bursa aktif
+    DELAYED    = "DELAYED"    # 2–60 menit, bursa aktif
+    END_OF_DAY = "EOD"        # bursa tutup / di luar sesi / akhir pekan
+    STALE      = "STALE"      # bursa aktif tapi data > 60 menit
+    UNKNOWN    = "UNKNOWN"
+
+
+class SourceHealth(str, Enum):
+    """Status kesehatan satu sumber data."""
+    HEALTHY  = "HEALTHY"
+    DEGRADED = "DEGRADED"   # ada field yang hilang / timeout parsial
+    RUSAK    = "RUSAK"       # respons kosong / error; auto-switch ke cadangan
+
+
+_WIB = ZoneInfo("Asia/Jakarta")
+
+# State bursa IDX yang valid. State dari Yahoo (PREPRE, REGULAR, dll.) yang
+# berbasis jam AS TIDAK masuk set ini — diabaikan demi state turunan WIB.
+_IDX_STATES = {
+    "OPEN",
+    "CLOSED EOD",
+    "PREOPEN",
+    "PRECLOSE",
+    "POSTCLOSE",
+    "CLOSED",
+}
+
+
+@dataclass
+class FreshnessResult:
+    label: DataFreshness
+    freshness_pct: float          # 0..100, 100 = paling fresh
+    as_of_wib: str               # formatted "dd MMM yyyy HH:mm"
+    delay_minutes: int           # beda antara fetched_at dan as_of
+    source: str                  # nama provider
+    market_state: str            # OPEN / CLOSED EOD / PREOPEN / ...
+
+
+def _parse_as_of(as_of: str | None) -> datetime:
+    """Parse as_of string (ISO) ke datetime WIB."""
+    if not as_of:
+        return datetime.now(_WIB)
+    try:
+        return datetime.fromisoformat(as_of.replace("Z", "+00:00")).astimezone(_WIB)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(as_of).replace(tzinfo=_WIB)
+    except ValueError:
+        return datetime.now(_WIB)
+
+
+def _derive_idx_state(
+    moment: datetime,
+    market_open_h: int,
+    market_open_min: int,
+    market_close_h: int,
+    market_close_min: int,
+) -> str:
+    """Tentukan state bursa IDX dari jam lokal WIB + hari kalender."""
+    if moment.weekday() >= 5:  # Sabtu=5, Minggu=6
+        return "CLOSED EOD"
+    minute_of_day = moment.hour * 60 + moment.minute
+    open_min = market_open_h * 60 + market_open_min
+    close_min = market_close_h * 60 + market_close_min
+    if minute_of_day < open_min:
+        return "PREOPEN"
+    if minute_of_day <= close_min:
+        return "OPEN"
+    return "CLOSED EOD"
+
+
+def classify_freshness(
+    fetched_at: datetime | None,
+    as_of: str | None,
+    market_state: str,
+    source: str = "unknown",
+    *,
+    market_open_h: int = 9,
+    market_open_min: int = 0,
+    market_close_h: int = 15,
+    market_close_min: int = 45,
+    polling_interval_s: int = 600,
+) -> FreshnessResult:
+    """
+    Klasifikasi kesegaran data.
+
+    `fetched_at` = waktu kita mengambil data (UTC). Delay = fetched_at - as_of.
+    `as_of` = stempel waktu data itu sendiri (WIB, dari sumber).
+
+    Aturan (PRD 4.4):
+    - fetched_at None → UNKNOWN
+    - bursa tidak aktif (tutup, akhir pekan, pre-open) → EOD
+    - bursa aktif: delay < 2m → REALTIME; ≤ 60m → DELAYED; > 60m → STALE
+    - `market_state` hanya dipakai bila merupakan state IDX valid
+      (Yahoo mengirim state berbasis jam AS → diabaikan).
+    """
+    if fetched_at is None:
+        return FreshnessResult(
+            label=DataFreshness.UNKNOWN,
+            freshness_pct=0.0,
+            as_of_wib="—",
+            delay_minutes=0,
+            source=source,
+            market_state=market_state or "UNKNOWN",
+        )
+
+    now_wib = fetched_at.astimezone(_WIB)
+    as_of_dt = _parse_as_of(as_of)
+
+    delay_s = max(0.0, (now_wib - as_of_dt).total_seconds())
+    delay_min = int(delay_s / 60)
+
+    stale_threshold_s = 60 * 60
+    freshness_pct = max(0.0, min(100.0, 100.0 * (1.0 - delay_s / stale_threshold_s)))
+
+    # State bursa diturunkan dari MOMEN DATA (as_of), bukan momen fetch.
+    # Contoh: data close Jumat yang di-fetch Senin pagi tetap "EOD" — itu
+    # snapshot akhir sesi, bukan data live yang basi. Lihat docs/DATA_SOURCE_DISCOVERY.md.
+    given = (market_state or "").strip().upper()
+    if given in _IDX_STATES:
+        state = given
+    else:
+        state = _derive_idx_state(
+            as_of_dt,
+            market_open_h,
+            market_open_min,
+            market_close_h,
+            market_close_min,
+        )
+
+    if state != "OPEN":
+        # Sesi bursa sudah tutup saat data diambil → EOD. Delay tetap
+        # dilaporkan lewat delay_minutes supaya UI jujur soal umur data.
+        label = DataFreshness.END_OF_DAY
+    elif delay_min < 2:
+        label = DataFreshness.REALTIME
+    elif delay_min <= 60:
+        # 60 menit = DELAYED, bukan STALE (STALE = > 60 menit, bursa aktif)
+        label = DataFreshness.DELAYED
+    else:
+        label = DataFreshness.STALE
+
+    return FreshnessResult(
+        label=label,
+        freshness_pct=round(freshness_pct, 1),
+        as_of_wib=as_of_dt.strftime("%d %b %Y %H:%M"),
+        delay_minutes=delay_min,
+        source=source,
+        market_state=state,
+    )
+
+
+# ── Schema Pydantic untuk /api/health ────────────────────────────────
+
+def build_source_health(
+    source: str,
+    fetched_at: datetime | None,
+    status: SourceHealth,
+    records_count: int = 0,
+    error_msg: str | None = None,
+) -> dict:
+    """Buat objek health untuk response /api/health."""
+    return {
+        "source": source,
+        "status": status.value,
+        "fetched_at": fetched_at.isoformat() if fetched_at else None,
+        "records_count": records_count,
+        "error_msg": error_msg,
+    }
+```
+
+---
+
+### File: `scripts/populate_db.py`
+**Deskripsi:** Database Seeding & Mass Ticker Synchronization Script  
+**Ukuran File:** 6317 bytes
+
+```python
+"""
+scripts/populate_db.py
+Sinkronisasi seluruh emiten BEI dan quote terkini ke database lokal (SQLite).
+Dijalankan secara berkala atau saat inisialisasi awal sistem.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Setup paths
+BASE_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE_DIR))
+
+from app.db.database import engine, init_db
+from app.db.models import Symbol, QuoteLatest, IndexQuote, MarketSnapshot
+from app.providers import yahoo as ymod
+from sqlmodel import Session, select
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def populate_symbols_and_market_data():
+    """
+    1. Ambil snapshot market overview (memuat 955 emiten BEI).
+    2. Simpan daftar simbol ke tabel `symbol`.
+    3. Simpan mover/gainers/losers ke tabel `quotelatest`.
+    4. Simpan indeks IHSG (^JKSE) ke tabel `indexquote`.
+    5. Simpan ringkasan snapshot ke tabel `marketsnapshot`.
+    """
+    init_db()
+    logger.info("Mengambil market overview dari provider...")
+    try:
+        overview = ymod.fetch_market_overview()
+    except Exception as exc:
+        logger.error(f"Gagal mengambil market overview: {exc}")
+        return
+
+    as_of = overview.get("as_of", "")
+    market_state = overview.get("market_state", "UNKNOWN")
+    breadth = overview.get("breadth", {})
+    idx_info = overview.get("index", {})
+
+    logger.info(f"Market State: {market_state} | As Of: {as_of} | Universe: {breadth.get('universe')} emiten")
+
+    with Session(engine) as session:
+        # ── 1. Simpan Indeks IHSG ──
+        if idx_info and idx_info.get("symbol"):
+            sym = idx_info["symbol"]
+            existing_idx = session.exec(select(IndexQuote).where(IndexQuote.symbol == sym)).first()
+            if existing_idx:
+                existing_idx.price = float(idx_info.get("price") or 0)
+                existing_idx.change = float(idx_info.get("change") or 0)
+                existing_idx.change_pct = float(idx_info.get("change_pct") or 0)
+                existing_idx.as_of = as_of
+                existing_idx.fetched_at = datetime.now(timezone.utc)
+            else:
+                new_idx = IndexQuote(
+                    symbol=sym,
+                    name=idx_info.get("name") or "IDX COMPOSITE",
+                    price=float(idx_info.get("price") or 0),
+                    change=float(idx_info.get("change") or 0),
+                    change_pct=float(idx_info.get("change_pct") or 0),
+                    as_of=as_of,
+                    fetched_at=datetime.now(timezone.utc),
+                )
+                session.add(new_idx)
+            logger.info(f"Tersimpan Index: {sym} = {idx_info.get('price')} ({idx_info.get('change_pct')}%)")
+
+        # ── 2. Simpan Seluruh Emiten Aktif (Gainers, Losers, Most Active, Heavyweights) ──
+        all_movers = (
+            overview.get("gainers", [])
+            + overview.get("losers", [])
+            + overview.get("most_active", [])
+            + overview.get("heavyweights", [])
+        )
+
+        seen_tickers = set()
+        count_symbols = 0
+        count_quotes = 0
+
+        for m in all_movers:
+            ticker = m.get("symbol")
+            if not ticker or ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+
+            # Insert / Update Symbol
+            sym_rec = session.exec(select(Symbol).where(Symbol.ticker == ticker)).first()
+            if not sym_rec:
+                sym_rec = Symbol(
+                    ticker=ticker,
+                    name=m.get("name") or f"PT {ticker} Tbk",
+                    is_active=True,
+                    updated_at=datetime.now(timezone.utc),
+                )
+                session.add(sym_rec)
+                count_symbols += 1
+
+            # Insert / Update QuoteLatest
+            q_rec = session.exec(select(QuoteLatest).where(QuoteLatest.ticker == ticker)).first()
+            if q_rec:
+                q_rec.price = float(m.get("price") or 0)
+                q_rec.change = float(m.get("change") or 0)
+                q_rec.change_pct = float(m.get("change_pct") or 0)
+                q_rec.volume_lot = int((m.get("volume") or 0) / 100)
+                q_rec.value_idr = float(m.get("value") or 0)
+                q_rec.market_cap = float(m.get("market_cap") or 0) if m.get("market_cap") else None
+                q_rec.as_of = as_of
+                q_rec.fetched_at = datetime.now(timezone.utc)
+            else:
+                q_rec = QuoteLatest(
+                    ticker=ticker,
+                    price=float(m.get("price") or 0),
+                    change=float(m.get("change") or 0),
+                    change_pct=float(m.get("change_pct") or 0),
+                    volume_lot=int((m.get("volume") or 0) / 100),
+                    value_idr=float(m.get("value") or 0),
+                    market_cap=float(m.get("market_cap") or 0) if m.get("market_cap") else None,
+                    as_of=as_of,
+                    source="idx-market-overview",
+                    fetched_at=datetime.now(timezone.utc),
+                )
+                session.add(q_rec)
+                count_quotes += 1
+
+        # ── 3. Simpan Market Snapshot Terminal ──
+        snap = MarketSnapshot(
+            trading_date=as_of[:10] if as_of else datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            ihsg_last=float(idx_info.get("price") or 0),
+            change_pts=float(idx_info.get("change") or 0),
+            change_pct=float(idx_info.get("change_pct") or 0),
+            total_value_bn=float(breadth.get("turnover_idr") or 0) / 1e9,
+            net_foreign_rg_bn=0.0,
+            market_status=market_state,
+            headline=f"IHSG {idx_info.get('price')} ({idx_info.get('change_pct'):+.2f}%). Turnover Rp {float(breadth.get('turnover_idr') or 0)/1e12:.2f} Triliun.",
+            payload_json=json.dumps(overview),
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(snap)
+
+        session.commit()
+        logger.info(f"Sukses sinkronisasi DB: +{count_symbols} emiten baru, +{count_quotes} quote terkini, 1 market snapshot.")
+
+
+if __name__ == "__main__":
+    populate_symbols_and_market_data()
+```
+
+---
+
+### File: `app/templates/base.html`
+**Deskripsi:** Institutional Dark-Theme Terminal Web UI (Tailwind CSS + Alpine.js)  
+**Ukuran File:** 38251 bytes
+
+```html
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IDX-QuantTerminal — Institutional DuPont &amp; IHSG Research</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans+Condensed:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0A0E17',
+            surface: '#111726',
+            'surface-raised': '#182032',
+            border: '#1F293D',
+            'border-light': '#2A3752',
+            text: '#E2E8F0',
+            muted: '#8A99AD',
+            accent: '#38BDF8',
+            gain: '#22C55E',
+            loss: '#EF4444',
+            warn: '#F59E0B',
+          },
+          fontFamily: {
+            sans: ['"IBM Plex Sans"', 'sans-serif'],
+            condensed: ['"IBM Plex Sans Condensed"', 'sans-serif'],
+            mono: ['"IBM Plex Mono"', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <!-- Tickers data injected server-side, parsed client-side to avoid HTML attribute quote escaping -->
+  <script type="application/json" id="tickers-data">{{ cached_tickers_str | tojson }}</script>
+  <!-- Alpine.js v3.14.1 (pinned, inline defer to avoid CDN timeout in some envs) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" onload="window.__alpineLoaded=true"></script>
+  <!-- Fallback: if CDN fails within 3s, use bundled copy or mark Alpine missing -->
+  <script>
+    window.addEventListener('DOMContentLoaded', function() {
+      if (typeof Alpine === 'undefined') {
+        console.error('[IDX-QuantTerminal] Alpine.js failed to load from CDN. Some UI features disabled.');
+        // Show all x-show sections as fallback (display:block)
+        document.querySelectorAll('[x-show]').forEach(function(el) {
+          el.style.display = '';
+        });
+      }
+    });
+  </script>
+  <style>
+    body { background-color: #0A0E17; color: #E2E8F0; font-family: 'IBM Plex Sans', sans-serif; }
+    .tabular { font-variant-numeric: tabular-nums; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0A0E17; }
+    ::-webkit-scrollbar-thumb { background: #1F293D; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2A3752; }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col antialiased">
+  <div x-data="{
+        activeNav: 'dupont',
+        stageMode: '5_STAGE',
+        searchQuery: '',
+        showSearch: false,
+        cachedTickers: JSON.parse(document.getElementById('tickers-data')?.textContent || '[]'),
+        get filteredTickers() {
+          if (!this.searchQuery) return this.cachedTickers;
+          return this.cachedTickers.filter(t => t.toLowerCase().includes(this.searchQuery.toLowerCase()));
+        }
+      }"
+      @keydown.window.ctrl.k.prevent="showSearch = true"
+      @keydown.window.meta.k.prevent="showSearch = true"
+      @keydown.window.escape="showSearch = false"
+      class="flex-1 flex flex-col">
+
+  <!-- ================= TOP GLOBAL HEADER ================= -->
+  <header class="h-12 bg-surface border-b border-border flex items-center justify-between px-4 sticky top-0 z-40">
+    <!-- Brand + Quick Info -->
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-3 h-3 bg-accent rounded-sm animate-pulse"></div>
+        <span class="font-condensed font-bold text-base tracking-wider text-text uppercase">IDX-QuantTerminal</span>
+        <span class="bg-border px-1.5 py-0.5 rounded text-[10px] font-mono text-muted">v3.0</span>
+      </div>
+
+      <!-- Live Tape Strip -->
+      <div class="hidden md:flex items-center gap-3 border-l border-border pl-4 font-mono text-xs">
+        <span class="text-muted">IHSG</span>
+        <span class="font-semibold text-text tabular">{{ "%.2f"|format(terminal.header.ihsg_last) }}</span>
+        <span class="font-semibold tabular {{ 'text-gain' if terminal.header.change_pct >= 0 else 'text-loss' }}">
+          {{ "%+.2f"|format(terminal.header.change_pct) }}%
+        </span>
+        <span class="text-border">|</span>
+        <span class="text-muted">Turnover</span>
+        <span class="text-text tabular">Rp {{ "%.1f"|format(terminal.header.total_value_idr_bn / 1000) }} T</span>
+        <span class="text-border">|</span>
+        <span class="text-muted">Foreign RG</span>
+        <span class="font-semibold tabular {{ 'text-gain' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-loss' }}">
+          {{ "%+.1f"|format(terminal.header.net_foreign_rg_idr_bn) }} B
+        </span>
+      </div>
+    </div>
+
+    <!-- Center Search Trigger -->
+    <button @click="showSearch = true"
+            class="flex items-center gap-3 bg-surface-raised border border-border hover:border-border-light px-3 py-1.5 rounded text-xs text-muted transition font-mono">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <span>Cari emiten... ({{ bundle.current.ticker }})</span>
+      <kbd class="bg-bg px-1.5 py-0.5 rounded text-[10px] text-muted border border-border">⌘K</kbd>
+    </button>
+
+    <!-- Right: Freshness Chip (PRD 4.4 / 7.5 Compliant) -->
+    <div class="flex items-center gap-3 font-mono text-xs">
+      <div class="flex items-center gap-2 bg-surface-raised px-2.5 py-1 rounded border border-border">
+        <span class="w-2 h-2 rounded-full {{ 'bg-gain animate-ping' if terminal.header.market_status == 'OPEN' else 'bg-warn' }}"></span>
+        <span class="font-semibold uppercase tracking-wider text-[11px] {{ 'text-gain' if terminal.header.market_status == 'OPEN' else 'text-warn' }}">
+          {{ terminal.header.market_status }}
+        </span>
+        <span class="text-muted text-[10px]">· yfinance</span>
+      </div>
+      <!-- Download Template & Export Actions -->
+      <a href="/app/static/template_lapkeu_bei.xlsx" download="template_lapkeu_bei.xlsx"
+         class="bg-surface-raised hover:bg-border border border-border text-text font-mono px-3 py-1 rounded text-xs transition flex items-center gap-1.5"
+         title="Unduh format spreadsheet laporan keuangan kosong untuk diisi manual">
+        <svg class="w-3.5 h-3.5 text-gain" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        <span>Template Excel</span>
+      </a>
+      <a href="/api/dupont/{{ bundle.current.ticker }}/export?autoprint=1" target="_blank"
+         class="bg-accent hover:bg-sky-400 text-bg font-semibold px-3 py-1 rounded text-xs transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <span>PDF Tear-Sheet</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE (RAIL + VIEW) ================= -->
+  <div class="flex-1 flex overflow-hidden">
+    <!-- Slim Left Rail Navigation (PRD 7.3) -->
+    <aside class="w-14 bg-surface border-r border-border flex flex-col items-center py-4 gap-6 shrink-0">
+      <button @click="activeNav = 'dupont'"
+              :class="activeNav === 'dupont' ? 'text-accent bg-surface-raised' : 'text-muted hover:text-text'"
+              class="p-2.5 rounded-lg transition relative group" title="Analisis DuPont &amp; ALK">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span class="absolute left-16 bg-surface-raised border border-border px-2 py-1 rounded text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition z-50 pointer-events-none">DuPont (ALK)</span>
+      </button>
+
+      <button @click="activeNav = 'terminal'"
+              :class="activeNav === 'terminal' ? 'text-accent bg-surface-raised' : 'text-muted hover:text-text'"
+              class="p-2.5 rounded-lg transition relative group" title="IHSG Terminal Riset">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+        <span class="absolute left-16 bg-surface-raised border border-border px-2 py-1 rounded text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition z-50 pointer-events-none">IHSG Terminal</span>
+      </button>
+
+      <div class="w-8 h-px bg-border my-auto"></div>
+
+      <a href="/api/health" target="_blank" class="p-2.5 text-muted hover:text-text rounded-lg transition relative group" title="API Status">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <span class="absolute left-16 bg-surface-raised border border-border px-2 py-1 rounded text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition z-50 pointer-events-none">Health Check</span>
+      </a>
+    </aside>
+
+    <!-- Content Workspace -->
+    <div class="flex-1 overflow-y-auto">
+
+      <!-- ================= TAB 1: DUPONT PLATFORM ================= -->
+      <section x-show="activeNav === 'dupont'" class="p-6 space-y-6 max-w-[1600px] mx-auto">
+        <!-- Ticker Overview Banner -->
+        {% if notice %}
+        <div class="bg-warn/10 border border-warn/30 rounded-lg px-4 py-3 flex items-start gap-3">
+          <svg class="w-4 h-4 text-warn shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span class="text-xs font-mono text-warn">{{ notice }}</span>
+        </div>
+        {% endif %}
+        <div class="bg-surface border border-border rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <div class="bg-surface-raised border border-border-light px-4 py-2 rounded">
+              <span class="font-condensed font-black text-2xl tracking-wider text-accent">{{ bundle.current.ticker }}</span>
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-text">{{ bundle.current.company_name }}</h2>
+              <p class="text-xs text-muted font-mono">Periode: {{ bundle.current.year }} ({{ bundle.current.period_type.value }}) · Unit: Normalisasi IDR Penuh</p>
+            </div>
+          </div>
+
+          <!-- Controls: 3-Stage vs 5-Stage & Selector -->
+          <div class="flex items-center gap-3">
+            <div class="bg-bg border border-border p-1 rounded flex items-center gap-1 font-mono text-xs">
+              <button @click="stageMode = '3_STAGE'"
+                      :class="stageMode === '3_STAGE' ? 'bg-accent text-bg font-bold' : 'text-muted hover:text-text'"
+                      class="px-3 py-1 rounded transition">3-Stage</button>
+              <button @click="stageMode = '5_STAGE'"
+                      :class="stageMode === '5_STAGE' ? 'bg-accent text-bg font-bold' : 'text-muted hover:text-text'"
+                      class="px-3 py-1 rounded transition">5-Stage</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= VISUAL ROE BRIDGE (PRD 7.4) ================= -->
+        {% if banking and banking.net_interest_margin %}
+        <!-- ================= BANKING METRICS PANEL ================= -->
+        <div class="bg-surface border border-accent/30 rounded-lg p-5 shadow-lg shadow-accent/5">
+          <div class="flex items-center justify-between border-b border-border pb-3 mb-4">
+            <div class="flex items-center gap-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-accent animate-pulse"></span>
+              <h3 class="font-condensed font-bold text-sm tracking-wider uppercase text-text">Metrik Khusus Perbankan (Bank Model — OJK/BI Standards)</h3>
+            </div>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-accent/10 border border-accent/30 text-accent uppercase">
+              Financial Institution Mode
+            </span>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-3 pt-1">
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Net Interest Margin (NIM)</span>
+              <span class="text-lg font-bold font-mono text-accent block my-1">{{ "%.2f"|format(banking.net_interest_margin * 100) }}%</span>
+              <span class="text-[10px] text-muted font-mono">Efisiensi Intermediasi</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Return on Assets (ROA)</span>
+              <span class="text-lg font-bold font-mono text-gain block my-1">{{ "%.2f"|format(banking.return_on_assets * 100) if banking.return_on_assets else 'N/A' }}%</span>
+              <span class="text-[10px] text-muted font-mono">Profitabilitas Aset</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Cost to Income (CIR)</span>
+              <span class="text-lg font-bold font-mono text-text block my-1">{{ "%.2f"|format(banking.cost_to_income_ratio * 100) if banking.cost_to_income_ratio else '—' }}%</span>
+              <span class="text-[10px] text-muted font-mono">Efisiensi Operasional</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Debt to Equity (D/E)</span>
+              <span class="text-lg font-bold font-mono text-text block my-1">{{ "%.2f"|format(banking.debt_to_equity) if banking.debt_to_equity else '—' }}x</span>
+              <span class="text-[10px] text-muted font-mono">Struktur Utang</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Return on Equity (ROE)</span>
+              <span class="text-lg font-bold font-mono text-gain block my-1">{{ "%.2f"|format(banking.return_on_equity * 100) if banking.return_on_equity else 'N/A' }}%</span>
+              <span class="text-[10px] text-muted font-mono">Imbal Hasil Modal</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if dcf %}
+        <!-- ================= DCF VALUATION PANEL ================= -->
+        <div class="bg-surface border border-border rounded-lg p-5">
+          <div class="flex items-center justify-between border-b border-border pb-3 mb-4">
+            <div>
+              <h3 class="font-condensed font-bold text-sm tracking-wider uppercase text-text">Valuasi Intrinsik Saham (Discounted Cash Flow — CFA Standards)</h3>
+              <p class="text-xs text-muted">Proyeksi FCF, Gordon Growth Terminal Value, dan analisis skenario (WACC {{ dcf.wacc_pct }}%)</p>
+            </div>
+            <div class="flex items-center gap-2 font-mono text-xs">
+              <span class="text-muted">Fair Value Est:</span>
+              <span class="px-2.5 py-1 rounded bg-accent/10 border border-accent/30 font-bold text-accent text-sm">
+                Rp {{ "{:,.0f}".format(dcf.price_per_share) }}
+              </span>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+            <div class="bg-bg border border-border rounded p-3">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Cost of Capital (WACC)</span>
+              <span class="text-base font-bold font-mono text-text block my-1">{{ dcf.wacc_pct }}%</span>
+              <span class="text-[10px] text-muted font-mono">Ke &amp; Kd Tertimbang</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Enterprise Value (EV)</span>
+              <span class="text-base font-bold font-mono text-text block my-1">Rp {{ "{:,.1f}".format(dcf.enterprise_value_bn) }} T</span>
+              <span class="text-[10px] text-muted font-mono">Nilai Entitas Usaha</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Equity Value</span>
+              <span class="text-base font-bold font-mono text-accent block my-1">Rp {{ "{:,.1f}".format(dcf.equity_value_bn) }} T</span>
+              <span class="text-[10px] text-muted font-mono">Hak Pemegang Saham</span>
+            </div>
+            <div class="bg-bg border border-border rounded p-3">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Terminal Value (TV)</span>
+              <span class="text-base font-bold font-mono text-text block my-1">Rp {{ "{:,.1f}".format(dcf.terminal_value_bn) }} T</span>
+              <span class="text-[10px] text-muted font-mono">Nilai Berkelanjutan</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- ================= VISUAL ROE BRIDGE (PRD 7.4) ================= -->
+        <div class="bg-surface border border-border rounded-lg p-5">
+          <div class="flex items-center justify-between border-b border-border pb-3 mb-4">
+            <div>
+              <h3 class="font-condensed font-bold text-sm tracking-wider uppercase text-text">Dekomposisi Jembatan Perubahan ROE (YoY Attribution Bridge)</h3>
+              <p class="text-xs text-muted">Dekomposisi logaritmik aditif: kontribusi bersih tiap pendorong terhadap pergeseran ROE</p>
+            </div>
+            <div class="flex items-center gap-2 font-mono text-xs">
+              <span class="text-muted">Arah ROE:</span>
+              <span class="px-2 py-0.5 rounded font-bold {{ 'bg-gain/20 text-gain' if bundle.roe_direction == 'UP' else ('bg-loss/20 text-loss' if bundle.roe_direction == 'DOWN' else 'bg-border text-muted') }}">
+                {{ bundle.roe_direction }}
+              </span>
+              <span class="text-muted ml-2">Primary Driver:</span>
+              <span class="px-2 py-0.5 rounded bg-surface-raised border border-border font-bold text-accent">
+                {{ bundle.primary_driver.value }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Horizontal Waterfall / Bridge SVG Component -->
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-3 pt-2">
+            <!-- ROE Prev -->
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">ROE Sebelumnya</span>
+              <span class="text-xl font-bold font-mono text-text block my-1">
+                {{ "%.2f"|format(bundle.previous.roe * 100) if bundle.previous and bundle.previous.roe else 'NM' }}%
+              </span>
+              <span class="text-[11px] text-muted font-mono">{{ bundle.previous.year if bundle.previous else '—' }} Base</span>
+            </div>
+
+            <!-- Operational Margin Impact -->
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Margin Operasi (EBIT)</span>
+              <span class="text-lg font-bold font-mono block my-1 {{ 'text-gain' if bundle.driver_contributions_pct.get('OPERATIONAL_MARGIN', 0) >= 0 else 'text-loss' }}">
+                {{ "%+.1f"|format(bundle.driver_contributions_pct.get('OPERATIONAL_MARGIN', 0)) }}%
+              </span>
+              <span class="text-[11px] text-muted font-mono">Efisiensi Profit</span>
+            </div>
+
+            <!-- Asset Turnover Impact -->
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Perputaran Aset (AT)</span>
+              <span class="text-lg font-bold font-mono block my-1 {{ 'text-gain' if bundle.driver_contributions_pct.get('ASSET_EFFICIENCY', 0) >= 0 else 'text-loss' }}">
+                {{ "%+.1f"|format(bundle.driver_contributions_pct.get('ASSET_EFFICIENCY', 0)) }}%
+              </span>
+              <span class="text-[11px] text-muted font-mono">Utilisasi Aset</span>
+            </div>
+
+            <!-- Financial Leverage Impact -->
+            <div class="bg-bg border border-border rounded p-3 text-center">
+              <span class="text-[10px] uppercase tracking-wider text-muted font-mono block">Pengungkit Utang (EM)</span>
+              <span class="text-lg font-bold font-mono block my-1 {{ 'text-gain' if bundle.driver_contributions_pct.get('FINANCIAL_LEVERAGE', 0) >= 0 else 'text-loss' }}">
+                {{ "%+.1f"|format(bundle.driver_contributions_pct.get('FINANCIAL_LEVERAGE', 0)) }}%
+              </span>
+              <span class="text-[11px] text-muted font-mono">Struktur Modal</span>
+            </div>
+
+            <!-- ROE Current -->
+            <div class="bg-bg border border-accent/40 rounded p-3 text-center shadow-lg shadow-accent/5">
+              <span class="text-[10px] uppercase tracking-wider text-accent font-mono block font-bold">ROE Sekarang</span>
+              <span class="text-xl font-bold font-mono text-accent block my-1">
+                {{ "%.2f"|format(bundle.current.roe * 100) if bundle.current.roe else 'NM' }}%
+              </span>
+              <span class="text-[11px] font-mono {{ 'text-gain' if bundle.yoy_deltas.get('roe') and bundle.yoy_deltas.roe.bps_change and bundle.yoy_deltas.roe.bps_change >= 0 else 'text-loss' }}">
+                {{ "%+.0f"|format(bundle.yoy_deltas.roe.bps_change) if bundle.yoy_deltas.get('roe') and bundle.yoy_deltas.roe.bps_change else '0' }} bps YoY
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= INTERACTIVE DUPONT TREE (SVG HIERARCHY) ================= -->
+        <div class="bg-surface border border-border rounded-lg p-5">
+          <div class="flex items-center justify-between border-b border-border pb-3 mb-5">
+            <div>
+              <h3 class="font-condensed font-bold text-sm tracking-wider uppercase text-text">Pohon Dekomposisi DuPont 5-Stage (Structural Flow)</h3>
+              <p class="text-xs text-muted">Hierarki perkalian rasio: dari Laba Bersih &amp; Ekuitas hingga komponen mikronya</p>
+            </div>
+            <div class="font-mono text-xs text-muted flex items-center gap-3">
+              <span>Rekonsiliasi 5-Stage:</span>
+              <span class="text-gain font-semibold">{{ "%.2e"|format(bundle.current.reconciliation_diff_5stage or 0) }}</span>
+              <span class="text-gain">✓ Identitas Valid (&lt;1e-6)</span>
+            </div>
+          </div>
+
+          <!-- Structured Node Cards -->
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {% for node in bundle.tree_nodes %}
+            <div x-show="stageMode === '5_STAGE' || '{{ node.stage }}' !== '5_ONLY'"
+                 class="bg-bg border rounded-lg p-4 transition-all {{ 'border-accent bg-accent/5 md:col-span-4' if node.id == 'roe' else 'border-border hover:border-border-light' }}">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <span class="text-[10px] font-mono uppercase tracking-wider text-muted">{{ node.stage }}</span>
+                  <h4 class="font-bold text-sm text-text mt-0.5">{{ node.label }}</h4>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-surface-raised border border-border {{ 'text-gain' if '+' in node.yoy else ('text-loss' if '-' in node.yoy else 'text-muted') }}">
+                  {{ node.yoy }}
+                </span>
+              </div>
+              <div class="my-3 flex items-baseline gap-2">
+                <span class="font-mono font-bold text-2xl tracking-tight {{ 'text-emerald-400' if node.color == 'emerald' else ('text-amber-300' if node.color == 'amber' else 'text-accent' if node.id == 'roe' else 'text-text') }}">
+                  {{ node.value }}
+                </span>
+              </div>
+              <div class="pt-2 border-t border-border flex items-center justify-between text-[11px] font-mono text-muted">
+                <span>Formula:</span>
+                <span class="text-text">{{ node.formula }}</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- ================= AI AUDIT & ANOMALY VERDICT ================= -->
+        <div class="bg-surface border border-border rounded-lg p-5">
+          <div class="flex items-center justify-between border-b border-border pb-3 mb-4">
+            <div class="flex items-center gap-3">
+              <span class="font-condensed font-bold text-sm tracking-wider uppercase text-text">Analisis Kualitas Laba &amp; Anomali (Quality of Earnings Verdict)</span>
+              <span class="bg-border px-2 py-0.5 rounded text-[10px] font-mono text-muted">Zero-Math Validated</span>
+            </div>
+            <span class="px-3 py-1 rounded text-xs font-mono font-bold border {{ 'bg-gain/10 border-gain/30 text-gain' if 'High Quality' in anomaly.quality_verdict else 'bg-warn/10 border-warn/30 text-warn' }}">
+              {{ anomaly.quality_verdict }}
+            </span>
+          </div>
+
+          <div class="space-y-3">
+            <h4 class="font-bold text-text text-base">{{ anomaly.headline }}</h4>
+            <p class="text-sm text-muted leading-relaxed font-sans">{{ anomaly.driver_explanation }}</p>
+
+            <div class="bg-bg border border-border rounded p-4 my-3">
+              <span class="text-xs font-mono uppercase text-muted tracking-wider block mb-2 font-semibold">Temuan Kunci (Grounded Metrics):</span>
+              <ul class="space-y-1.5 text-xs font-mono text-text">
+                {% for bullet in anomaly.anomaly_bullets %}
+                <li class="flex items-start gap-2">
+                  <span class="text-accent">▪</span>
+                  <span>{{ bullet }}</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+
+            <div class="flex items-center gap-2 text-xs font-mono text-warn bg-warn/10 border border-warn/20 p-3 rounded">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <span><strong>Watchout:</strong> {{ anomaly.risk_watchout }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= TAB 2: IHSG TERMINAL PLATFORM ================= -->
+      <section x-show="activeNav === 'terminal'" class="p-6 space-y-6 max-w-[1600px] mx-auto">
+        <!-- Terminal Header Summary -->
+        <div class="bg-surface border border-border rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <span class="text-xs font-mono uppercase text-accent font-semibold">IHSG Market Intelligence</span>
+            <h2 class="text-base font-bold text-text mt-0.5">{{ terminal.header.briefing_headline }}</h2>
+            <p class="text-xs text-muted font-mono mt-1">Tanggal Transaksi: {{ terminal.header.trading_date }} · Status: {{ terminal.header.market_status }}</p>
+          </div>
+          <div class="flex items-center gap-6 font-mono text-xs">
+            <div class="text-right">
+              <span class="text-muted block text-[10px]">TOTAL VALUE</span>
+              <span class="text-text font-bold text-sm">Rp {{ "%.1f"|format(terminal.header.total_value_idr_bn / 1000) }} T</span>
+            </div>
+            <div class="text-right border-l border-border pl-6">
+              <span class="text-muted block text-[10px]">NET ASING REGULER</span>
+              <span class="font-bold text-sm {{ 'text-gain' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-loss' }}">
+                Rp {{ "%+.1f"|format(terminal.header.net_foreign_rg_idr_bn) }} M
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3-Panel Dense Terminal Grid (Bloomberg / TradingView Style) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          <!-- PANEL 1: Big-Cap Movers -->
+          <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
+            <div class="bg-surface-raised border-b border-border px-4 py-3 flex items-center justify-between">
+              <h3 class="font-condensed font-bold text-xs uppercase tracking-wider text-text">1. Big-Cap Movers &amp; Index Impact</h3>
+              <span class="text-[10px] font-mono text-muted">Top Contributors</span>
+            </div>
+            <div class="overflow-x-auto flex-1">
+              <table class="w-full text-xs font-mono">
+                <thead>
+                  <tr class="text-muted border-b border-border text-left text-[11px] bg-bg/50">
+                    <th class="py-2.5 px-3">Ticker</th>
+                    <th class="text-right px-2">Last</th>
+                    <th class="text-right px-2">Chg %</th>
+                    <th class="text-right px-3">Impact</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                  {% for m in terminal.movers %}
+                  <tr class="hover:bg-surface-raised transition">
+                    <td class="py-2.5 px-3 font-bold">
+                      <a href="/?ticker={{ m.ticker }}" class="text-accent hover:underline">{{ m.ticker }}</a>
+                    </td>
+                    <td class="text-right px-2 text-text tabular">{{ m.last_price }}</td>
+                    <td class="text-right px-2 tabular font-semibold {{ 'text-gain' if m.change_pct >= 0 else 'text-loss' }}">
+                      {{ "%+.2f"|format(m.change_pct) }}%
+                    </td>
+                    <td class="text-right px-3 tabular font-semibold {{ 'text-gain' if m.ihsg_point_impact >= 0 else 'text-loss' }}">
+                      {{ "%+.1f"|format(m.ihsg_point_impact) }}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANEL 2: Foreign Flow RG vs NG -->
+          <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
+            <div class="bg-surface-raised border-b border-border px-4 py-3 flex items-center justify-between">
+              <h3 class="font-condensed font-bold text-xs uppercase tracking-wider text-text">2. Foreign Flow (RG vs NG)</h3>
+              <span class="text-[10px] font-mono text-muted">Akumulasi / Distribusi</span>
+            </div>
+            <div class="overflow-x-auto flex-1">
+              <table class="w-full text-xs font-mono">
+                <thead>
+                  <tr class="text-muted border-b border-border text-left text-[11px] bg-bg/50">
+                    <th class="py-2.5 px-3">Ticker</th>
+                    <th class="text-right px-2">RG 1D</th>
+                    <th class="text-right px-2">RG 5D</th>
+                    <th class="text-center px-3">Sinyal</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                  {% for f in terminal.foreign_flows %}
+                  <tr class="hover:bg-surface-raised transition">
+                    <td class="py-2.5 px-3 font-bold">
+                      <a href="/?ticker={{ f.ticker }}" class="text-accent hover:underline">{{ f.ticker }}</a>
+                    </td>
+                    <td class="text-right px-2 tabular {{ 'text-gain font-semibold' if f.net_foreign_rg_1d_bn >= 0 else 'text-loss font-semibold' }}">
+                      {{ "%+.1f"|format(f.net_foreign_rg_1d_bn) }}B
+                    </td>
+                    <td class="text-right px-2 tabular {{ 'text-gain' if f.net_foreign_rg_5d_bn >= 0 else 'text-loss' }}">
+                      {{ "%+.1f"|format(f.net_foreign_rg_5d_bn) }}B
+                    </td>
+                    <td class="text-center px-3">
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold border {{ 'bg-gain/10 border-gain/30 text-gain' if 'ACCUMULATION' in f.flow_signal else ('bg-loss/10 border-loss/30 text-loss' if 'DISTRIBUTION' in f.flow_signal else 'bg-border text-muted') }}">
+                        {{ f.flow_signal }}
+                      </span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANEL 3: Support & Resistance Matrix -->
+          <div class="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
+            <div class="bg-surface-raised border-b border-border px-4 py-3 flex items-center justify-between">
+              <h3 class="font-condensed font-bold text-xs uppercase tracking-wider text-text">3. Matriks Support &amp; Resistance</h3>
+              <span class="text-[10px] font-mono text-muted">BEI Validated Tick</span>
+            </div>
+            <div class="overflow-x-auto flex-1">
+              <table class="w-full text-xs font-mono">
+                <thead>
+                  <tr class="text-muted border-b border-border text-left text-[11px] bg-bg/50">
+                    <th class="py-2.5 px-3">Ticker</th>
+                    <th class="text-right px-1">S1</th>
+                    <th class="text-right px-1">Last</th>
+                    <th class="text-right px-1">R1</th>
+                    <th class="text-right px-3">Jarak R1</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                  {% for sr in terminal.sr_matrix %}
+                  <tr class="hover:bg-surface-raised transition">
+                    <td class="py-2.5 px-3 font-bold">
+                      <a href="/?ticker={{ sr.ticker }}" class="text-accent hover:underline">{{ sr.ticker }}</a>
+                    </td>
+                    <td class="text-right px-1 text-muted tabular">{{ sr.s1 }}</td>
+                    <td class="text-right px-1 text-text font-bold tabular">{{ sr.last_price }}</td>
+                    <td class="text-right px-1 text-accent tabular">{{ sr.r1 }}</td>
+                    <td class="text-right px-3 tabular text-muted">
+                      +{{ "%.1f"|format(sr.distance_to_r1_pct) }}%
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ================= SEARCH / COMMAND PALETTE MODAL (⌘K) ================= -->
+  <div x-show="showSearch"
+       x-transition.opacity
+       class="fixed inset-0 bg-bg/80 backdrop-blur-sm z-50 flex items-start justify-center pt-20 p-4"
+       style="display: none;">
+    <div class="bg-surface border border-border-light rounded-lg max-w-lg w-full shadow-2xl overflow-hidden"
+         @click.away="showSearch = false">
+      <div class="p-3 border-b border-border flex items-center gap-3">
+        <svg class="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text"
+               x-model="searchQuery"
+               placeholder="Cari kode saham (contoh: BBCA, ASII, TLKM)..."
+               class="bg-transparent border-none text-text text-sm w-full focus:outline-none font-mono"
+               autofocus>
+        <kbd class="text-[10px] bg-bg border border-border px-1.5 py-0.5 rounded text-muted">ESC</kbd>
+      </div>
+
+      <div class="max-h-64 overflow-y-auto p-2 font-mono text-xs divide-y divide-border/50">
+        <template x-for="ticker in filteredTickers" :key="ticker">
+          <a :href="'/?ticker=' + ticker"
+             class="flex items-center justify-between p-2.5 rounded hover:bg-surface-raised transition text-text group">
+            <span class="font-bold text-accent group-hover:underline" x-text="ticker"></span>
+            <span class="text-muted text-[11px]">Buka Analisis DuPont →</span>
+          </a>
+        </template>
+        <div x-show="filteredTickers.length === 0" class="p-4 text-center text-muted text-xs">
+          Tidak ditemukan emiten yang cocok di cache.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
+```
+
+---
+

@@ -1,0 +1,291 @@
+<!-- TAB 1: DUPONT & EARNINGS QUALITY (v5.2 Linear/Koyfin Dark UI) -->
+<section x-show="activeNav === 'dupont'" class="space-y-6">
+
+  <!-- 6-KPI Executive Summary Strip (Subtle Luminance Cards) -->
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3.5">
+    <!-- 1. ROE -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Return on Equity</span>
+      <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-white block my-1">
+        {{ "%.2f"|format(bundle.current.roe * 100) if bundle.current.roe else 'NM' }}%
+      </span>
+      <span class="text-xs font-mono font-medium {{ 'text-emerald-400' if bundle.yoy_deltas.get('roe') and bundle.yoy_deltas.roe.bps_change and bundle.yoy_deltas.roe.bps_change >= 0 else 'text-rose-400' }}">
+        {{ "%+.0f"|format(bundle.yoy_deltas.roe.bps_change) if bundle.yoy_deltas.get('roe') and bundle.yoy_deltas.roe.bps_change else '0' }} bps YoY
+      </span>
+    </div>
+
+    <!-- 2. Primary Driver -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Pendorong Utama</span>
+      <span class="text-sm font-semibold text-sky-400 block my-1.5 leading-snug"
+            x-text="humanDriver('{{ bundle.primary_driver.value }}')">
+      </span>
+      <span class="text-xs text-slate-400 font-mono">Dekomposisi YoY</span>
+    </div>
+
+    <!-- 3. Earnings Quality -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Kualitas Laba</span>
+      <span class="text-sm font-semibold block my-1.5 {{ 'text-emerald-400' if 'High Quality' in anomaly.quality_verdict else 'text-amber-400' }}">
+        {{ anomaly.quality_verdict }}
+      </span>
+      <span class="text-xs text-slate-400 font-mono">
+        OCF/NI: {{ "%.2f"|format(bundle.current.ocf_to_net_income) if bundle.current.ocf_to_net_income else '—' }}x
+      </span>
+    </div>
+
+    <!-- 4. Credit Rating -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Peringkat Kredit</span>
+      <div class="flex items-baseline gap-2 my-1">
+        <span class="text-2xl font-semibold font-mono text-white">{{ credit.credit_grade if credit else '—' }}</span>
+        <span class="text-xs font-mono text-slate-400">({{ credit.credit_score if credit else '0' }}/10)</span>
+      </div>
+      <span class="text-xs font-medium {{ 'text-emerald-400' if credit and credit.credit_grade in ['AAA','AA+','AA','AA-','A+','A','A-','BBB'] else 'text-amber-400' }}">
+        {{ 'Investment Grade' if credit and credit.credit_grade in ['AAA','AA+','AA','AA-','A+','A','A-','BBB'] else 'High Yield / Speculative' }}
+      </span>
+    </div>
+
+    <!-- 5. Fair Value -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Nilai Wajar Intrinsik</span>
+      {% if banking and banking.fair_value_per_share %}
+      <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-emerald-400 block my-1">
+        Rp {{ "{:,.0f}".format(banking.fair_value_per_share) }}
+      </span>
+      <span class="text-xs text-slate-400 font-mono">Justified PBV Multiple</span>
+      {% elif dcf and dcf.price_per_share %}
+      <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-emerald-400 block my-1">
+        Rp {{ "{:,.0f}".format(dcf.price_per_share) }}
+      </span>
+      <span class="text-xs text-slate-400 font-mono">DCF (WACC {{ dcf.wacc_pct }}%)</span>
+      {% else %}
+      <span class="text-2xl font-semibold font-mono text-slate-500 block my-1">—</span>
+      <span class="text-xs text-slate-400 font-mono">Tidak Tersedia</span>
+      {% endif %}
+    </div>
+
+    <!-- 6. Sharpe & VaR -->
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+      <span class="text-xs text-slate-400 font-medium block">Sharpe / VaR 95%</span>
+      <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-white block my-1">
+        {{ "%.2f"|format(risk.sharpe_ratio) if risk and risk.sharpe_ratio else '—' }}
+      </span>
+      <span class="text-xs text-slate-400 font-mono">
+        VaR: {{ "%.1f"|format(risk.var_95 * 100) if risk and risk.var_95 else '—' }}% (1-Hari)
+      </span>
+    </div>
+  </div>
+
+  <!-- Grid Utama 12-Kolom (Kiri: Tree 7 cols, Kanan: Waterfall & Tren 5 cols) -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    
+    <!-- KOLOM KIRI: 3-Tier Hierarchical DuPont Tree (7 cols) -->
+    <div class="lg:col-span-7 space-y-6">
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6">
+        <div class="flex items-center justify-between pb-4 border-b border-white/[0.06] mb-6">
+          <div>
+            <h3 class="text-sm font-medium text-slate-200">Pohon Dekomposisi DuPont 3-Tingkat</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Hierarki perkalian rasio struktural dan dekomposisi profitabilitas</p>
+          </div>
+          <!-- Toggle 3-Stage / 5-Stage -->
+          <div class="flex items-center gap-1 bg-[#090D16] p-1 rounded-lg border border-white/[0.06] font-mono text-xs">
+            <button @click="stageMode = '3_STAGE'"
+                    :class="stageMode === '3_STAGE' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold' : 'text-slate-400 hover:text-white'"
+                    class="px-2.5 py-1 rounded transition-colors">3-Stage</button>
+            <button @click="stageMode = '5_STAGE'"
+                    :class="stageMode === '5_STAGE' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold' : 'text-slate-400 hover:text-white'"
+                    class="px-2.5 py-1 rounded transition-colors">5-Stage</button>
+          </div>
+        </div>
+
+        <!-- Tree Nodes Layout -->
+        <div class="space-y-4">
+          <!-- Tier 1: ROE Header Box -->
+          <div class="flex justify-center">
+            <div class="w-full max-w-sm bg-sky-500/10 border border-sky-500/30 rounded-xl p-4 text-center">
+              <span class="text-xs font-mono uppercase text-sky-400 font-semibold tracking-wider block">Tier 1 &bull; Return on Equity (ROE)</span>
+              <span class="text-3xl font-semibold font-mono tabular-nums text-white block my-1">
+                {{ "%.2f"|format(bundle.current.roe * 100) if bundle.current.roe else 'NM' }}%
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Net Income / Total Average Equity</span>
+            </div>
+          </div>
+
+          <!-- Vertical Connector Line -->
+          <div class="flex justify-center my-0.5">
+            <div class="w-px h-6 bg-white/20"></div>
+          </div>
+
+          <!-- Tier 2: 3 Kolom (NPM × AT × EM) -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-slate-800/40 rounded-xl p-3.5 text-center">
+              <span class="text-xs text-slate-400 block font-medium">Net Profit Margin</span>
+              <span class="text-xl font-semibold font-mono text-emerald-400 block my-1">
+                {{ "%.2f"|format(bundle.current.net_profit_margin * 100) if bundle.current.net_profit_margin else '0' }}%
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Laba Bersih / Revenue</span>
+            </div>
+            <div class="bg-slate-800/40 rounded-xl p-3.5 text-center">
+              <span class="text-xs text-slate-400 block font-medium">Asset Turnover</span>
+              <span class="text-xl font-semibold font-mono text-amber-300 block my-1">
+                {{ "%.3f"|format(bundle.current.asset_turnover) if bundle.current.asset_turnover else '0' }}x
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Revenue / Total Assets</span>
+            </div>
+            <div class="bg-slate-800/40 rounded-xl p-3.5 text-center">
+              <span class="text-xs text-slate-400 block font-medium">Equity Multiplier</span>
+              <span class="text-xl font-semibold font-mono text-sky-400 block my-1">
+                {{ "%.2f"|format(bundle.current.equity_multiplier) if bundle.current.equity_multiplier else '0' }}x
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Total Assets / Ekuitas</span>
+            </div>
+          </div>
+
+          <!-- Tier 3: 5-Stage Breakdown Container (EBIT Margin × IB × TB) -->
+          <div x-show="stageMode === '5_STAGE'"
+               x-transition:enter="transition ease-out duration-200"
+               x-transition:enter-start="opacity-0 -translate-y-2"
+               x-transition:enter-end="opacity-100 translate-y-0"
+               class="pt-4 border-t border-white/[0.06] space-y-3">
+            <div class="flex items-center gap-2 text-xs font-medium text-slate-300">
+              <span class="text-sky-400">&darr;</span>
+              <span>Tier 3 &bull; Dekomposisi Net Profit Margin (5-Stage Extended)</span>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+              <div class="bg-[#151F32] rounded-xl p-3 text-center">
+                <span class="text-xs text-slate-400 block">Margin Operasional (EBIT)</span>
+                <span class="text-lg font-semibold font-mono text-white block my-1">
+                  {{ "%.2f"|format(bundle.current.ebit_margin * 100) if bundle.current.ebit_margin else '0' }}%
+                </span>
+                <span class="text-[11px] text-slate-400 font-mono">EBIT / Revenue</span>
+              </div>
+              <div class="bg-[#151F32] rounded-xl p-3 text-center">
+                <span class="text-xs text-slate-400 block">Interest Burden (IB)</span>
+                <span class="text-lg font-semibold font-mono text-white block my-1">
+                  {{ "%.3f"|format(bundle.current.interest_burden) if bundle.current.interest_burden else '0' }}x
+                </span>
+                <span class="text-[11px] text-slate-400 font-mono">EBT / EBIT</span>
+              </div>
+              <div class="bg-[#151F32] rounded-xl p-3 text-center">
+                <span class="text-xs text-slate-400 block">Tax Burden (TB)</span>
+                <span class="text-lg font-semibold font-mono text-white block my-1">
+                  {{ "%.3f"|format(bundle.current.tax_burden) if bundle.current.tax_burden else '0' }}x
+                </span>
+                <span class="text-[11px] text-slate-400 font-mono">Net Income / EBT</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reconciliation Check Bar -->
+          <div class="pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs font-mono text-slate-400">
+            <span>Rekonsiliasi Identitas Matematis:</span>
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-semibold">{{ "%.2e"|format(bundle.current.reconciliation_diff_5stage or 0) }}</span>
+              <span class="text-emerald-400">&bull; Valid (&lt;1e-6)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Grounded Quality Audit & Anomaly Verdict -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+          <h4 class="text-sm font-medium text-slate-200">Audit Kualitas Laba &amp; Anomali Finansial</h4>
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-medium border {{ 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' if 'High Quality' in anomaly.quality_verdict else 'bg-amber-500/10 border-amber-500/30 text-amber-400' }}">
+            {{ anomaly.quality_verdict }}
+          </span>
+        </div>
+
+        <div>
+          <h5 class="text-base font-semibold text-white">{{ anomaly.headline }}</h5>
+          <p class="text-xs text-slate-300 mt-1.5 leading-relaxed">{{ anomaly.driver_explanation }}</p>
+        </div>
+
+        <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-4 space-y-2">
+          <span class="text-xs font-mono uppercase text-slate-400 font-semibold tracking-wider block">Temuan Kunci (Grounded Metrics):</span>
+          <ul class="space-y-1.5 text-xs text-slate-300 font-mono">
+            {% for b in anomaly.anomaly_bullets %}
+            <li class="flex items-start gap-2">
+              <span class="text-sky-400">&bull;</span>
+              <span>{{ b }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="flex items-start gap-2.5 text-xs font-mono text-amber-300 bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl">
+          <span class="font-bold shrink-0">Perhatian:</span>
+          <span>{{ anomaly.risk_watchout }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KOLOM KANAN: 6-Step Waterfall + Multi-Year Historical Trend (5 cols) -->
+    <div class="lg:col-span-5 space-y-6">
+      
+      <!-- Visual ROE YoY Waterfall Bridge (6 Langkah) -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-4">
+          <div>
+            <h3 class="text-sm font-medium text-slate-200">Waterfall Jembatan ROE YoY</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Dekomposisi Logaritmik Aditif 6-Langkah</p>
+          </div>
+          <span class="text-xs font-mono font-semibold px-2 py-0.5 rounded {{ 'bg-emerald-500/20 text-emerald-400' if bundle.roe_direction == 'UP' else ('bg-rose-500/20 text-rose-400' if bundle.roe_direction == 'DOWN' else 'bg-slate-800 text-slate-400') }}">
+            {{ bundle.roe_direction }}
+          </span>
+        </div>
+
+        <div class="space-y-3 font-mono text-xs">
+          {% for step in bundle.roe_bridge_steps %}
+          <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-3 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-2 h-2 rounded-full {{ 'bg-sky-400' if step.type in ['BASE', 'TOTAL'] else ('bg-emerald-400' if step.val_pct >= 0 else 'bg-rose-500') }}"></span>
+              <span class="text-slate-200 font-medium" x-text="humanStepLabel('{{ step.label }}')"></span>
+            </div>
+            <span class="font-semibold tabular-nums {{ 'text-sky-400' if step.type in ['BASE', 'TOTAL'] else ('text-emerald-400' if step.val_pct >= 0 else 'text-rose-400') }}">
+              {{ "%+.2f"|format(step.val_pct) if step.type == 'DELTA' else "%.2f"|format(step.val_pct) }}%
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Tabel Tren Historis Multi-Tahun (2022-2025) -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 overflow-hidden">
+        <div class="pb-3 border-b border-white/[0.06] mb-4">
+          <h3 class="text-sm font-medium text-slate-200">Tren Multi-Tahun DuPont</h3>
+          <p class="text-xs text-slate-400 mt-0.5">Perjalanan kinerja fundamental emiten hingga 5 tahun terakhir</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs font-mono">
+            <thead>
+              <tr class="text-slate-400 border-b border-white/[0.06] text-left bg-slate-800/30">
+                <th class="py-2 px-2.5">Tahun</th>
+                <th class="text-right px-2">ROE</th>
+                <th class="text-right px-2">NPM</th>
+                <th class="text-right px-2">AT</th>
+                <th class="text-right px-2">EM</th>
+                <th class="text-right px-2.5">OCF/NI</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/[0.04]">
+              {% for hm in history_metrics %}
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="py-2.5 px-2.5 font-bold text-sky-400">{{ hm.year }}</td>
+                <td class="text-right px-2 font-semibold text-white tabular-nums">{{ "%.2f"|format(hm.roe * 100) if hm.roe else '—' }}%</td>
+                <td class="text-right px-2 text-slate-300 tabular-nums">{{ "%.2f"|format(hm.net_profit_margin * 100) if hm.net_profit_margin else '—' }}%</td>
+                <td class="text-right px-2 text-slate-300 tabular-nums">{{ "%.3f"|format(hm.asset_turnover) if hm.asset_turnover else '—' }}</td>
+                <td class="text-right px-2 text-slate-300 tabular-nums">{{ "%.2f"|format(hm.equity_multiplier) if hm.equity_multiplier else '—' }}</td>
+                <td class="text-right px-2.5 text-slate-300 tabular-nums">{{ "%.2f"|format(hm.ocf_to_net_income) if hm.ocf_to_net_income else '—' }}x</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</section>

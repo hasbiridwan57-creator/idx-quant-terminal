@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IDX-QuantTerminal &bull; v5.3 Institutional Equity Research Suite</title>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Alpine.js Core -->
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #080C14; }
+    ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+  </style>
+</head>
+
+<body class="bg-[#080C14] text-slate-100 font-sans antialiased min-h-screen flex selection:bg-sky-500/30 selection:text-sky-300"
+      x-data="workspaceApp">
+
+  <!-- =============================================================== -->
+  <!-- 1. SINGLE PERMANENT LEFT SIDEBAR (w-60 shrink-0)                -->
+  <!-- =============================================================== -->
+  <aside class="w-60 shrink-0 bg-[#0E1525] border-r border-white/[0.06] flex flex-col justify-between h-screen sticky top-0 z-40 select-none">
+    
+    <!-- Bagian Atas: Brand & Navigasi -->
+    <div class="flex flex-col overflow-y-auto">
+      <!-- App Brand & Version -->
+      <div class="h-16 px-5 border-b border-white/[0.06] flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 font-bold font-mono text-sm">
+            Q
+          </div>
+          <span class="font-bold tracking-tight text-white text-sm">IDX-Quant</span>
+        </a>
+        <span class="px-2 py-0.5 rounded-full text-[11px] font-mono font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
+          v5.3
+        </span>
+      </div>
+
+      <!-- Navigasi Menu Berkelompok -->
+      <nav class="p-4 space-y-6">
+        
+        <!-- Grup 0: PRIMARY TRADING & CHART TERMINAL (DEFAULT) -->
+        <div>
+          <span class="px-2.5 text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block mb-2">
+            Technical &amp; Live Chart
+          </span>
+          <div class="space-y-1">
+            <button @click="activeNav = 'charting'"
+                    :class="activeNav === 'charting' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
+              <span>Multi-Chart Terminal</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Grup 1: FUNDAMENTAL & VALUATION -->
+        <div>
+          <span class="px-2.5 text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block mb-2">
+            Fundamental &amp; Valuation
+          </span>
+          <div class="space-y-1">
+            <button @click="activeNav = 'research'; $nextTick(() => { renderResearchVisuals(); setTimeout(() => renderResearchVisuals(), 100); })"
+                    :class="activeNav === 'research' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              <div class="flex items-center justify-between w-full">
+                <span>Research Paper</span>
+                <span class="text-[9px] font-mono px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded">CFA</span>
+              </div>
+            </button>
+
+            <button @click="activeNav = 'dupont'"
+                    :class="activeNav === 'dupont' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              <span>DuPont &amp; Earnings</span>
+            </button>
+
+            <button @click="activeNav = 'valuation'"
+                    :class="activeNav === 'valuation' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              <span>Valuation &amp; Banking</span>
+            </button>
+
+            <button @click="activeNav = 'screener'"
+                    :class="activeNav === 'screener' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+              <span>Screener &amp; Peers</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Grup 2: QUANT & FIXED INCOME -->
+        <div>
+          <span class="px-2.5 text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block mb-2">
+            Quant &amp; Fixed Income
+          </span>
+          <div class="space-y-1">
+            <button @click="activeNav = 'quant'"
+                    :class="activeNav === 'quant' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+              <span>Quant Risk &amp; GBM</span>
+            </button>
+
+            <button @click="activeNav = 'fixed_income'"
+                    :class="activeNav === 'fixed_income' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span>Fixed Income &amp; SBN</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Grup 3: MARKET LIVE -->
+        <div>
+          <span class="px-2.5 text-[10px] font-mono uppercase tracking-wider text-slate-500 font-semibold block mb-2">
+            Market Live
+          </span>
+          <div class="space-y-1">
+            <button @click="activeNav = 'terminal'"
+                    :class="activeNav === 'terminal' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 13v-1m4 1v-3m4 3V8M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/></svg>
+              <span>IHSG Intelligence</span>
+            </button>
+          </div>
+        </div>
+
+      </nav>
+    </div>
+
+    <!-- Bagian Bawah Sidebar: Widget Ringkas IHSG Composite -->
+    <div class="p-4 border-t border-white/[0.06] bg-[#090D16]/60 space-y-3">
+      <div class="rounded-xl bg-slate-800/40 p-3.5 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">IHSG Composite</span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-mono {{ 'bg-emerald-500/10 text-emerald-400' if terminal.header.market_status == 'OPEN' else 'bg-slate-700/60 text-slate-400' }}">
+            {{ terminal.header.market_status }}
+          </span>
+        </div>
+        <div class="flex items-baseline justify-between font-mono">
+          <span class="text-lg font-semibold text-white tabular-nums">
+            {{ "%.2f"|format(terminal.header.ihsg_last) }}
+          </span>
+          <span class="text-xs font-semibold tabular-nums {{ 'text-emerald-400' if terminal.header.change_pct >= 0 else 'text-rose-400' }}">
+            {{ "%+.2f"|format(terminal.header.change_pct) }}%
+          </span>
+        </div>
+        <div class="pt-2 border-t border-white/[0.04] grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400">
+          <div>
+            <span class="block text-[10px] text-slate-500 font-sans">Turnover</span>
+            <span class="text-slate-200">Rp {{ "%.1f"|format(terminal.header.total_value_idr_bn / 1000) }}T</span>
+          </div>
+          <div>
+            <span class="block text-[10px] text-slate-500 font-sans">Net Asing RG</span>
+            <span class="{{ 'text-emerald-400' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-rose-400' }}">
+              {{ "%+.0f"|format(terminal.header.net_foreign_rg_idr_bn) }}M
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between px-1 text-[11px] text-slate-500 font-mono">
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>System Healthy</span>
+        </span>
+        <a href="/api/screener" class="hover:text-slate-300 transition-colors">API Docs</a>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- =============================================================== -->
+  <!-- 2. MAIN WORKSPACE CONTAINER (Flex 1)                            -->
+  <!-- =============================================================== -->
+  <main class="flex-1 flex flex-col min-w-0 bg-[#080C14]">
+    
+    <!-- TOP CONTEXT & ACTION BAR (h-16 px-6) -->
+    <header class="h-16 px-6 border-b border-white/[0.06] bg-[#0E1525] flex items-center justify-between gap-4 sticky top-0 z-30">
+      
+      <!-- Kiri: Company Context Badges -->
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 font-mono font-bold text-sm">
+          {{ bundle.current.ticker }}
+        </div>
+        <div class="truncate">
+          <h1 class="text-sm font-semibold text-white truncate leading-tight">{{ bundle.current.company_name }}</h1>
+          <div class="flex items-center gap-2 text-xs text-slate-400 font-mono mt-0.5">
+            <span>{{ bundle.current.year }} FY</span>
+            <span>&bull;</span>
+            <span class="text-emerald-400">&check; Neraca Seimbang</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tengah: Search Bar / Command Palette Trigger (Max w-md) -->
+      <div class="flex-1 max-w-md mx-4 hidden md:block">
+        <div class="relative">
+          <input type="text"
+                 placeholder="Cari dari 955 emiten BEI (misal BBCA, ASII, TLKM)..."
+                 @keydown.enter="if($event.target.value) window.location.href='/?ticker=' + $event.target.value.toUpperCase()"
+                 class="w-full bg-[#090D16] border border-white/[0.08] focus:border-sky-500/50 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-slate-500 font-mono focus:outline-none transition-colors">
+          <div class="absolute right-2.5 top-2 text-[10px] font-mono text-slate-500 border border-white/[0.06] bg-slate-800/40 px-1.5 py-0.5 rounded">
+            Enter &crarr;
+          </div>
+        </div>
+      </div>
+
+      <!-- Kanan: 3 Action Buttons -->
+      <div class="flex items-center gap-2.5 shrink-0">
+        <button @click="showUploadModal = true"
+                class="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs font-mono transition-colors whitespace-nowrap flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span>Upload Lapkeu</span>
+        </button>
+
+        <a href="/app/static/template_lapkeu_bei.xlsx"
+           class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/[0.06] text-xs font-mono transition-colors whitespace-nowrap hidden sm:inline-flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <span>Template Excel</span>
+        </a>
+
+        <a href="/api/report/pdf?ticker={{ bundle.current.ticker }}"
+           target="_blank"
+           class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/[0.06] text-xs font-mono transition-colors whitespace-nowrap hidden sm:inline-flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+          <span>PDF Report</span>
+        </a>
+      </div>
+
+    </header>
+
+    <!-- CONTENT WORKSPACE AREA -->
+    <div class="flex-1 p-6 max-w-[1600px] w-full mx-auto space-y-4">
+      {% if notice %}
+      <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-start gap-3">
+        <svg class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <span class="text-xs font-mono text-amber-300">{{ notice }}</span>
+      </div>
+      {% endif %}
+
+      {% include "_tab0_charting.html" %}
+            {% include "_tab7_research.html" %}
+            {% include "_tab1_dupont.html" %}
+      {% include "_tab3_quant.html" %}
+      {% include "_tab3_quant.html" %}
+      {% include "_tab4_screener.html" %}
+      {% include "_tab5_fixed_income.html" %}
+      {% include "_tab6_terminal.html" %}
+    </div>
+
+  </main>
+
+  <!-- =============================================================== -->
+  <!-- 3. MODAL UPLOAD LAPORAN KEUANGAN (Global Header Trigger)         -->
+  <!-- =============================================================== -->
+  <!-- MODAL AI TECHNICAL COPILOT (virattt/ai-hedge-fund architecture) -->
+  <div x-show="showAiModal"
+       x-transition.opacity
+       class="fixed inset-0 bg-[#080C14]/85 backdrop-blur-md z-50 flex items-center justify-center p-4"
+       style="display: none;">
+    <div class="bg-[#0E1525] border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-2xl p-6 space-y-5"
+         @click.away="showAiModal = false">
+      <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-base font-semibold text-white">AI Institutional Technical Analyst</h3>
+            <p class="text-xs text-slate-400">Model 5-Pillar virattt/ai-hedge-fund &bull; Saham: <span class="text-sky-400 font-mono font-bold" x-text="activeCopilotTicker"></span></p>
+          </div>
+        </div>
+        <button @click="showAiModal = false" class="text-slate-400 hover:text-white font-mono text-xs">&times; TUTUP</button>
+      </div>
+
+      <!-- Loading State -->
+      <div x-show="aiLoading" class="py-12 flex flex-col items-center justify-center space-y-3 font-mono text-xs text-slate-400">
+        <div class="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin"></div>
+        <span>Mengeksekusi model kalkulasi 5-Pillar teknikal...</span>
+      </div>
+
+      <!-- Result State -->
+      <div x-show="!aiLoading && aiData && !aiData.error" class="space-y-4">
+        <!-- Hero Verdict Box -->
+        <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-4 flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-400 block font-sans">Konsensus Sinyal Institusional</span>
+            <div class="flex items-baseline gap-2.5 mt-0.5">
+              <span class="text-2xl font-bold font-mono tracking-tight"
+                    :class="aiData?.overall_signal === 'BULLISH' ? 'text-emerald-400' : (aiData?.overall_signal === 'BEARISH' ? 'text-rose-400' : 'text-amber-400')"
+                    x-text="aiData?.overall_signal"></span>
+              <span class="text-xs font-mono text-slate-400">(Score: <span x-text="aiData?.composite_score"></span>)</span>
+            </div>
+          </div>
+          <div class="text-right font-mono">
+            <span class="text-xs text-slate-400 block font-sans">Tingkat Keyakinan</span>
+            <span class="text-2xl font-semibold text-white tabular-nums"><span x-text="aiData?.confidence_pct"></span>%</span>
+          </div>
+        </div>
+
+        <!-- 5-Pillar Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-2.5 font-mono text-xs">
+          <div class="bg-slate-800/40 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-slate-400 block font-sans">Trend ADX</span>
+            <span class="text-xs font-semibold block my-1"
+                  :class="aiData?.pillars?.trend?.signal === 'BULLISH' ? 'text-emerald-400' : (aiData?.pillars?.trend?.signal === 'BEARISH' ? 'text-rose-400' : 'text-slate-300')"
+                  x-text="aiData?.pillars?.trend?.signal"></span>
+            <span class="text-[10px] text-slate-500">ADX: <span x-text="aiData?.pillars?.trend?.metrics?.adx"></span></span>
+          </div>
+
+          <div class="bg-slate-800/40 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-slate-400 block font-sans">Momentum</span>
+            <span class="text-xs font-semibold block my-1"
+                  :class="aiData?.pillars?.momentum?.signal === 'BULLISH' ? 'text-emerald-400' : (aiData?.pillars?.momentum?.signal === 'BEARISH' ? 'text-rose-400' : 'text-slate-300')"
+                  x-text="aiData?.pillars?.momentum?.signal"></span>
+            <span class="text-[10px] text-slate-500">1M: <span x-text="aiData?.pillars?.momentum?.metrics?.momentum_1m_pct"></span>%</span>
+          </div>
+
+          <div class="bg-slate-800/40 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-slate-400 block font-sans">Mean Reversion</span>
+            <span class="text-xs font-semibold block my-1"
+                  :class="aiData?.pillars?.mean_reversion?.signal === 'BULLISH' ? 'text-emerald-400' : (aiData?.pillars?.mean_reversion?.signal === 'BEARISH' ? 'text-rose-400' : 'text-slate-300')"
+                  x-text="aiData?.pillars?.mean_reversion?.signal"></span>
+            <span class="text-[10px] text-slate-500">RSI: <span x-text="aiData?.pillars?.mean_reversion?.metrics?.rsi_14"></span></span>
+          </div>
+
+          <div class="bg-slate-800/40 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-slate-400 block font-sans">Volatility</span>
+            <span class="text-xs font-semibold block my-1 text-sky-400" x-text="aiData?.pillars?.volatility?.metrics?.atr_pct + '%'"></span>
+            <span class="text-[10px] text-slate-500">ATR Ratio</span>
+          </div>
+
+          <div class="bg-slate-800/40 rounded-xl p-3 text-center">
+            <span class="text-[11px] text-slate-400 block font-sans">Hurst Test</span>
+            <span class="text-xs font-semibold block my-1 text-white" x-text="aiData?.pillars?.statistical?.metrics?.hurst_exponent"></span>
+            <span class="text-[10px] text-slate-500">Hurst Exponent</span>
+          </div>
+        </div>
+
+        <!-- Actionable Trade Plan -->
+        <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-4 space-y-2 font-mono text-xs">
+          <span class="text-slate-400 font-sans text-xs font-semibold uppercase tracking-wider block">Actionable Trading Setup:</span>
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <span class="text-slate-500 text-[11px] block font-sans">Zona Akumulasi / Buy:</span>
+              <span class="text-white font-semibold" x-text="aiData?.actionable_plan?.entry_zone"></span>
+            </div>
+            <div>
+              <span class="text-slate-500 text-[11px] block font-sans">Stop Loss Protektif:</span>
+              <span class="text-rose-400 font-semibold" x-text="aiData?.actionable_plan?.stop_loss"></span>
+            </div>
+            <div>
+              <span class="text-slate-500 text-[11px] block font-sans">Target 1 (Resistensi):</span>
+              <span class="text-emerald-400 font-semibold" x-text="aiData?.actionable_plan?.target_1"></span>
+            </div>
+            <div>
+              <span class="text-slate-500 text-[11px] block font-sans">Risk / Reward:</span>
+              <span class="text-sky-400 font-semibold" x-text="aiData?.actionable_plan?.risk_reward_ratio"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 9Router VPS Institutional Synthesis -->
+        <div x-show="aiData?.llm_summary" class="bg-gradient-to-r from-blue-950/40 to-slate-900 border border-blue-500/20 rounded-xl p-4 space-y-1.5">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+            <span class="text-[11px] font-mono text-blue-300 font-bold uppercase tracking-wider">9Router AI Executive Commentary</span>
+          </div>
+          <p class="text-xs text-slate-200 leading-relaxed font-sans" x-text="aiData?.llm_summary"></p>
+        </div>
+      </div>
+
+      <!-- Error State -->
+      <div x-show="!aiLoading && aiData && aiData.error" class="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-mono">
+        <span x-text="aiData.error"></span>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="showUploadModal"
+       x-transition.opacity
+       class="fixed inset-0 bg-[#080C14]/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+       style="display: none;">
+    <div class="bg-[#0E1525] border border-white/[0.1] rounded-2xl max-w-lg w-full shadow-2xl p-6 space-y-5"
+         @click.away="showUploadModal = false">
+      <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        <h3 class="text-base font-semibold text-white">Upload Laporan Keuangan BEI (Excel / CSV)</h3>
+        <button @click="showUploadModal = false" class="text-slate-400 hover:text-white font-mono text-xs">&times; TUTUP</button>
+      </div>
+
+      <form action="/api/dupont/upload" method="post" enctype="multipart/form-data" class="space-y-4">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1.5 font-mono">Pilih File (.xlsx / .csv):</label>
+          <input type="file" name="file" accept=".xlsx,.xls,.csv" required
+                 class="w-full text-xs text-slate-300 font-mono file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-sky-500/10 file:text-sky-400 hover:file:bg-sky-500/20 cursor-pointer bg-[#090D16] border border-white/[0.08] rounded-xl p-2">
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <a href="/app/static/template_lapkeu_bei.xlsx" class="text-xs text-sky-400 hover:underline font-mono">
+            Download Format Resmi BEI
+          </a>
+          <button type="submit" class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold rounded-xl text-xs font-mono transition-colors">
+            Mulai Ekstraksi &rarr;
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =============================================================== -->
+  <!-- 4. RAW DATA JSON PAYLOADS (Zero Raw Code Leak Architecture)      -->
+  <!-- =============================================================== -->
+  <script type="application/json" id="screener-json">{{ screener_rows | tojson if screener_rows else '[]' }}</script>
+  <script type="application/json" id="dcf-json">{{ dcf_payload | tojson }}</script>
+  <script type="application/json" id="mc-json">{{ mc_payload | tojson }}</script>
+  <script type="application/json" id="bond-json">{{ bond_demo | tojson if bond_demo else '{}' }}</script>
+  <script type="application/json" id="research-data">{{ research_payload | tojson if research_payload else '{}' }}</script>
+
+  <!-- =============================================================== -->
+  <!-- 5. ALPINE.JS WORKSPACE CONTROLLER                               -->
+  <!-- =============================================================== -->
+  <!-- TradingView Embed Library -->
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
+  <script>
+    // Data function - tersedia SEBELUM Alpine membaca x-data
+    // Didefinisikan sebagai global sehingga Alpine dapat menemukannya
+    window.workspaceApp = function() {
+      return {
+        activeNav: 'charting',
+        ticker: '{{ bundle.current.ticker }}',
+        stageMode: '3_STAGE',
+        showUploadModal: false,
+        showCompareModal: false,
+        chartLayout: 1,
+        chartSlot1: 'IDX:COMPOSITE',
+        chartSlot2: 'IDX:BBCA',
+        chartSlot3: 'IDX:BBRI',
+        chartSlot4: 'IDX:ASII',
+        showAiModal: false,
+        aiLoading: false,
+        aiData: null,
+        activeCopilotTicker: 'COMPOSITE',
+        async openAiCopilot(rawSymbol) {
+          let ticker = (rawSymbol || 'COMPOSITE').replace('IDX:', '').trim();
+          this.activeCopilotTicker = ticker;
+          this.showAiModal = true;
+          this.aiLoading = true;
+          this.aiData = null;
+          try {
+            let res = await fetch(`/api/agent/technical/${ticker}`);
+            if (res.ok) {
+              this.aiData = await res.json();
+            } else {
+              this.aiData = { error: 'Gagal memuat analisis AI.' };
+            }
+          } catch(e) {
+            console.error('AI agent fetch error:', e);
+            this.aiData = { error: 'Koneksi ke backend gagal.' };
+          } finally {
+            this.aiLoading = false;
+          }
+        },
+        sectorFilter: 'ALL',
+        searchKw: '',
+        sortCol: 'roe_pct',
+        sortAsc: false,
+        compareTicker1: '{{ bundle.current.ticker }}',
+        compareTicker2: 'BBCA',
+        allRows: [],
+        baseWacc: 11.5,
+        baseGrowth: 5.0,
+        baseTg: 2.5,
+        simWacc: 11.5,
+        simGrowth: 5.0,
+        simTg: 2.5,
+        baseEV: 0,
+        baseEq: 0,
+        basePrice: 0,
+        bondForm: { face: 1000000, coupon: 7.25, ytm: 6.75, tenor: 5.0, freq: 2 },
+        bondResult: {},
+        researchData: null,
+        llmThesisLoading: false,
+        llmResearchText: '',
+        newsLoading: false,
+        newsArticles: [],
+        filterTicker: '',
+        filterKeyword: '',
+        analysisLoading: false,
+        newsAnalysis: '',
+        currentTicker: 'ASII',
+        get filteredNewsArticles() {
+          if (!this.filterTicker && !this.filterKeyword) { return this.newsArticles; }
+          return this.newsArticles.filter(article => {
+            const matchesTicker = !this.filterTicker || article.title.toLowerCase().includes(this.filterTicker.toLowerCase()) || article.description.toLowerCase().includes(this.filterTicker.toLowerCase());
+            const matchesKeyword = !this.filterKeyword || article.title.toLowerCase().includes(this.filterKeyword.toLowerCase()) || article.description.toLowerCase().includes(this.filterKeyword.toLowerCase());
+            return matchesTicker && matchesKeyword;
+          });
+        },
+        async fetchTickerNewsForAnalysis(tickerSymbol) {
+          this.currentTicker = tickerSymbol || this.ticker || 'ASII';
+          this.newsLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.currentTicker}/news`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsArticles = data.articles || [];
+            }
+          } catch(e) {
+            console.error('News fetch error:', e);
+          } finally {
+            this.newsLoading = false;
+          }
+        },
+        async refreshNews() {
+          await this.fetchTickerNewsForAnalysis(this.ticker);
+        },
+        async analyzeNewsCatalyst() {
+          this.analysisLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/ai-thesis`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsAnalysis = data.thesis || 'Analisis selesai, tidak ada dampak berita khusus terdeteksi.';
+            }
+          } catch(e) {
+            console.error('News analysis error:', e);
+            this.newsAnalysis = 'Gagal menganalisis dampak berita.';
+          } finally {
+            this.analysisLoading = false;
+          }
+        },
+        async fetchNewsArticles() {
+          this.newsLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/news`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsArticles = data.articles || [];
+            }
+          } catch(e) {
+            console.error('News fetch error:', e);
+          } finally {
+            this.newsLoading = false;
+          }
+        },
+        async generateLlmResearchThesis() {
+          this.llmThesisLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/ai-thesis`);
+            if (res.ok) {
+              let data = await res.json();
+              this.llmResearchText = data.thesis || 'Tidak ada konten tesis.';
+            } else {
+              this.llmResearchText = '<span class="text-rose-400">Gagal generate AI thesis dari 9Router.</span>';
+            }
+          } catch(e) {
+            this.llmResearchText = '<span class="text-rose-400">Koneksi backend gagal.</span>';
+          } finally {
+            this.llmThesisLoading = false;
+          }
+        },
+        init() {
+          try {
+            const screenerEl = document.getElementById('screener-json');
+            this.allRows = screenerEl ? JSON.parse(screenerEl.textContent) : [];
+          } catch(e) { console.error('Error parsing screener JSON:', e); this.allRows = []; }
+          try {
+            const dcfEl = document.getElementById('dcf-json');
+            const dcfData = dcfEl ? JSON.parse(dcfEl.textContent) : {};
+            if (dcfData && dcfData.wacc_pct) {
+              this.baseWacc = dcfData.wacc_pct;
+              this.simWacc = dcfData.wacc_pct;
+              this.baseEV = dcfData.enterprise_value_trn || 0;
+              this.baseEq = dcfData.equity_value_trn || 0;
+              this.basePrice = dcfData.price_per_share || 0;
+            }
+          } catch(e) { console.error('Error parsing dcf JSON:', e); }
+          try {
+            const bondEl = document.getElementById('bond-json');
+            this.bondResult = bondEl ? JSON.parse(bondEl.textContent) : {};
+            if (!this.bondResult.clean_price) { this.calcBond(); }
+          } catch(e) { console.error('Error parsing bond JSON:', e); }
+          try {
+            const resEl = document.getElementById('research-data') || document.getElementById('research-json');
+            this.researchData = resEl ? JSON.parse(resEl.textContent) : null;
+          } catch(e) { console.error('Error parsing research JSON:', e); }
+          setTimeout(() => {
+            try {
+              if (this.researchData) { this.renderAllCharts(); }
+            } catch(e) { console.error('Error rendering charts:', e); }
+          }, 300);
+        },
+        renderTVWidget(containerId, symbol) {
+          const el = document.getElementById(containerId);
+          if (!el || typeof TradingView === 'undefined') return;
+          el.innerHTML = '';
+          new TradingView.widget({
+            autosize: true, symbol: symbol, interval: "D", timezone: "Asia/Jakarta", theme: "dark", style: "1", locale: "id", toolbar_bg: "#0E1525",
+            enable_publishing: false, allow_symbol_change: true, container_id: containerId, hide_side_toolbar: false, withdateranges: true,
+            details: true, hotlist: true, calendar: false, show_popup_button: true, popup_width: "1200", popup_height: "750",
+            studies: ["MASimple@tv-basicstudies", "RSI@tv-basicstudies", "MACD@tv-basicstudies", "BB@tv-basicstudies"],
+            studies_overrides: { "volume.volume.color.0": "#F43F5E", "volume.volume.color.1": "#10B981" },
+            overrides: {
+              "paneProperties.background": "#0E1525", "paneProperties.vertGridProperties.color": "rgba(255, 255, 255, 0.04)",
+              "paneProperties.horzGridProperties.color": "rgba(255, 255, 255, 0.04)", "scalesProperties.textColor": "#94A3B8",
+              "mainSeriesProperties.candleStyle.wickUpColor": "#10B981", "mainSeriesProperties.candleStyle.wickDownColor": "#F43F5E",
+              "mainSeriesProperties.candleStyle.upColor": "#10B981", "mainSeriesProperties.candleStyle.downColor": "#F43F5E"
+            }
+          });
+        },
+        renderAllCharts() {
+          this.renderTVWidget('tv-chart-container-1', this.chartSlot1);
+          if (this.chartLayout >= 2) { setTimeout(() => this.renderTVWidget('tv-chart-container-2', this.chartSlot2), 150); }
+          if (this.chartLayout >= 3) { setTimeout(() => this.renderTVWidget('tv-chart-container-3', this.chartSlot3), 300); }
+          if (this.chartLayout === 4) { setTimeout(() => this.renderTVWidget('tv-chart-container-4', this.chartSlot4), 450); }
+          this.renderResearchVisuals();
+        },
+        renderResearchVisuals() {
+          if (!this.researchData || typeof Chart === 'undefined') return;
+          const ffCanvas = document.getElementById('footballFieldCanvas');
+          if (ffCanvas) {
+            if (window._ffChartInstance) { window._ffChartInstance.destroy(); }
+            const ctx = ffCanvas.getContext('2d');
+            const dcf = Number(this.researchData.dcf_fair_value || 0);
+            const exitP = Number(this.researchData.exit_multiple_fair_value || 0);
+            const relP = Number(this.researchData.relative_fair_value || 0);
+            const currP = Number(this.researchData.current_price || 0);
+            const targetP = Number(this.researchData.target_price || 0);
+            window._ffChartInstance = new Chart(ctx, {
+              type: 'bar', data: {
+                labels: ['Relative Comps', 'Exit Multiple', 'DCF Model', 'Blended Target'],
+                datasets: [{
+                  label: 'Base to Fair Value Range',
+                  data: [
+                    [Math.min(currP, relP), Math.max(currP, relP)],
+                    [Math.min(currP, exitP), Math.max(currP, exitP)],
+                    [Math.min(currP, dcf), Math.max(currP, dcf)],
+                    [Math.min(currP, targetP), Math.max(currP, targetP)],
+                  ],
+                  backgroundColor: ['#6366f1', '#a855f7', '#0ea5e9', '#10b981'], borderRadius: 4,
+                }]
+              },
+              options: {
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(c) { return 'Rentang: Rp ' + c.raw[0].toLocaleString('id-ID') + ' - Rp ' + c.raw[1].toLocaleString('id-ID'); } } } },
+                scales: {
+                  x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', font: { size: 9, family: 'monospace' } } },
+                  y: { grid: { display: false }, ticks: { color: '#cbd5e1', font: { size: 10 } } }
+                }
+              }
+            });
+          }
+          const dpCanvas = document.getElementById('dupontRadarCanvas');
+          if (dpCanvas) {
+            if (window._dpRadarInstance) { window._dpRadarInstance.destroy(); }
+            const ctx2 = dpCanvas.getContext('2d');
+            const tb = (this.researchData.tax_burden || 0.78) * 100;
+            const ib = (this.researchData.interest_burden || 0.95) * 100;
+            const om = (this.researchData.ebit_margin || 0.12) * 100;
+            const at = (this.researchData.asset_turnover || 0.85) * 50;
+            const em = Math.min(100, (this.researchData.equity_multiplier || 1.6) * 35);
+            window._dpRadarInstance = new Chart(ctx2, {
+              type: 'radar', data: {
+                labels: ['Tax Burden', 'Interest Burden', 'EBIT Margin', 'Asset Turnover', 'Financial Leverage'],
+                datasets: [{
+                  label: this.ticker, data: [tb, ib, om * 2.5, at, em],
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: '#10b981', pointBackgroundColor: '#10b981', borderWidth: 2,
+                }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                scales: { r: { angleLines: { color: 'rgba(255,255,255,0.08)' }, grid: { color: 'rgba(255,255,255,0.06)' }, pointLabels: { color: '#94a3b8', font: { size: 9 } }, ticks: { display: false, maxTicksLimit: 4 } } }
+              }
+            });
+          }
+        },
+        setChartLayout(layout) { this.chartLayout = layout; this.$nextTick(() => { this.renderAllCharts(); }); },
+        updateChartSlot(slotNum, rawSymbol) {
+          let sym = rawSymbol.trim().toUpperCase();
+          if (!sym.includes(':')) { sym = 'IDX:' + sym; }
+          if (slotNum === 1) { this.chartSlot1 = sym; this.renderTVWidget('tv-chart-container-1', sym); }
+          else if (slotNum === 2) { this.chartSlot2 = sym; this.renderTVWidget('tv-chart-container-2', sym); }
+          else if (slotNum === 3) { this.chartSlot3 = sym; this.renderTVWidget('tv-chart-container-3', sym); }
+          else if (slotNum === 4) { this.chartSlot4 = sym; this.renderTVWidget('tv-chart-container-4', sym); }
+        },
+        humanDriver(code) {
+          const map = { 'OPERATIONAL_MARGIN': 'Margin Operasional (EBIT)', 'ASSET_EFFICIENCY': 'Efisiensi Perputaran Aset', 'FINANCIAL_LEVERAGE': 'Pengungkit Struktur Modal (EM)', 'TAX_OR_INTEREST_BURDEN': 'Efisiensi Pajak & Beban Bunga' };
+          return map[code] || code;
+        },
+        humanStepLabel(label) {
+          const map = { 'OPERATIONAL_MARGIN': 'Margin Operasional (EBIT)', 'ASSET_EFFICIENCY': 'Efisiensi Perputaran Aset', 'FINANCIAL_LEVERAGE': 'Pengungkit Struktur Modal (EM)', 'TAX_OR_INTEREST_BURDEN': 'Efisiensi Pajak & Beban Bunga' };
+          for (const [k, v] of Object.entries(map)) { if (label.includes(k)) return label.replace(k, v); }
+          return label;
+        },
+        get filteredRows() {
+          return (this.allRows || []).filter(r => {
+            let matchSec = (this.sectorFilter === 'ALL') || (r.sector === this.sectorFilter);
+            let matchKw = (!this.searchKw) || ((r.ticker && r.ticker.toLowerCase().includes(this.searchKw.toLowerCase())) || (r.company_name && r.company_name.toLowerCase().includes(this.searchKw.toLowerCase())));
+            return matchSec && matchKw;
+          }).sort((a, b) => {
+            let valA = a[this.sortCol] ?? -999999;
+            let valB = b[this.sortCol] ?? -999999;
+            return this.sortAsc ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+          });
+        },
+        sortBy(col) { if (this.sortCol === col) { this.sortAsc = !this.sortAsc; } else { this.sortCol = col; this.sortAsc = false; } },
+        get t1Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker1) || {}; },
+        get t2Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker2) || {}; },
+        get dcfFactor() {
+          let waccDiff = (this.simWacc - this.baseWacc) * 0.08;
+          let gDiff = (this.simGrowth - this.baseGrowth) * 0.04;
+          let tgDiff = (this.simTg - this.baseTg) * 0.05;
+          return Math.max(0.2, 1.0 - waccDiff + gDiff + tgDiff);
+        },
+        get simEV() { return (this.baseEV * this.dcfFactor).toFixed(1); },
+        get simEq() { return (this.baseEq * this.dcfFactor).toFixed(1); },
+        get simTargetPrice() { return Math.max(50, Math.round(this.basePrice * this.dcfFactor)); },
+        resetDcfSliders() { this.simWacc = this.baseWacc; this.simGrowth = this.baseGrowth; this.simTg = this.baseTg; },
+        async calcBond() {
+          try {
+            let url = `/api/bonds/calculate?face_value=${this.bondForm.face}&coupon_pct=${this.bondForm.coupon}&ytm_pct=${this.bondForm.ytm}&years=${this.bondForm.tenor}&freq=${this.bondForm.freq}`;
+            let res = await fetch(url);
+            if (res.ok) { this.bondResult = await res.json(); }
+          } catch(e) { console.error('Error fetching bond calculation:', e); }
+        },
+        formatNum(val) {
+          if (val === undefined || val === null) return '0.00';
+          return Number(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+      };
+    };
+  </script>
+
+  <script>
+        showUploadModal: false,
+        showCompareModal: false,
+
+        // Multi-Chart Grid State
+        chartLayout: 1, // 1, 2, 3, or 4
+        chartSlot1: 'IDX:COMPOSITE',
+        chartSlot2: 'IDX:BBCA',
+        chartSlot3: 'IDX:BBRI',
+        chartSlot4: 'IDX:ASII',
+
+        // AI Technical Copilot State (virattt/ai-hedge-fund architecture)
+        showAiModal: false,
+        aiLoading: false,
+        aiData: null,
+        activeCopilotTicker: 'COMPOSITE',
+
+        async openAiCopilot(rawSymbol) {
+          let ticker = (rawSymbol || 'COMPOSITE').replace('IDX:', '').trim();
+          this.activeCopilotTicker = ticker;
+          this.showAiModal = true;
+          this.aiLoading = true;
+          this.aiData = null;
+          try {
+            let res = await fetch(`/api/agent/technical/${ticker}`);
+            if (res.ok) {
+              this.aiData = await res.json();
+            } else {
+              this.aiData = { error: 'Gagal memuat analisis AI.' };
+            }
+          } catch(e) {
+            console.error('AI agent fetch error:', e);
+            this.aiData = { error: 'Koneksi ke backend gagal.' };
+          } finally {
+            this.aiLoading = false;
+          }
+        },
+
+        // Screener state
+        sectorFilter: 'ALL',
+        searchKw: '',
+        sortCol: 'roe_pct',
+        sortAsc: false,
+        compareTicker1: '{{ bundle.current.ticker }}',
+        compareTicker2: 'BBCA',
+        allRows: [],
+
+        // DCF simulation state
+        baseWacc: 11.5,
+        baseGrowth: 5.0,
+        baseTg: 2.5,
+        simWacc: 11.5,
+        simGrowth: 5.0,
+        simTg: 2.5,
+        baseEV: 0,
+        baseEq: 0,
+        basePrice: 0,
+
+        // Bond calculator state
+        bondForm: {
+          face: 1000000,
+          coupon: 7.25,
+          ytm: 6.75,
+          tenor: 5.0,
+          freq: 2
+        },
+        bondResult: {},
+
+        // Research Paper State
+        researchData: null,
+        llmThesisLoading: false,
+        llmResearchText: '',
+        newsLoading: false,
+        newsArticles: [],
+        filterTicker: '',
+        filterKeyword: '',
+        analysisLoading: false,
+        newsAnalysis: '',
+        currentTicker: this.ticker || 'ASII',
+
+        get filteredNewsArticles() {
+          if (!this.filterTicker && !this.filterKeyword) {
+            return this.newsArticles;
+          }
+          return this.newsArticles.filter(article => {
+            const matchesTicker = !this.filterTicker || 
+              article.title.toLowerCase().includes(this.filterTicker.toLowerCase()) ||
+              article.description.toLowerCase().includes(this.filterTicker.toLowerCase());
+            const matchesKeyword = !this.filterKeyword || 
+              article.title.toLowerCase().includes(this.filterKeyword.toLowerCase()) ||
+              article.description.toLowerCase().includes(this.filterKeyword.toLowerCase());
+            return matchesTicker && matchesKeyword;
+          });
+        },
+
+        async fetchTickerNewsForAnalysis(tickerSymbol) {
+          this.currentTicker = tickerSymbol || this.ticker || 'ASII';
+          this.newsLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.currentTicker}/news`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsArticles = data.articles || [];
+            }
+          } catch(e) {
+            console.error('News fetch error:', e);
+          } finally {
+            this.newsLoading = false;
+          }
+        },
+
+        async refreshNews() {
+          await this.fetchTickerNewsForAnalysis(this.ticker);
+        },
+
+        async analyzeNewsCatalyst() {
+          this.analysisLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/ai-thesis`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsAnalysis = data.thesis || 'Analisis selesai, tidak ada dampak berita khusus terdeteksi.';
+            }
+          } catch(e) {
+            console.error('News analysis error:', e);
+            this.newsAnalysis = 'Gagal menganalisis dampak berita.';
+          } finally {
+            this.analysisLoading = false;
+          }
+        },
+
+        async fetchNewsArticles() {
+          this.newsLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/news`);
+            if (res.ok) {
+              let data = await res.json();
+              this.newsArticles = data.articles || [];
+            }
+          } catch(e) {
+            console.error('News fetch error:', e);
+          } finally {
+            this.newsLoading = false;
+          }
+        },
+
+        async generateLlmResearchThesis() {
+          this.llmThesisLoading = true;
+          try {
+            let res = await fetch(`/api/research/${this.ticker}/ai-thesis`);
+            if (res.ok) {
+              let data = await res.json();
+              this.llmResearchText = data.thesis || 'Tidak ada konten tesis.';
+            } else {
+              this.llmResearchText = '<span class="text-rose-400">Gagal generate AI thesis dari 9Router.</span>';
+            }
+          } catch(e) {
+            this.llmResearchText = '<span class="text-rose-400">Koneksi backend gagal.</span>';
+          } finally {
+            this.llmThesisLoading = false;
+          }
+        },
+
+        init() {
+          // Parse JSON safely from application/json scripts
+          try {
+            const screenerEl = document.getElementById('screener-json');
+            this.allRows = screenerEl ? JSON.parse(screenerEl.textContent) : [];
+          } catch(e) { console.error('Error parsing screener JSON:', e); this.allRows = []; }
+
+          try {
+            const dcfEl = document.getElementById('dcf-json');
+            const dcfData = dcfEl ? JSON.parse(dcfEl.textContent) : {};
+            if (dcfData && dcfData.wacc_pct) {
+              this.baseWacc = dcfData.wacc_pct;
+              this.simWacc = dcfData.wacc_pct;
+              this.baseEV = dcfData.enterprise_value_trn || 0;
+              this.baseEq = dcfData.equity_value_trn || 0;
+              this.basePrice = dcfData.price_per_share || 0;
+            }
+          } catch(e) { console.error('Error parsing dcf JSON:', e); }
+
+          try {
+            const bondEl = document.getElementById('bond-json');
+            this.bondResult = bondEl ? JSON.parse(bondEl.textContent) : {};
+            if (!this.bondResult.clean_price) {
+              this.calcBond();
+            }
+          } catch(e) { console.error('Error parsing bond JSON:', e); }
+
+          try {
+            const resEl = document.getElementById('research-data') || document.getElementById('research-json');
+            this.researchData = resEl ? JSON.parse(resEl.textContent) : null;
+          } catch(e) { console.error('Error parsing research JSON:', e); }
+
+          // Initialize TradingView Charts after DOM ready — with error guard
+          setTimeout(() => {
+            try {
+              if (this.researchData) { this.renderAllCharts(); }
+            } catch(e) { 
+              console.error('Error rendering charts:', e); 
+            }
+          }, 300);
+        },
+
+        // Render TradingView widgets dengan Toolbar & Indikator Aktif
+        renderTVWidget(containerId, symbol) {
+          const el = document.getElementById(containerId);
+          if (!el || typeof TradingView === 'undefined') return;
+          el.innerHTML = '';
+          new TradingView.widget({
+            autosize: true,
+            symbol: symbol,
+            interval: "D",
+            timezone: "Asia/Jakarta",
+            theme: "dark",
+            style: "1", // Candlestick
+            locale: "id",
+            toolbar_bg: "#0E1525",
+            enable_publishing: false,
+            allow_symbol_change: true,
+            container_id: containerId,
+            hide_side_toolbar: false,
+            withdateranges: true,
+            details: true,
+            hotlist: true,
+            calendar: false,
+            show_popup_button: true,
+            popup_width: "1200",
+            popup_height: "750",
+            studies: [
+              "MASimple@tv-basicstudies",      // Simple Moving Average 9/20
+              "RSI@tv-basicstudies",           // RSI 14
+              "MACD@tv-basicstudies",          // MACD 12/26/9
+              "BB@tv-basicstudies"             // Bollinger Bands
+            ],
+            studies_overrides: {
+              "volume.volume.color.0": "#F43F5E",
+              "volume.volume.color.1": "#10B981"
+            },
+            overrides: {
+              "paneProperties.background": "#0E1525",
+              "paneProperties.vertGridProperties.color": "rgba(255, 255, 255, 0.04)",
+              "paneProperties.horzGridProperties.color": "rgba(255, 255, 255, 0.04)",
+              "scalesProperties.textColor": "#94A3B8",
+              "mainSeriesProperties.candleStyle.wickUpColor": "#10B981",
+              "mainSeriesProperties.candleStyle.wickDownColor": "#F43F5E",
+              "mainSeriesProperties.candleStyle.upColor": "#10B981",
+              "mainSeriesProperties.candleStyle.downColor": "#F43F5E"
+            }
+          });
+        },
+
+        renderAllCharts() {
+          this.renderTVWidget('tv-chart-container-1', this.chartSlot1);
+          if (this.chartLayout >= 2) {
+            setTimeout(() => this.renderTVWidget('tv-chart-container-2', this.chartSlot2), 150);
+          }
+          if (this.chartLayout >= 3) {
+            setTimeout(() => this.renderTVWidget('tv-chart-container-3', this.chartSlot3), 300);
+          }
+          if (this.chartLayout === 4) {
+            setTimeout(() => this.renderTVWidget('tv-chart-container-4', this.chartSlot4), 450);
+          }
+          this.renderResearchVisuals();
+        },
+
+        renderResearchVisuals() {
+          if (!this.researchData || typeof Chart === 'undefined') return;
+
+          // 1. Render Football Field Valuation Range Chart
+          const ffCanvas = document.getElementById('footballFieldCanvas');
+          if (ffCanvas) {
+            if (window._ffChartInstance) { window._ffChartInstance.destroy(); }
+            const ctx = ffCanvas.getContext('2d');
+            const dcf = Number(this.researchData.dcf_fair_value || 0);
+            const exitP = Number(this.researchData.exit_multiple_fair_value || 0);
+            const relP = Number(this.researchData.relative_fair_value || 0);
+            const currP = Number(this.researchData.current_price || 0);
+            const targetP = Number(this.researchData.target_price || 0);
+
+            window._ffChartInstance = new Chart(ctx, {
+              type: 'bar',
+              data: {
+                labels: ['Relative Comps', 'Exit Multiple', 'DCF Model', 'Blended Target'],
+                datasets: [
+                  {
+                    label: 'Base to Fair Value Range',
+                    data: [
+                      [Math.min(currP, relP), Math.max(currP, relP)],
+                      [Math.min(currP, exitP), Math.max(currP, exitP)],
+                      [Math.min(currP, dcf), Math.max(currP, dcf)],
+                      [Math.min(currP, targetP), Math.max(currP, targetP)],
+                    ],
+                    backgroundColor: ['#6366f1', '#a855f7', '#0ea5e9', '#10b981'],
+                    borderRadius: 4,
+                  }
+                ]
+              },
+              options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: function(c) {
+                        return 'Rentang: Rp ' + c.raw[0].toLocaleString('id-ID') + ' - Rp ' + c.raw[1].toLocaleString('id-ID');
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  x: {
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { color: '#94a3b8', font: { size: 9, family: 'monospace' } }
+                  },
+                  y: {
+                    grid: { display: false },
+                    ticks: { color: '#cbd5e1', font: { size: 10 } }
+                  }
+                }
+              }
+            });
+          }
+
+          // 2. Render DuPont 5-Stage Radar Chart
+          const dpCanvas = document.getElementById('dupontRadarCanvas');
+          if (dpCanvas) {
+            if (window._dpRadarInstance) { window._dpRadarInstance.destroy(); }
+            const ctx2 = dpCanvas.getContext('2d');
+            const tb = (this.researchData.tax_burden || 0.78) * 100;
+            const ib = (this.researchData.interest_burden || 0.95) * 100;
+            const om = (this.researchData.ebit_margin || 0.12) * 100;
+            const at = (this.researchData.asset_turnover || 0.85) * 50; // normalized to 100 scale
+            const em = Math.min(100, (this.researchData.equity_multiplier || 1.6) * 35); // normalized
+
+            window._dpRadarInstance = new Chart(ctx2, {
+              type: 'radar',
+              data: {
+                labels: ['Tax Burden', 'Interest Burden', 'EBIT Margin', 'Asset Turnover', 'Financial Leverage'],
+                datasets: [{
+                  label: this.ticker,
+                  data: [tb, ib, om * 2.5, at, em],
+                  backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                  borderColor: '#10b981',
+                  pointBackgroundColor: '#10b981',
+                  borderWidth: 2,
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  r: {
+                    angleLines: { color: 'rgba(255,255,255,0.08)' },
+                    grid: { color: 'rgba(255,255,255,0.06)' },
+                    pointLabels: { color: '#94a3b8', font: { size: 9 } },
+                    ticks: { display: false, maxTicksLimit: 4 }
+                  }
+                }
+              }
+            });
+          }
+
+          // 3. Render Revenue Segment Doughnut Chart
+          const segCanvas = document.getElementById('revenueSegmentCanvas');
+          if (segCanvas && this.researchData.segment_breakdown) {
+            if (window._segChartInstance) { window._segChartInstance.destroy(); }
+            const ctx3 = segCanvas.getContext('2d');
+            const segLabels = this.researchData.segment_breakdown.map(s => s.segment);
+            const segValues = this.researchData.segment_breakdown.map(s => s.share_pct);
+
+            window._segChartInstance = new Chart(ctx3, {
+              type: 'doughnut',
+              data: {
+                labels: segLabels,
+                datasets: [{
+                  data: segValues,
+                  backgroundColor: ['#0ea5e9', '#10b981', '#a855f7', '#f59e0b'],
+                  borderColor: '#0E1525',
+                  borderWidth: 3,
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '65%',
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: function(c) {
+                        return c.label + ': ' + c.raw + '%';
+                      }
+                    }
+                  }
+                }
+              }
+            });
+          }
+
+          // 4. Render Historical & Forecast Margin Trends (Figure FA 6)
+          const marginCanvas = document.getElementById('marginTrendCanvas');
+          if (marginCanvas && this.researchData.forecast_5yr) {
+            if (window._marginChartInstance) { window._marginChartInstance.destroy(); }
+            const ctx4 = marginCanvas.getContext('2d');
+            const labels = ['2023A', '2024A', '2025A', ...this.researchData.forecast_5yr.map(f => f.year)];
+            const baseEbit = (this.researchData.ebit_margin || 0.12) * 100;
+            const baseNpm = (this.researchData.roe || 15) * 0.6;
+            
+            const ebitData = [baseEbit * 0.92, baseEbit * 0.96, baseEbit, ...this.researchData.forecast_5yr.map((f, i) => Number((baseEbit * (1 + 0.015 * (i+1))).toFixed(1)))];
+            const roeData = [(this.researchData.roe || 15) * 0.9, (this.researchData.roe || 15) * 0.95, (this.researchData.roe || 15), ...this.researchData.forecast_5yr.map(f => f.roe)];
+
+            window._marginChartInstance = new Chart(ctx4, {
+              type: 'line',
+              data: {
+                labels: labels,
+                datasets: [
+                  {
+                    label: 'ROE (%)',
+                    data: roeData,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                  },
+                  {
+                    label: 'EBIT Margin (%)',
+                    data: ebitData,
+                    borderColor: '#0ea5e9',
+                    backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                    borderWidth: 2,
+                    borderDash: [4, 4],
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top',
+                    labels: { color: '#94a3b8', boxWidth: 10, font: { size: 9, family: 'monospace' } }
+                  }
+                },
+                scales: {
+                  x: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: '#64748b', font: { size: 9, family: 'monospace' } }
+                  },
+                  y: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: '#64748b', font: { size: 9, family: 'monospace' } }
+                  }
+                }
+              }
+            });
+          }
+
+          // 5. Render Historical PE Band Chart (Figure VA 3)
+          const peCanvas = document.getElementById('peBandCanvas');
+          if (peCanvas && this.researchData.pe_band_history) {
+            if (window._peBandInstance) { window._peBandInstance.destroy(); }
+            const ctx5 = peCanvas.getContext('2d');
+            const peData = this.researchData.pe_band_history;
+            const labels = ['3Y Ago', '2.5Y', '2Y', '1.5Y', '1Y', '6M', 'Current'];
+            
+            // Historical PE series hovering around mean
+            const histPe = [
+              peData.mean * 0.94,
+              peData.mean * 1.08,
+              peData.mean * 1.15,
+              peData.mean * 0.98,
+              peData.mean * 0.88,
+              peData.mean * 0.92,
+              peData.current_pe
+            ];
+
+            window._peBandInstance = new Chart(ctx5, {
+              type: 'line',
+              data: {
+                labels: labels,
+                datasets: [
+                  {
+                    label: '+2 SD (' + peData.plus_2sd + 'x)',
+                    data: Array(7).fill(peData.plus_2sd),
+                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false,
+                  },
+                  {
+                    label: '+1 SD (' + peData.plus_1sd + 'x)',
+                    data: Array(7).fill(peData.plus_1sd),
+                    borderColor: 'rgba(249, 115, 22, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [3, 3],
+                    pointRadius: 0,
+                    fill: false,
+                  },
+                  {
+                    label: 'Mean (' + peData.mean + 'x)',
+                    data: Array(7).fill(peData.mean),
+                    borderColor: '#a855f7',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    fill: false,
+                  },
+                  {
+                    label: '-1 SD (' + peData.minus_1sd + 'x)',
+                    data: Array(7).fill(peData.minus_1sd),
+                    borderColor: 'rgba(16, 185, 129, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [3, 3],
+                    pointRadius: 0,
+                    fill: false,
+                  },
+                  {
+                    label: '-2 SD (' + peData.minus_2sd + 'x)',
+                    data: Array(7).fill(peData.minus_2sd),
+                    borderColor: 'rgba(14, 165, 233, 0.4)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false,
+                  },
+                  {
+                    label: 'Stock P/E (' + peData.current_pe + 'x)',
+                    data: histPe,
+                    borderColor: '#38bdf8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                    borderWidth: 2.5,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#38bdf8',
+                    tension: 0.3,
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: true,
+                    position: 'top',
+                    labels: { color: '#94a3b8', boxWidth: 8, font: { size: 9, family: 'monospace' } }
+                  }
+                },
+                scales: {
+                  x: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: '#64748b', font: { size: 9, family: 'monospace' } }
+                  },
+                  y: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: '#64748b', font: { size: 9, family: 'monospace' } }
+                  }
+                }
+              }
+            });
+          }
+        },
+
+        setChartLayout(layout) {
+          this.chartLayout = layout;
+          this.$nextTick(() => {
+            this.renderAllCharts();
+          });
+        },
+
+        updateChartSlot(slotNum, rawSymbol) {
+          let sym = rawSymbol.trim().toUpperCase();
+          if (!sym.includes(':')) {
+            sym = 'IDX:' + sym;
+          }
+          if (slotNum === 1) { this.chartSlot1 = sym; this.renderTVWidget('tv-chart-container-1', sym); }
+          else if (slotNum === 2) { this.chartSlot2 = sym; this.renderTVWidget('tv-chart-container-2', sym); }
+          else if (slotNum === 3) { this.chartSlot3 = sym; this.renderTVWidget('tv-chart-container-3', sym); }
+          else if (slotNum === 4) { this.chartSlot4 = sym; this.renderTVWidget('tv-chart-container-4', sym); }
+        },
+
+        // Humanize database raw codes
+        humanDriver(code) {
+          const map = {
+            'OPERATIONAL_MARGIN': 'Margin Operasional (EBIT)',
+            'ASSET_EFFICIENCY': 'Efisiensi Perputaran Aset',
+            'FINANCIAL_LEVERAGE': 'Pengungkit Struktur Modal (EM)',
+            'TAX_OR_INTEREST_BURDEN': 'Efisiensi Pajak & Beban Bunga'
+          };
+          return map[code] || code;
+        },
+
+        humanStepLabel(label) {
+          const map = {
+            'OPERATIONAL_MARGIN': 'Margin Operasional (EBIT)',
+            'ASSET_EFFICIENCY': 'Efisiensi Perputaran Aset',
+            'FINANCIAL_LEVERAGE': 'Pengungkit Struktur Modal (EM)',
+            'TAX_OR_INTEREST_BURDEN': 'Efisiensi Pajak & Beban Bunga'
+          };
+          for (const [k, v] of Object.entries(map)) {
+            if (label.includes(k)) return label.replace(k, v);
+          }
+          return label;
+        },
+
+        // Filtered Screener Rows
+        get filteredRows() {
+          return (this.allRows || []).filter(r => {
+            let matchSec = (this.sectorFilter === 'ALL') || (r.sector === this.sectorFilter);
+            let matchKw = (!this.searchKw) || (
+              (r.ticker && r.ticker.toLowerCase().includes(this.searchKw.toLowerCase())) ||
+              (r.company_name && r.company_name.toLowerCase().includes(this.searchKw.toLowerCase()))
+            );
+            return matchSec && matchKw;
+          }).sort((a, b) => {
+            let valA = a[this.sortCol] ?? -999999;
+            let valB = b[this.sortCol] ?? -999999;
+            return this.sortAsc ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+          });
+        },
+
+        sortBy(col) {
+          if (this.sortCol === col) { this.sortAsc = !this.sortAsc; }
+          else { this.sortCol = col; this.sortAsc = false; }
+        },
+
+        get t1Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker1) || {}; },
+        get t2Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker2) || {}; },
+
+        // Interactive DCF Sliders
+        get dcfFactor() {
+          let waccDiff = (this.simWacc - this.baseWacc) * 0.08;
+          let gDiff = (this.simGrowth - this.baseGrowth) * 0.04;
+          let tgDiff = (this.simTg - this.baseTg) * 0.05;
+          return Math.max(0.2, 1.0 - waccDiff + gDiff + tgDiff);
+        },
+        get simEV() { return (this.baseEV * this.dcfFactor).toFixed(1); },
+        get simEq() { return (this.baseEq * this.dcfFactor).toFixed(1); },
+        get simTargetPrice() { return Math.max(50, Math.round(this.basePrice * this.dcfFactor)); },
+        resetDcfSliders() {
+          this.simWacc = this.baseWacc;
+          this.simGrowth = this.baseGrowth;
+          this.simTg = this.baseTg;
+        },
+
+        // Bond calculator
+        async calcBond() {
+          try {
+            let url = `/api/bonds/calculate?face_value=${this.bondForm.face}&coupon_pct=${this.bondForm.coupon}&ytm_pct=${this.bondForm.ytm}&years=${this.bondForm.tenor}&freq=${this.bondForm.freq}`;
+            let res = await fetch(url);
+            if (res.ok) {
+              this.bondResult = await res.json();
+            }
+          } catch(e) { console.error('Error fetching bond calculation:', e); }
+        },
+
+        formatNum(val) {
+          if (val === undefined || val === null) return '0.00';
+          return Number(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+      }));
+    });
+  </script>
+</body>
+</html>

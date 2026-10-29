@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>DuPont Institutional Tear-Sheet — {{ bundle.current.ticker }}</title>
+  <style>
+    @page { size: A4 portrait; margin: 14mm; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 12px; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+    .title { font-size: 18px; font-weight: 800; }
+    .badge { background: #0f172a; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+    .box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-bottom: 14px; background: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #cbd5e1; padding: 7px 9px; text-align: left; }
+    th { background: #e2e8f0; font-weight: 700; }
+    .verdict { font-weight: 700; color: #047857; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body onload="if(window.location.search.includes('autoprint=1')) window.print();">
+  <div class="no-print" style="background:#0f172a;color:#fff;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+    <span>Institutional Equity Research Tear-Sheet — {{ bundle.current.ticker }}</span>
+    <button onclick="window.print()" style="background:#10b981;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:700;">Cetak / Simpan PDF</button>
+  </div>
+
+  <div class="header">
+    <div>
+      <div class="title">{{ bundle.current.ticker }} — {{ bundle.current.company_name }}</div>
+      <div>Periode: {{ bundle.current.year }} ({{ bundle.current.period_type.value }}) | Primary Driver: <strong>{{ bundle.primary_driver.value }}</strong></div>
+    </div>
+    <div class="badge">5-STAGE DUPONT &amp; ALK REPORT</div>
+  </div>
+
+  <div class="box">
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px;">{{ anomaly.headline }}</div>
+    <div class="verdict">Verdict: {{ anomaly.quality_verdict }}</div>
+    <p>{{ anomaly.driver_explanation }}</p>
+    <ul>
+      {% for b in anomaly.anomaly_bullets %}
+      <li>{{ b }}</li>
+      {% endfor %}
+    </ul>
+    <div><strong>Risk Watchout:</strong> {{ anomaly.risk_watchout }}</div>
+  </div>
+
+  <h3>Dekomposisi Struktur 3-Stage &amp; 5-Stage DuPont</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Komponen Rasio</th>
+        <th>Formula Standar IDX</th>
+        <th>Nilai Periode Berjalan</th>
+        <th>Perubahan YoY</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for node in bundle.tree_nodes %}
+      <tr>
+        <td><strong>{{ node.label }}</strong></td>
+        <td>{{ node.formula }}</td>
+        <td><strong>{{ node.value }}</strong></td>
+        <td>{{ node.yoy }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

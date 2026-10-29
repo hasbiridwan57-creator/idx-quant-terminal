@@ -1,0 +1,1027 @@
+<!-- ============================================================
+TAB 7: INSTITUTIONAL EQUITY RESEARCH PAPER
+Format acuan: CFA Institute Research Challenge
+Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang).
+============================================================ -->
+<div x-show="activeNav === 'research'" class="space-y-6">
+
+  <!-- MASTHEAD -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-2xl p-6 shadow-xl relative overflow-hidden">
+    <div class="absolute -right-16 -top-16 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2">
+          <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">CFA RESEARCH CHALLENGE FORMAT</span>
+          <span class="px-2.5 py-0.5 rounded text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">LIVE COMPUTE</span>
+        </div>
+        <h1 class="text-3xl font-black text-white tracking-tight flex items-baseline gap-3">
+          <span x-text="researchData ? researchData.company_name : ticker"></span>
+          <span class="text-lg font-mono font-medium text-slate-400" x-text="'(IDX: ' + ticker + ')'"></span>
+        </h1>
+        <div class="flex items-center gap-3 text-xs text-slate-400 font-mono">
+          <span>Sector: <strong class="text-slate-200" x-text="researchData ? researchData.sector : 'N/A'"></strong></span>
+          <span>•</span>
+          <span x-text="researchData ? ('Price as of ' + researchData.report_date) : 'Price N/A'"></span>
+        </div>
+      </div>
+      <div class="flex items-center gap-5 bg-[#080C14]/90 border border-white/[0.08] p-4 rounded-xl">
+        <div class="text-right">
+          <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400">Recommendation</div>
+          <div class="text-3xl font-black tracking-wide"
+               :class="researchData && researchData.recommendation === 'BUY' ? 'text-emerald-400' : (researchData && researchData.recommendation === 'SELL' ? 'text-rose-400' : 'text-amber-400')"
+               x-text="researchData ? researchData.recommendation : '—'"></div>
+          <div class="text-xs font-mono text-slate-300">
+            Target: <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
+            (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+                   x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(0) + '% ' + (researchData.upside_pct >= 0 ? 'Up' : 'Down') + 'side') : 'N/A'"></span>)
+          </div>
+        </div>
+        <div class="h-12 w-px bg-white/[0.08]"></div>
+        <div class="text-left">
+          <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400">Current Price</div>
+          <div class="text-2xl font-black font-mono text-white" x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIG 1/2/3 + EXECUTIVE SUMMARY -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div class="lg:col-span-4 space-y-6">
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl overflow-hidden shadow-sm">
+        <div class="bg-[#161F30] px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 1: Company Statistics</span>
+          <span class="text-[10px] font-mono text-sky-400">MARKET</span>
+        </div>
+        <table class="w-full text-xs font-mono">
+          <tbody class="divide-y divide-white/[0.04]">
+            <tr><td class="px-4 py-2.5 text-slate-400">Last Close</td><td class="px-4 py-2.5 text-right text-white font-semibold" x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Market Cap</td><td class="px-4 py-2.5 text-right text-white" x-text="researchData ? 'Rp ' + Number(researchData.market_cap_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Shares Outstanding</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? Number(researchData.shares_outstanding_m).toLocaleString('id-ID', {maximumFractionDigits:0}) + ' M' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">52-Week High</td><td class="px-4 py-2.5 text-right text-slate-200">
+              <template x-if="researchData && researchData.week52_high"><span x-text="'Rp ' + Number(researchData.week52_high).toLocaleString('id-ID')"></span></template>
+              <template x-if="!researchData || !researchData.week52_high"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">52-Week Low</td><td class="px-4 py-2.5 text-right text-slate-200">
+              <template x-if="researchData && researchData.week52_low"><span x-text="'Rp ' + Number(researchData.week52_low).toLocaleString('id-ID')"></span></template>
+              <template x-if="!researchData || !researchData.week52_low"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">EV / Revenue (LTM)</td><td class="px-4 py-2.5 text-right text-slate-200">
+              <template x-if="researchData && researchData.ev_to_ntm_revenue"><span x-text="Number(researchData.ev_to_ntm_revenue).toFixed(1) + 'x'"></span></template>
+              <template x-if="!researchData || !researchData.ev_to_ntm_revenue"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">P/E</td><td class="px-4 py-2.5 text-right text-slate-200">
+              <template x-if="researchData && researchData.pe_ratio"><span x-text="Number(researchData.pe_ratio).toFixed(1) + 'x'"></span></template>
+              <template x-if="!researchData || !researchData.pe_ratio"><span class="text-slate-500">N/A (Rugi)</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">P/BV</td><td class="px-4 py-2.5 text-right text-slate-200">
+              <template x-if="researchData && researchData.pbv_ratio"><span x-text="Number(researchData.pbv_ratio).toFixed(2) + 'x'"></span></template>
+              <template x-if="!researchData || !researchData.pbv_ratio"><span class="text-slate-500">N/A</span></template></td></tr>
+          </tbody>
+        </table>
+        <div class="px-4 py-2 border-t border-white/[0.04] text-[10px] text-slate-500 font-mono">Source: IDX market data, 2026</div>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl overflow-hidden shadow-sm">
+        <div class="bg-[#161F30] px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 2: Valuation Results</span>
+          <span class="text-[10px] font-mono text-purple-400">COMPUTED</span>
+        </div>
+        <table class="w-full text-xs font-mono">
+          <thead><tr class="text-slate-500 text-[10px]">
+            <th class="px-4 py-2 text-left font-normal">Method</th>
+            <th class="px-4 py-2 text-right font-normal">Weight</th>
+            <th class="px-4 py-2 text-right font-normal">Value</th></tr></thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            <tr><td class="px-4 py-2.5 text-slate-300">DCF – Terminal Growth</td><td class="px-4 py-2.5 text-right text-slate-400">40%</td><td class="px-4 py-2.5 text-right text-white font-semibold">
+              <template x-if="researchData && researchData.dcf_fair_value"><span x-text="'Rp ' + Number(researchData.dcf_fair_value).toLocaleString('id-ID')"></span></template>
+              <template x-if="!researchData || !researchData.dcf_fair_value"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-300">Exit Multiple</td><td class="px-4 py-2.5 text-right text-slate-400">35%</td><td class="px-4 py-2.5 text-right text-white font-semibold">
+              <template x-if="researchData && researchData.exit_multiple_fair_value"><span x-text="'Rp ' + Number(researchData.exit_multiple_fair_value).toLocaleString('id-ID')"></span></template>
+              <template x-if="!researchData || !researchData.exit_multiple_fair_value"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-300">Relative Comps</td><td class="px-4 py-2.5 text-right text-slate-400">25%</td><td class="px-4 py-2.5 text-right text-white font-semibold">
+              <template x-if="researchData && researchData.relative_fair_value"><span x-text="'Rp ' + Number(researchData.relative_fair_value).toLocaleString('id-ID')"></span></template>
+              <template x-if="!researchData || !researchData.relative_fair_value"><span class="text-slate-500">N/A</span></template></td></tr>
+            <tr class="bg-blue-600/10"><td class="px-4 py-2.5 text-blue-300 font-bold">Target Price (Blended)</td><td class="px-4 py-2.5 text-right text-blue-300">—</td><td class="px-4 py-2.5 text-right text-blue-300 font-black" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Implied Upside / (Downside)</td><td class="px-4 py-2.5 text-right text-slate-400">—</td><td class="px-4 py-2.5 text-right font-bold" :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '%') : 'N/A'"></td></tr>
+          </tbody>
+        </table>
+        <div class="px-4 py-2 border-t border-white/[0.04] text-[10px] text-slate-500 font-mono">Source: IDX-Quant engine, 2026</div>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl overflow-hidden shadow-sm">
+        <div class="bg-[#161F30] px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 3: Financial Snapshot</span>
+          <span class="text-[10px] font-mono text-emerald-400">REPORTED</span>
+        </div>
+        <table class="w-full text-xs font-mono">
+          <tbody class="divide-y divide-white/[0.04]">
+            <tr><td class="px-4 py-2.5 text-slate-400">Revenue (FY)</td><td class="px-4 py-2.5 text-right text-white font-semibold" x-text="researchData ? 'Rp ' + Number(researchData.revenue_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">EBIT (FY)</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? 'Rp ' + Number(researchData.ebit_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Net Income to Parent</td><td class="px-4 py-2.5 text-right text-emerald-400 font-semibold" x-text="researchData ? 'Rp ' + Number(researchData.net_income_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Total Assets</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? 'Rp ' + Number(researchData.total_assets_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Equity to Parent</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? 'Rp ' + Number(researchData.total_equity_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Net Cash / (Net Debt)</td><td class="px-4 py-2.5 text-right font-bold" :class="researchData && researchData.net_cash_bn >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="researchData ? 'Rp ' + Number(researchData.net_cash_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">ROE</td><td class="px-4 py-2.5 text-right text-emerald-400 font-bold" x-text="researchData ? researchData.roe_pct.toFixed(1) + '%' : 'N/A'"></td></tr>
+          </tbody>
+        </table>
+        <div class="px-4 py-2 border-t border-white/[0.04] text-[10px] text-slate-500 font-mono">Source: Audited BEI filings — Entitas Induk</div>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 27: Football Field</span>
+          <span class="text-[10px] font-mono text-purple-400">TARGET BAND</span>
+        </div>
+        <div class="relative h-44 w-full"><canvas id="footballFieldCanvas"></canvas></div>
+        <div class="pt-1 flex items-center justify-between text-[11px] font-mono text-slate-400 border-t border-white/[0.04]">
+          <span>Current: <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></strong></span>
+          <span>Target: <strong class="text-blue-400" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="lg:col-span-8 space-y-6">
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+            <h2 class="text-sm font-bold text-white uppercase tracking-wider">Executive Summary</h2>
+          </div>
+          <button @click="generateLlmResearchThesis()" :disabled="llmThesisLoading"
+                  class="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-mono transition-all">
+            <span x-show="!llmThesisLoading">Generate AI Thesis</span>
+            <span x-show="llmThesisLoading" class="animate-pulse">Synthesizing...</span>
+          </button>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed text-justify">
+          Kami menginisiasi pandangan <strong class="text-white" x-text="researchData ? researchData.recommendation : '—'"></strong> untuk
+          <strong class="text-white" x-text="researchData ? researchData.company_name : ticker"></strong> (IDX: <span x-text="ticker"></span>)
+          dengan target harga 12-bulan <strong class="text-blue-400" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
+          (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+                 x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '% ' + (researchData.upside_pct >= 0 ? 'upside' : 'downside') : '')"></span>
+          dari harga terakhir <span x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></span>).
+          Valuasi berbasis DCF yang dibobot ke nilai intrinsik (Figure 2).
+          <span x-text="researchData ? ('ROE tercatat ' + researchData.roe_pct.toFixed(1) + '% dengan P/E ' + Number(researchData.pe_ratio).toFixed(1) + 'x dan P/BV ' + Number(researchData.pbv_ratio).toFixed(2) + 'x.') : ''"></span>
+        </p>
+        <div x-show="llmResearchText" class="p-4 bg-gradient-to-r from-purple-950/40 via-slate-900 to-[#0E1525] border border-purple-500/30 rounded-xl space-y-2">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+            <span class="text-[11px] font-mono text-purple-300 font-bold uppercase tracking-wider">AI Institutional Thesis</span>
+          </div>
+          <div class="text-xs text-slate-200 leading-relaxed space-y-2 text-justify" x-html="llmResearchText"></div>
+        </div>
+        <div class="pt-2 space-y-2.5">
+          <span class="text-xs font-bold text-slate-300 uppercase tracking-wider block">Investment Thesis Highlights</span>
+          <template x-for="(pillar, idx) in (researchData ? researchData.investment_thesis : [])" :key="idx">
+            <div class="p-3 bg-[#080C14] border border-white/[0.06] rounded-xl flex items-start gap-3">
+              <span class="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-xs font-mono font-bold flex items-center justify-center shrink-0 mt-0.5" x-text="idx + 1"></span>
+              <p class="text-xs text-slate-200 leading-relaxed" x-text="pillar"></p>
+            </div>
+          </template>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          <div class="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-xl space-y-1.5">
+            <span class="text-[10px] font-mono text-emerald-400 font-bold uppercase">Bull Catalysts</span>
+            <ul class="space-y-1">
+              <template x-for="(c, i) in (researchData ? researchData.bull_catalysts : [])" :key="i">
+                <li class="text-[11px] text-slate-300 leading-relaxed flex gap-1.5"><span class="text-emerald-400">•</span><span x-text="c"></span></li>
+              </template>
+            </ul>
+          </div>
+          <div class="p-3 bg-rose-950/20 border border-rose-500/20 rounded-xl space-y-1.5">
+            <span class="text-[10px] font-mono text-rose-400 font-bold uppercase">Bear Risks</span>
+            <ul class="space-y-1">
+              <template x-for="(risk, i) in (researchData ? researchData.bear_risks : [])" :key="i">
+                <li class="text-[11px] text-slate-300 leading-relaxed flex gap-1.5"><span class="text-rose-400">•</span><span x-text="risk"></span></li>
+              </template>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 4: Stock Price (Monthly Close)</span>
+          <span class="text-[10px] font-mono text-sky-400">REAL QUOTES</span>
+        </div>
+        <div class="relative h-52 w-full"><canvas id="priceHistoryCanvas"></canvas></div>
+        <p class="text-[11px] text-slate-400 leading-relaxed">
+          <template x-if="researchData && researchData.price_series_monthly && researchData.price_series_monthly.length > 0">
+            <span>Dibangun dari harga penutupan harian aktual, periode <span x-text="researchData.price_series_monthly[0].label"></span> – <span x-text="researchData.price_series_monthly[researchData.price_series_monthly.length - 1].label"></span>.</span>
+          </template>
+          <template x-if="!researchData || !researchData.price_series_monthly || researchData.price_series_monthly.length === 0">
+            <span class="text-amber-400">Histori harga belum tersedia di database lokal (N/A).</span>
+          </template>
+        </p>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Figure 5: Revenue by Segment</span>
+          <span class="text-[10px] font-mono text-emerald-400">REAL CALK</span>
+        </div>
+        <div class="relative h-44 w-full flex items-center justify-center"><canvas id="revenueSegmentCanvas"></canvas></div>
+        <div class="space-y-1.5 pt-2 border-t border-white/[0.04] text-[11px] font-mono">
+          <template x-if="researchData && researchData.segment_breakdown && researchData.segment_breakdown.length > 0">
+            <template x-for="seg in researchData.segment_breakdown" :key="seg.segment">
+              <div class="flex items-center justify-between text-slate-300">
+                <span class="truncate pr-2 text-slate-400" x-text="seg.segment"></span>
+                <span class="text-white font-semibold" x-text="seg.share_pct + '%'"></span>
+              </div>
+            </template>
+          </template>
+          <template x-if="!researchData || !researchData.segment_breakdown || researchData.segment_breakdown.length === 0">
+            <div class="flex items-center gap-2 text-amber-500/80 text-[10px] font-mono">
+              <span class="px-2 py-1 bg-amber-500/10 rounded text-amber-400">N/A</span>
+              <span>Data segmentasi audited belum tersedia — tidak dikarang.</span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BUSINESS OVERVIEW + HISTORICAL + DUPONT -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div class="lg:col-span-8 space-y-6">
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+            <h2 class="text-sm font-bold text-white uppercase tracking-wider">Business Overview &amp; Growth History</h2>
+          </div>
+          <span class="text-[10px] font-mono text-indigo-400">REPORTED</span>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed text-justify">
+          <strong class="text-white" x-text="researchData ? researchData.company_name : ticker"></strong> beroperasi di sektor
+          <strong x-text="researchData ? researchData.sector : 'N/A'"></strong>. Pendapatan FY terakhir
+          <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.revenue_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' Miliar' : 'N/A'"></strong>
+          dengan laba bersih entitas induk
+          <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.net_income_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' Miliar' : 'N/A'"></strong>
+          (net margin <span x-text="researchData ? ((researchData.net_income_bn / researchData.revenue_bn) * 100).toFixed(1) + '%' : 'N/A'"></span>).
+        </p>
+        <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+          <table class="w-full text-xs font-mono text-center">
+            <thead><tr class="bg-[#161F30] text-slate-300">
+              <th class="px-3 py-2.5 text-left">Metrik (Rp Miliar)</th>
+              <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="h.year">
+                <th class="px-3 py-2.5"><span x-text="'FY' + h.year"></span><sup class="text-emerald-400 ml-0.5">A</sup></th>
+              </template></tr></thead>
+            <tbody class="divide-y divide-white/[0.04]">
+              <tr><td class="px-3 py-2 text-left text-slate-400">Pendapatan</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'rev' + h.year">
+                  <td class="px-3 py-2 text-white" x-text="Number(h.revenue_bn).toLocaleString('id-ID', {maximumFractionDigits:1})"></td></template></tr>
+              <tr><td class="px-3 py-2 text-left text-slate-400">EBIT</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'ebit' + h.year">
+                  <td class="px-3 py-2 text-slate-200">
+                    <template x-if="h.ebit_bn !== null"><span x-text="Number(h.ebit_bn).toLocaleString('id-ID', {maximumFractionDigits:1})"></span></template>
+                    <template x-if="h.ebit_bn === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+              <tr><td class="px-3 py-2 text-left text-slate-400">Laba Bersih Induk</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'ni' + h.year">
+                  <td class="px-3 py-2 text-emerald-400" x-text="Number(h.net_income_bn).toLocaleString('id-ID', {maximumFractionDigits:1})"></td></template></tr>
+              <tr><td class="px-3 py-2 text-left text-slate-400">Total Aset</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'ta' + h.year">
+                  <td class="px-3 py-2 text-slate-200" x-text="Number(h.total_assets_bn).toLocaleString('id-ID', {maximumFractionDigits:1})"></td></template></tr>
+              <tr><td class="px-3 py-2 text-left text-slate-400">Ekuitas Induk</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'te' + h.year">
+                  <td class="px-3 py-2 text-slate-200" x-text="Number(h.total_equity_bn).toLocaleString('id-ID', {maximumFractionDigits:1})"></td></template></tr>
+              <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-amber-400 font-semibold">ROE (%)</td>
+                <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'roe' + h.year">
+                  <td class="px-3 py-2 text-amber-400 font-bold">
+                    <template x-if="h.roe_pct !== null"><span x-text="h.roe_pct.toFixed(1) + '%'"></span></template>
+                    <template x-if="h.roe_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="text-[10px] text-slate-500 font-mono">
+          <template x-if="researchData && researchData.historical_financials && researchData.historical_financials.length > 0">
+            <span>Source: Audited FY filings (BEI) — <span x-text="researchData.historical_financials.length"></span> tahun data riil.</span>
+          </template>
+          <template x-if="!researchData || !researchData.historical_financials || researchData.historical_financials.length === 0">
+            <span class="text-amber-400">Histori multi-tahun belum tersedia untuk emiten ini.</span>
+          </template>
+        </div>
+      </div>
+
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            <h2 class="text-sm font-bold text-white uppercase tracking-wider">Financial Analysis — DuPont Decomposition</h2>
+          </div>
+          <span class="text-[10px] font-mono text-slate-400">COMPUTED</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+          <div class="md:col-span-5 relative h-56 w-full flex items-center justify-center"><canvas id="dupontRadarCanvas"></canvas></div>
+          <div class="md:col-span-7 space-y-2 font-mono text-xs">
+            <div class="grid grid-cols-5 gap-2 text-center">
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Tax Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? (researchData.tax_burden * 100).toFixed(1) + '%' : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Interest Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? (researchData.interest_burden * 100).toFixed(1) + '%' : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">EBIT Margin</div><div class="text-xs font-bold text-emerald-400 mt-1" x-text="researchData ? (researchData.ebit_margin * 100).toFixed(1) + '%' : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Asset Turnover</div><div class="text-xs font-bold text-sky-400 mt-1" x-text="researchData ? researchData.asset_turnover.toFixed(2) + 'x' : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Eq. Multiplier</div><div class="text-xs font-bold text-amber-400 mt-1" x-text="researchData ? researchData.equity_multiplier.toFixed(2) + 'x' : 'N/A'"></div></div>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed font-sans pt-2 text-justify">
+              Dekomposisi 5-tahap: ROE <span class="font-mono" x-text="researchData ? researchData.roe_pct.toFixed(1) + '%' : 'N/A'"></span>
+              dari margin operasi <span x-text="researchData ? (researchData.ebit_margin * 100).toFixed(1) + '%' : 'N/A'"></span>,
+              perputaran aset <span x-text="researchData ? researchData.asset_turnover.toFixed(2) + 'x' : 'N/A'"></span>,
+              pengganda ekuitas <span x-text="researchData ? researchData.equity_multiplier.toFixed(2) + 'x' : 'N/A'"></span>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-5 shadow-sm space-y-3">
+          <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+            <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Earnings Quality Audit</span>
+            <span class="text-[10px] font-mono text-cyan-400">SLOAN</span>
+          </div>
+          <div class="space-y-1.5 font-mono text-xs">
+            <div class="flex justify-between"><span class="text-slate-400">Sloan Accrual Ratio</span><strong class="text-slate-200" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.sloan_accrual_ratio.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <div class="flex justify-between"><span class="text-slate-400">OCF / Net Income</span><strong class="text-emerald-400" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.ocf_to_ni.toFixed(2) + 'x' : 'N/A'"></strong></div>
+            <div class="flex justify-between"><span class="text-slate-400">Verdict</span><strong class="text-slate-200 text-right" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.verdict : 'N/A'"></strong></div>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed text-justify" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.commentary : ''"></p>
+        </div>
+        <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-5 shadow-sm space-y-3">
+          <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+            <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">P/E Band vs History</span>
+            <span class="text-[10px] font-mono text-sky-400" x-text="researchData && researchData.pe_band_history ? researchData.pe_band_history.valuation_regime : 'N/A'"></span>
+          </div>
+          <div class="relative h-44 w-full flex items-center justify-center"><canvas id="peBandCanvas"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lg:col-span-4 space-y-6">
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Macro Indicators</span>
+          <span class="text-[10px] font-mono text-indigo-400">BPS / BI</span>
+        </div>
+        <div class="space-y-1.5 font-mono text-xs">
+          <div class="flex justify-between"><span class="text-slate-400">PDB Indonesia</span><strong class="text-slate-200" x-text="researchData?.macro_indicators?.gdp_growth || 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">BI-Rate</span><strong class="text-emerald-400" x-text="researchData?.macro_indicators?.bi_rate || 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">PMTB (GFCF)</span><strong class="text-sky-400" x-text="researchData?.macro_indicators?.gfcf_growth || 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">Inflasi IHK</span><strong class="text-slate-200" x-text="researchData?.macro_indicators?.inflation_cpi || 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">USD/IDR</span><strong class="text-amber-400" x-text="researchData?.macro_indicators?.fx_usd_idr || 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">SBN 10Y</span><strong class="text-slate-200" x-text="researchData?.macro_indicators?.sbn_10y || 'N/A'"></strong></div>
+        </div>
+      </div>
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Market Risk Profile</span>
+          <span class="text-[10px] font-mono text-cyan-400">COMPUTED</span>
+        </div>
+        <div class="space-y-1.5 font-mono text-xs">
+          <div class="flex justify-between items-center"><span class="text-slate-400">Beta vs IHSG (2Y daily)</span>
+            <template x-if="researchData && researchData.beta_vs_ihsg"><strong class="text-cyan-400" x-text="researchData.beta_vs_ihsg.toFixed(2) + 'x'"></strong></template>
+            <template x-if="!researchData || !researchData.beta_vs_ihsg"><strong class="text-slate-500">N/A</strong></template></div>
+          <div class="flex justify-between items-center"><span class="text-slate-400">Hurst Exponent</span><strong class="text-sky-400" x-text="researchData ? researchData.hurst_exponent.toFixed(3) : 'N/A'"></strong></div>
+          <div class="flex justify-between items-center"><span class="text-slate-400">Technical Signal</span><strong class="text-emerald-400" x-text="researchData ? researchData.technical_signal : 'N/A'"></strong></div>
+          <div class="flex justify-between items-center"><span class="text-slate-400">Confidence</span><strong class="text-slate-200" x-text="researchData ? researchData.technical_confidence.toFixed(0) + '%' : 'N/A'"></strong></div>
+        </div>
+      </div>
+      <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Segment Detail</span>
+          <span class="text-[10px] font-mono text-emerald-400">CALK</span>
+        </div>
+        <div class="space-y-2 text-[11px] font-mono">
+          <template x-if="researchData && researchData.segment_breakdown && researchData.segment_breakdown.length > 0">
+            <template x-for="seg in researchData.segment_breakdown" :key="'d' + seg.segment">
+              <div class="p-2 bg-[#080C14] border border-white/[0.04] rounded-lg space-y-1">
+                <div class="flex justify-between"><span class="text-slate-300" x-text="seg.segment"></span><span class="text-white font-semibold" x-text="seg.share_pct + '%'"></span></div>
+                <div class="flex justify-between text-slate-500"><span>Margin</span><span class="text-slate-400" x-text="seg.margin || 'N/A'"></span></div>
+                <div class="flex justify-between text-slate-500"><span>Growth YoY</span><span class="text-emerald-400" x-text="seg.growth_yoy || 'N/A'"></span></div>
+              </div>
+            </template>
+          </template>
+          <template x-if="!researchData || !researchData.segment_breakdown || researchData.segment_breakdown.length === 0">
+            <div class="text-amber-400 text-[10px]">N/A — data segmen tidak tersedia.</div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VALUATION -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Valuation</h2>
+      </div>
+      <span class="text-[10px] font-mono text-amber-400">DCF + MULTIPLES</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- FIGURE 28: CAPM / Cost of Equity Build-Up -->
+      <div class="p-4 bg-[#080C14] border border-white/[0.06] rounded-xl space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-mono text-slate-500 uppercase">Fig 28 · CAPM Build-Up</span>
+          <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">COMPUTED</span>
+        </div>
+        <div class="space-y-1 font-mono text-[11px] pt-1">
+          <div class="flex justify-between"><span class="text-slate-400">Risk-Free (SBN 10Y)</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.rf_pct !== null ? researchData.wacc_build_up.rf_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">Equity Risk Premium</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.erp_pct !== null ? researchData.wacc_build_up.erp_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">Beta vs IHSG</span>
+            <strong class="text-cyan-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.beta !== null ? researchData.wacc_build_up.beta.toFixed(3) + 'x' : 'N/A'"></strong></div>
+          <div class="flex justify-between border-t border-white/[0.06] pt-1 mt-1">
+            <span class="text-slate-300 font-semibold">Cost of Equity (Ke)</span>
+            <strong class="text-emerald-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.ke_pct !== null ? researchData.wacc_build_up.ke_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="text-[9px] text-slate-500 pt-0.5" x-text="researchData && researchData.wacc_build_up ? 'Ke = Rf + β × ERP' : ''"></div>
+        </div>
+      </div>
+
+      <!-- FIGURE 29: Cost of Debt & Capital Structure -->
+      <div class="p-4 bg-[#080C14] border border-white/[0.06] rounded-xl space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-mono text-slate-500 uppercase">Fig 29 · CoD &amp; Structure</span>
+          <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-purple-500/10 text-purple-400 border border-purple-500/20">COMPUTED</span>
+        </div>
+        <div class="space-y-1 font-mono text-[11px] pt-1">
+          <div class="flex justify-between"><span class="text-slate-400">CoD Pre-Tax</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.cod_pre_tax_pct !== null ? researchData.wacc_build_up.cod_pre_tax_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">Effective Tax Rate</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.etr_pct !== null ? researchData.wacc_build_up.etr_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">CoD Post-Tax</span>
+            <strong class="text-amber-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.kd_post_tax_pct !== null ? researchData.wacc_build_up.kd_post_tax_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between border-t border-white/[0.06] pt-1 mt-1"><span class="text-slate-400">Weight Equity</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.we_pct !== null ? researchData.wacc_build_up.we_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between"><span class="text-slate-400">Weight Debt</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wd_pct !== null ? researchData.wacc_build_up.wd_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+          <div class="text-[9px] text-slate-500 pt-0.5" x-text="researchData && researchData.wacc_build_up ? researchData.wacc_build_up.debt_provenance : ''"></div>
+        </div>
+      </div>
+
+      <!-- WACC + Justified PBV (Bank) -->
+      <div class="p-4 bg-[#080C14] border border-white/[0.06] rounded-xl space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-mono text-slate-500 uppercase">WACC</span>
+          <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                x-text="researchData && researchData.wacc_build_up ? researchData.wacc_build_up.method : 'N/A'"></span>
+        </div>
+        <div class="text-2xl font-black text-purple-400"
+             x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wacc_pct !== null ? researchData.wacc_build_up.wacc_pct.toFixed(2) + '%' : 'N/A'"></div>
+        <div class="flex justify-between font-mono text-[11px] pt-1"><span class="text-slate-400">Terminal Growth</span>
+          <strong class="text-slate-200" x-text="researchData ? researchData.terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+        <template x-if="researchData && researchData.is_bank && researchData.wacc_build_up">
+          <div class="border-t border-white/[0.06] pt-1.5 mt-1 space-y-1 font-mono text-[11px]">
+            <div class="flex justify-between"><span class="text-slate-400">Justified P/BV</span>
+              <strong class="text-cyan-400" x-text="researchData.wacc_build_up.justified_pbv !== null ? researchData.wacc_build_up.justified_pbv.toFixed(2) + 'x' : 'N/A'"></strong></div>
+            <div class="text-[9px] text-slate-500" x-text="researchData.wacc_build_up.justified_pbv_note || ''"></div>
+          </div>
+        </template>
+        <template x-if="!researchData || !researchData.is_bank">
+          <div class="flex justify-between font-mono text-[11px] pt-1"><span class="text-slate-400">Market Cap</span>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up ? 'Rp ' + Number(researchData.wacc_build_up.market_cap_bn).toLocaleString('id-ID') + ' bn' : 'N/A'"></strong></div>
+        </template>
+      </div>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300">
+          <th class="px-4 py-2.5 text-left">WACC \ Terminal Growth (g)</th>
+          <template x-for="tg in (researchData ? researchData.sensitivity_grid.tg_labels : [])" :key="tg">
+            <th class="px-4 py-2.5" x-text="'g = ' + tg"></th>
+          </template></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="(wRow, rIdx) in (researchData ? researchData.sensitivity_grid.wacc_labels : [])" :key="rIdx">
+            <tr class="hover:bg-white/[0.02]">
+              <td class="px-4 py-2.5 text-left text-slate-400 font-semibold" x-text="'WACC = ' + wRow + (rIdx === 1 ? ' (Base)' : '')"></td>
+              <template x-for="(cellVal, cIdx) in researchData.sensitivity_grid.values[rIdx]" :key="cIdx">
+                <td class="px-4 py-2.5"
+                    :class="rIdx === 1 && cIdx === 1 ? 'bg-blue-600/20 text-blue-300 font-bold border border-blue-500/40' : 'text-slate-200'"
+                    x-text="'Rp ' + Number(cellVal).toLocaleString('id-ID')"></td>
+              </template>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SCENARIO + VARIANT -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Scenario Analysis &amp; Variant Perception</h2>
+      </div>
+      <span class="text-[10px] font-mono text-cyan-400">PROBABILITY-WEIGHTED</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono">
+      <div class="bg-[#080C14] border border-emerald-500/20 rounded-xl p-3.5 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-emerald-400">BULL (25%)</span>
+          <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded" x-text="researchData && researchData.scenario_analysis ? '+' + researchData.scenario_analysis.bull.upside + '%' : 'N/A'"></span>
+        </div>
+        <div class="text-lg font-black text-white" x-text="researchData && researchData.scenario_analysis ? 'Rp ' + Number(researchData.scenario_analysis.bull.target).toLocaleString('id-ID') : 'N/A'"></div>
+        <p class="text-[11px] text-slate-300 font-sans leading-relaxed text-justify" x-text="researchData && researchData.scenario_analysis ? researchData.scenario_analysis.bull.catalysts : ''"></p>
+      </div>
+      <div class="bg-[#080C14] border border-blue-500/20 rounded-xl p-3.5 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-blue-400">BASE (50%)</span>
+          <span class="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded" x-text="researchData && researchData.scenario_analysis ? '+' + researchData.scenario_analysis.base.upside + '%' : 'N/A'"></span>
+        </div>
+        <div class="text-lg font-black text-white" x-text="researchData && researchData.scenario_analysis ? 'Rp ' + Number(researchData.scenario_analysis.base.target).toLocaleString('id-ID') : 'N/A'"></div>
+        <p class="text-[11px] text-slate-300 font-sans leading-relaxed text-justify" x-text="researchData && researchData.scenario_analysis ? researchData.scenario_analysis.base.catalysts : ''"></p>
+      </div>
+      <div class="bg-[#080C14] border border-rose-500/20 rounded-xl p-3.5 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-rose-400">BEAR (25%)</span>
+          <span class="text-[10px] text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded" x-text="researchData && researchData.scenario_analysis ? researchData.scenario_analysis.bear.upside + '%' : 'N/A'"></span>
+        </div>
+        <div class="text-lg font-black text-white" x-text="researchData && researchData.scenario_analysis ? 'Rp ' + Number(researchData.scenario_analysis.bear.target).toLocaleString('id-ID') : 'N/A'"></div>
+        <p class="text-[11px] text-slate-300 font-sans leading-relaxed text-justify" x-text="researchData && researchData.scenario_analysis ? researchData.scenario_analysis.bear.catalysts : ''"></p>
+      </div>
+    </div>
+    <div class="p-4 bg-[#080C14] border border-white/[0.06] rounded-xl space-y-2.5">
+      <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">Variant Perception (Why Consensus Is Incomplete)</span>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <div class="p-3 bg-red-950/20 border border-red-500/20 rounded-lg space-y-1">
+          <span class="text-[10px] font-mono text-red-400 font-bold block">KONSENSUS PASAR:</span>
+          <p class="text-slate-300 leading-relaxed text-justify" x-text="researchData && researchData.variant_perception ? researchData.variant_perception.consensus_view : ''"></p>
+        </div>
+        <div class="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg space-y-1">
+          <span class="text-[10px] font-mono text-emerald-400 font-bold block">PANDANGAN KAMI:</span>
+          <p class="text-slate-300 leading-relaxed text-justify" x-text="researchData && researchData.variant_perception ? researchData.variant_perception.our_variant_view : ''"></p>
+        </div>
+      </div>
+      <div class="pt-2 space-y-1.5">
+        <span class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Catalyst Timeline</span>
+        <template x-for="(ct, i) in (researchData && researchData.variant_perception && researchData.variant_perception.catalyst_timeline ? researchData.variant_perception.catalyst_timeline : [])" :key="i">
+          <div class="flex items-start gap-3 text-[11px] font-mono">
+            <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 shrink-0" x-text="ct.period"></span>
+            <span class="text-slate-300" x-text="ct.event"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- PEER COMPS -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Comparable Companies Analysis</h2>
+      </div>
+      <span class="text-[10px] font-mono text-cyan-400">SECTOR MULTIPLES</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300">
+          <th class="px-3 py-2.5 text-left">Ticker</th><th class="px-3 py-2.5 text-left">Nama</th>
+          <th class="px-3 py-2.5">NPM (%)</th><th class="px-3 py-2.5">ROE (%)</th>
+          <th class="px-3 py-2.5">P/E</th><th class="px-3 py-2.5">P/BV</th><th class="px-3 py-2.5">Net Gearing</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="p in (researchData ? researchData.peer_benchmark : [])" :key="p.ticker">
+            <tr :class="p.ticker === ticker ? 'bg-blue-600/10 font-semibold' : 'hover:bg-white/[0.02]'">
+              <td class="px-3 py-2 text-left" :class="p.ticker === ticker ? 'text-blue-400 font-bold' : 'text-slate-300'" x-text="p.ticker"></td>
+              <td class="px-3 py-2 text-left text-slate-300 font-sans" x-text="p.name"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="Number(p.npm).toFixed(1) + '%'"></td>
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="Number(p.roe).toFixed(1) + '%'"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="Number(p.pe).toFixed(1) + 'x'"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="Number(p.pbv).toFixed(2) + 'x'"></td>
+              <td class="px-3 py-2 text-slate-400" x-text="p.net_gearing"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div class="text-[10px] text-slate-500 font-mono">Catatan: baris peer hanya diisi emiten yang datanya ADA di database lokal. Peer tak tersedia tidak ditampilkan (bukan estimasi).</div>
+  </div>
+
+  <!-- 5Y FORECAST -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Financial Forecast (5-Year)</h2>
+      </div>
+      <span class="text-[10px] font-mono text-blue-400">PROJECTION</span>
+    </div>
+    <p class="text-xs text-slate-300 leading-relaxed text-justify">
+      Proyeksi 5-tahun memakai asumsi pertumbuhan pendapatan organik &amp; margin operasi
+      <span class="text-amber-400">(ASSUMPTION — asumsi model, bukan data audited)</span>:
+    </p>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300">
+          <th class="px-3 py-2.5 text-left">Metrik (Rp Miliar)</th>
+          <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="f.year">
+            <th class="px-3 py-2.5" x-text="f.year"></th>
+          </template></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <tr><td class="px-3 py-2 text-left text-slate-400">Pendapatan</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fr' + f.year">
+              <td class="px-3 py-2 text-white" x-text="Number(f.revenue).toLocaleString('id-ID')"></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">EBIT</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fe' + f.year">
+              <td class="px-3 py-2 text-slate-200" x-text="Number(f.ebit).toLocaleString('id-ID')"></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Laba Bersih Induk</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fn' + f.year">
+              <td class="px-3 py-2 text-emerald-400" x-text="Number(f.net_income).toLocaleString('id-ID')"></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Total Ekuitas</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'ft' + f.year">
+              <td class="px-3 py-2 text-slate-200" x-text="Number(f.total_equity).toLocaleString('id-ID')"></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Kas</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fc' + f.year">
+              <td class="px-3 py-2 text-sky-400" x-text="Number(f.cash).toLocaleString('id-ID')"></td></template></tr>
+          <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-amber-400 font-semibold">DPS (Rp)</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fd' + f.year">
+              <td class="px-3 py-2 text-amber-400 font-bold" x-text="'Rp ' + Number(f.dps).toLocaleString('id-ID')"></td></template></tr>
+          <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-emerald-400 font-semibold">ROE (%)</td>
+            <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fo' + f.year">
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="Number(f.roe).toFixed(1) + '%'"></td></template></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- RISK MATRIX -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Investment Risks</h2>
+      </div>
+      <span class="text-[10px] font-mono text-rose-400">RISK MATRIX</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+      <div class="md:col-span-5 bg-[#080C14] border border-white/[0.08] rounded-xl p-4">
+        <div class="text-[10px] font-mono text-slate-400 mb-2 flex justify-between"><span>Impact →</span><span>↑ Probability</span></div>
+        <div class="grid grid-cols-5 gap-1.5 h-44">
+          <div class="rounded bg-yellow-500/20 border border-yellow-500/30"></div>
+          <div class="rounded bg-orange-500/20 border border-orange-500/30"></div>
+          <div class="rounded bg-orange-500/30 border border-orange-500/40"></div>
+          <div class="rounded bg-rose-500/30 border border-rose-500/50 flex items-center justify-center text-[10px] text-rose-300 font-bold">R1</div>
+          <div class="rounded bg-rose-600/40 border border-rose-500/60"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-yellow-500/20 border border-yellow-500/30"></div>
+          <div class="rounded bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-[10px] text-orange-300 font-bold">R2</div>
+          <div class="rounded bg-orange-500/30 border border-orange-500/40 flex items-center justify-center text-[10px] text-orange-300 font-bold">R3</div>
+          <div class="rounded bg-rose-500/30 border border-rose-500/50"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center text-[10px] text-yellow-300 font-bold">R4</div>
+          <div class="rounded bg-orange-500/20 border border-orange-500/30"></div>
+          <div class="rounded bg-orange-500/30 border border-orange-500/40"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] text-emerald-300 font-bold">R5</div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-yellow-500/20 border border-yellow-500/30"></div>
+          <div class="rounded bg-orange-500/20 border border-orange-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-emerald-500/20 border border-emerald-500/30"></div>
+          <div class="rounded bg-yellow-500/20 border border-yellow-500/30"></div>
+        </div>
+      </div>
+      <div class="md:col-span-7 space-y-2">
+        <template x-for="rf in (researchData ? researchData.risk_factors : [])" :key="rf.code">
+          <div class="p-2.5 bg-[#080C14] border border-white/[0.06] rounded-xl flex items-center justify-between text-xs font-mono">
+            <div class="flex items-center gap-2.5">
+              <span class="w-6 h-6 rounded bg-[#161F30] text-white font-bold flex items-center justify-center text-[10px]" x-text="rf.code"></span>
+              <span class="text-slate-200 font-sans text-xs font-medium" x-text="rf.name"></span>
+            </div>
+            <div class="flex items-center gap-3 text-[11px]">
+              <span class="text-slate-400">Prob: <strong class="text-slate-200" x-text="rf.prob"></strong></span>
+              <span class="text-slate-400">Dampak: <strong class="text-slate-200" x-text="rf.impact"></strong></span>
+              <span class="px-2 py-0.5 rounded font-bold"
+                    :class="rf.score === 'Kritis' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : (rf.score === 'Tinggi' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : (rf.score === 'Moderat' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'))"
+                    x-text="rf.score"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEWS FEED -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/[0.06]">
+      <div>
+        <h3 class="text-sm font-semibold text-white tracking-wide flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
+          Live Catalyst &amp; News Intelligence
+        </h3>
+        <p class="text-xs text-slate-400 mt-0.5">Berita terkini emiten untuk analisis katalis tesis.</p>
+      </div>
+      <div class="flex items-center gap-2.5">
+        <button @click="refreshNews()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/[0.06] text-xs font-mono transition-colors">
+          <span x-text="newsLoading ? 'Memuat...' : 'Refresh News'"></span>
+        </button>
+        <button @click="analyzeNewsCatalyst()" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-slate-950 font-semibold text-xs font-mono transition-colors">
+          Sintesis Katalis AI
+        </button>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-slate-400 uppercase tracking-wider mb-2">Ticker</label>
+        <input x-model="filterTicker" placeholder="Contoh: ASII, BBCA" class="w-full bg-[#080C14] border border-white/[0.04] rounded-lg p-3 font-mono text-white focus:outline-none focus:border-emerald-400" type="text">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 uppercase tracking-wider mb-2">Katalis</label>
+        <input x-model="filterKeyword" placeholder="Contoh: dividen, suku bunga" class="w-full bg-[#080C14] border border-white/[0.04] rounded-lg p-3 font-mono text-white focus:outline-none focus:border-emerald-400" type="text">
+      </div>
+    </div>
+    <div class="space-y-2 max-h-80 overflow-y-auto">
+      <template x-for="article in filteredNewsArticles" :key="article.link">
+        <div class="p-3 bg-[#080C14] border border-white/[0.04] rounded-lg hover:border-white/[0.06] transition-colors">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <a :href="article.link" target="_blank" class="text-[13px] font-semibold text-rose-400 hover:text-rose-300 truncate block" x-text="article.title"></a>
+              <p class="text-[11px] text-slate-400 mt-0.5 line-clamp-2" x-text="article.description"></p>
+            </div>
+            <div class="text-right text-xs shrink-0"><span class="text-slate-600" x-text="article.source"></span></div>
+          </div>
+        </div>
+      </template>
+      <div x-show="filteredNewsArticles.length === 0" class="text-center py-6 text-slate-500 text-xs">
+        Tidak ada berita. Klik <strong class="text-slate-400 cursor-pointer" @click="refreshNews()">Refresh News</strong>.
+      </div>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.04] rounded-lg p-4 space-y-3">
+      <h4 class="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Analisis Dampak Berita ke Tesis</h4>
+      <div x-show="newsAnalysis && newsAnalysis !== ''" class="text-[12px] text-slate-300 leading-relaxed"><p x-html="newsAnalysis"></p></div>
+      <div x-show="!newsAnalysis || newsAnalysis === ''" class="text-[12px] text-slate-500">
+        Klik <strong class="text-slate-400 cursor-pointer" @click="analyzeNewsCatalyst()">Sintesis Katalis AI</strong> untuk menganalisis dampak berita.
+      </div>
+    </div>
+  </div>
+
+  <!-- ESG -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-lime-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">ESG</h2>
+      </div>
+      <span class="text-[10px] font-mono text-amber-400">DATA BELUM TERSEDIA</span>
+    </div>
+    <p class="text-xs text-slate-300 leading-relaxed text-justify">
+      Skor ESG (Environment / Social / Governance) <strong class="text-amber-400">tidak ditampilkan</strong> karena sumber skor ESG resmi per emiten BEI belum terintegrasi ke pipeline ini.
+      Kami tidak menampilkan angka ESG karangan. Untuk mengaktifkan modul ini diperlukan ingest data skor ESG (LSEG / MSCI / Sustainalytics) atau laporan keberlanjutan emiten.
+    </p>
+  </div>
+
+  <!-- FIG 30/33/34: MARGIN TREND + REVENUE GROWTH + ROIC -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Figure 30/33/34: Margin Trend, Revenue Growth &amp; ROIC</h2></div>
+      <span class="text-[10px] font-mono text-emerald-400">REPORTED (AUDITED)</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300">
+          <th class="px-3 py-2.5 text-left">Metrik</th>
+          <template x-for="m in (researchData ? researchData.margin_trend : [])" :key="m.year"><th class="px-3 py-2.5">FY<span x-text="m.year"></span></th></template>
+        </tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <tr><td class="px-3 py-2 text-left text-slate-400">Gross Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'gm'+m.year"><td class="px-3 py-2 text-emerald-400"><template x-if="m.gross_margin_pct !== null"><span x-text="m.gross_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.gross_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Net Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'nm'+m.year"><td class="px-3 py-2 text-slate-200"><template x-if="m.net_margin_pct !== null"><span x-text="m.net_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.net_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Revenue Growth YoY (%)</td><template x-for="g in (researchData ? researchData.revenue_growth_series : [])" :key="'rg'+g.year"><td class="px-3 py-2 text-sky-400"><template x-if="g.growth_pct !== null"><span x-text="(g.growth_pct >= 0 ? '+' : '') + g.growth_pct.toFixed(1) + '%'"></span></template><template x-if="g.growth_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">ROIC (%)</td><template x-for="r in (researchData ? researchData.roic_series : [])" :key="'roic'+r.year"><td class="px-3 py-2 text-amber-400"><template x-if="r.roic_pct !== null"><span x-text="r.roic_pct.toFixed(1) + '%'"></span></template><template x-if="r.roic_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-[10px] text-slate-500 font-mono">ROIC = NOPAT / Invested Capital; N/A bila EBIT tidak tersedia di taksonomi IDX (tidak dikarang).</p>
+  </div>
+
+  <!-- FIG 36: OPEX BREAKDOWN -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Figure 36: S&amp;M, G&amp;A, and R&amp;D (Rp Miliar)</h2></div>
+      <span class="text-[10px] font-mono text-amber-400">REPORTED</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Beban</th><template x-for="o in (researchData ? researchData.opex_breakdown : [])" :key="o.year"><th class="px-3 py-2.5">FY<span x-text="o.year"></span></th></template></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <tr><td class="px-3 py-2 text-left text-slate-400">Selling &amp; Marketing</td><template x-for="o in (researchData ? researchData.opex_breakdown : [])" :key="'s'+o.year"><td class="px-3 py-2 text-slate-200"><template x-if="o.selling_bn !== null"><span x-text="Number(o.selling_bn).toLocaleString('id-ID',{maximumFractionDigits:1})"></span></template><template x-if="o.selling_bn === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">G&amp;A</td><template x-for="o in (researchData ? researchData.opex_breakdown : [])" :key="'g'+o.year"><td class="px-3 py-2 text-slate-200"><template x-if="o.ga_bn !== null"><span x-text="Number(o.ga_bn).toLocaleString('id-ID',{maximumFractionDigits:1})"></span></template><template x-if="o.ga_bn === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">R&amp;D</td><template x-for="o in (researchData ? researchData.opex_breakdown : [])" :key="'r'+o.year"><td class="px-3 py-2 text-slate-200"><span class="text-slate-500">N/A</span></td></template></tr>
+          <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-amber-400 font-semibold">Total OpEx</td><template x-for="o in (researchData ? researchData.opex_breakdown : [])" :key="'t'+o.year"><td class="px-3 py-2 text-amber-400 font-bold"><template x-if="o.total_opex_bn !== null"><span x-text="Number(o.total_opex_bn).toLocaleString('id-ID',{maximumFractionDigits:1})"></span></template><template x-if="o.total_opex_bn === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-[10px] text-slate-500 font-mono">R&amp;D tidak dilaporkan seragam di taksonomi XBRL IDX → N/A (tidak dikarang).</p>
+  </div>
+
+  <!-- FIG 38: CASH BALANCE SERIES -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Figure 38: Cash Balance (Rp Miliar)</h2></div>
+      <span class="text-[10px] font-mono text-sky-400">REPORTED</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Kas &amp; Setara Kas</th><template x-for="c in (researchData ? researchData.cash_balance_series : [])" :key="c.year"><th class="px-3 py-2.5">FY<span x-text="c.year"></span></th></template></tr></thead>
+        <tbody><tr><template x-for="c in (researchData ? researchData.cash_balance_series : [])" :key="'cb'+c.year"><td class="px-3 py-2 text-sky-400 font-bold"><template x-if="c.cash_bn !== null"><span x-text="Number(c.cash_bn).toLocaleString('id-ID',{maximumFractionDigits:1})"></span></template><template x-if="c.cash_bn === null"><span class="text-slate-500">N/A</span></template></td></template></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FIG 37: SHARE BUYBACKS (TREASURY STOCK) -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-fuchsia-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Figure 37: Share Buybacks — Treasury Stock (Rp Miliar)</h2></div>
+      <span class="text-[10px] font-mono text-fuchsia-400">REPORTED (BALANCE SHEET)</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Treasury Stock</th><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'tb'+h.year"><th class="px-3 py-2.5">FY<span x-text="h.year"></span></th></template></tr></thead>
+        <tbody><tr><td class="px-3 py-2 text-left text-slate-400">Nilai saham treasuri</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'tbv'+h.year"><td class="px-3 py-2 text-fuchsia-400 font-bold"><template x-if="h.treasury_stock_bn !== null && h.treasury_stock_bn !== undefined"><span x-text="Number(h.treasury_stock_bn).toLocaleString('id-ID',{maximumFractionDigits:1})"></span></template><template x-if="h.treasury_stock_bn === null || h.treasury_stock_bn === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr></tbody>
+      </table>
+    </div>
+    <p class="text-[10px] text-slate-500 font-mono">Nilai saham treasuri dari XBRL audited (baris <em>TreasuryStocks</em>). N/A bila emiten tidak melaporkan.</p>
+  </div>
+
+  <!-- BANK METRICS: NPL -->
+  <div x-show="researchData &amp;&amp; researchData.is_bank" class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Bank Metrics: Non-Performing Financing Ratio</h2></div>
+      <span class="text-[10px] font-mono text-teal-400">REPORTED (AUDITED)</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Rasio</th><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'np'+h.year"><th class="px-3 py-2.5">FY<span x-text="h.year"></span></th></template></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Gross (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npg'+h.year"><td class="px-3 py-2 text-teal-400"><template x-if="h.npl_gross_pct !== null && h.npl_gross_pct !== undefined"><span x-text="h.npl_gross_pct.toFixed(2) + '%'"></span></template><template x-if="h.npl_gross_pct === null || h.npl_gross_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Net (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npn'+h.year"><td class="px-3 py-2 text-slate-200"><template x-if="h.npl_net_pct !== null && h.npl_net_pct !== undefined"><span x-text="h.npl_net_pct.toFixed(2) + '%'"></span></template><template x-if="h.npl_net_pct === null || h.npl_net_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-[10px] text-slate-500 font-mono">NPL dari XBRL audited (<em>NonPerformingFinancingGross/Net</em>); dilaporkan sebagai rasio oleh emiten. N/A untuk non-bank.</p>
+  </div>
+
+  <!-- APPENDIX 6: INDUSTRY MULTIPLES -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 6: Peer Multiples (3-Year Reference)</h2></div>
+      <span class="text-[10px] font-mono text-cyan-400">PEERS</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Metric</th><th class="px-3 py-2.5">Peer Median</th><th class="px-3 py-2.5">Peer Min</th><th class="px-3 py-2.5">Peer Max</th><th class="px-3 py-2.5">Subject</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="im in (researchData ? researchData.industry_multiples : [])" :key="im.metric">
+            <tr><td class="px-3 py-2 text-left text-slate-300" x-text="im.metric"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="im.peer_median !== null ? Number(im.peer_median).toFixed(2) : 'N/A'"></td>
+              <td class="px-3 py-2 text-slate-400" x-text="im.peer_min !== null ? Number(im.peer_min).toFixed(2) : 'N/A'"></td>
+              <td class="px-3 py-2 text-slate-400" x-text="im.peer_max !== null ? Number(im.peer_max).toFixed(2) : 'N/A'"></td>
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="im.subject !== null ? Number(im.subject).toFixed(2) : 'N/A'"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- APPENDIX 7: SEGMENT DEEP DIVE -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 7: Segment Deep Dive</h2></div>
+      <span class="text-[10px] font-mono text-emerald-400">CALK</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Segment</th><th class="px-3 py-2.5">Revenue (Rp M)</th><th class="px-3 py-2.5">Share %</th><th class="px-3 py-2.5">Growth YoY</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="sd in (researchData ? researchData.segment_deep_dive : [])" :key="sd.segment">
+            <tr><td class="px-3 py-2 text-left text-slate-300" x-text="sd.segment"></td><td class="px-3 py-2 text-slate-200" x-text="sd.revenue_bn !== null && sd.revenue_bn !== undefined ? Number(sd.revenue_bn).toLocaleString('id-ID',{maximumFractionDigits:1}) : 'N/A'"></td><td class="px-3 py-2 text-white font-semibold" x-text="sd.share_pct !== null && sd.share_pct !== undefined ? sd.share_pct + '%' : 'N/A'"></td><td class="px-3 py-2 font-semibold" :class="sd.growth_yoy > 0 ? 'text-emerald-400' : (sd.growth_yoy < 0 ? 'text-rose-400' : 'text-slate-400')" x-text="sd.growth_yoy !== null && sd.growth_yoy !== undefined ? (sd.growth_yoy >= 0 ? '+' : '') + sd.growth_yoy.toFixed(1) + '%' : 'N/A'"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div x-show="!researchData || !researchData.segment_deep_dive || researchData.segment_deep_dive.length === 0" class="text-amber-400 text-[10px] font-mono">N/A — data segmentasi tidak tersedia.</div>
+  </div>
+
+  <!-- APPENDIX 8: COMPANY HISTORY -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 8: Company History (Audited)</h2></div>
+      <span class="text-[10px] font-mono text-indigo-400">TIMELINE</span>
+    </div>
+    <div class="space-y-2">
+      <template x-for="ch in (researchData ? researchData.company_history : [])" :key="ch.year + ch.event">
+        <div class="p-3 bg-[#080C14] border border-white/[0.04] rounded-lg flex items-start gap-3">
+          <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 font-mono text-xs shrink-0" x-text="ch.year"></span>
+          <p class="text-xs text-slate-300 leading-relaxed" x-text="ch.event"></p>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- APPENDIX 15: VALUATION SUPPORT -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 15: Valuation Support (Base Case)</h2></div>
+      <span class="text-[10px] font-mono text-purple-400">DCF + MULTIPLES</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Method</th><th class="px-3 py-2.5">Weight</th><th class="px-3 py-2.5">Value (Rp)</th><th class="px-3 py-2.5 text-left">Basis</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="vs in (researchData ? researchData.valuation_support : [])" :key="vs.method">
+            <tr><td class="px-3 py-2 text-left text-slate-300" x-text="vs.method"></td><td class="px-3 py-2 text-slate-400" x-text="vs.weight_pct + '%'"></td><td class="px-3 py-2 text-white font-semibold" x-text="'Rp ' + Number(vs.value).toLocaleString('id-ID')"></td><td class="px-3 py-2 text-left text-slate-500" x-text="vs.basis"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- APPENDIX 16: REVERSE DCF -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 16: Reverse DCF (Implied Growth)</h2></div>
+      <span class="text-[10px] font-mono text-rose-400">COMPUTED</span>
+    </div>
+    <div class="space-y-1.5 font-mono text-xs">
+      <div class="flex justify-between"><span class="text-slate-400">Market Price</span><strong class="text-white" x-text="researchData && researchData.reverse_dcf ? 'Rp ' + Number(researchData.reverse_dcf.market_price).toLocaleString('id-ID') : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">Model Fair Value</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? 'Rp ' + Number(researchData.reverse_dcf.model_fair_value).toLocaleString('id-ID') : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">Model Terminal Growth</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.model_terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">Implied Terminal Growth</span><strong class="text-amber-400" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.implied_terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">WACC</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.wacc_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+    </div>
+    <p class="text-[11px] text-slate-400 leading-relaxed text-justify" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.interpretation : ''"></p>
+    <p class="text-[10px] text-slate-500 font-mono" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.method : ''"></p>
+  </div>
+
+  <!-- APPENDIX 17: VALUATION WATERFALL -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 17: Valuation Waterfall (Intrinsic Valuation)</h2></div>
+      <span class="text-[10px] font-mono text-blue-400">STEP-BY-STEP</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono text-center">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Step</th><th class="px-3 py-2.5">Value (Rp)</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="vw in (researchData ? researchData.valuation_waterfall : [])" :key="vw.step">
+            <tr><td class="px-3 py-2 text-left text-slate-300" x-text="vw.step"></td><td class="px-3 py-2 text-white font-semibold" x-text="'Rp ' + Number(vw.value).toLocaleString('id-ID')"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FIG 46/47/48: EMPLOYEE, OWNERSHIP, MANAGEMENT -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-lime-500"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Figure 46/47/48: Employee, Ownership &amp; Management</h2></div>
+      <span class="text-[10px] font-mono text-amber-400">DATA BELUM TERSEDIA</span>
+    </div>
+    <p class="text-xs text-slate-300 leading-relaxed text-justify">
+      Jumlah karyawan, pemegang saham utama, dan profil direksi/komisaris <strong class="text-amber-400">tidak ditampilkan</strong> karena tidak tersedia dalam XBRL audited BEI/IDX (tidak dikarang). Untuk mengaktifkan diperlukan ingest laporan tahunan (CALK) atau profil perusahaan BEI.
+    </p>
+  </div>
+
+  <!-- APPENDIX 3: GLOSSARY -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-slate-400"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 3: Glossary</h2></div>
+      <span class="text-[10px] font-mono text-slate-400">TERMS</span>
+    </div>
+    <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
+      <table class="w-full text-xs font-mono">
+        <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left w-24">Term</th><th class="px-3 py-2.5 text-left">Definition</th></tr></thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="g in (researchData ? researchData.glossary : [])" :key="g.term">
+            <tr><td class="px-3 py-2 text-left text-blue-300 font-semibold" x-text="g.term"></td><td class="px-3 py-2 text-left text-slate-300" x-text="g.definition"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- APPENDIX 19: REFERENCES -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-slate-400"></span><h2 class="text-sm font-bold text-white uppercase tracking-wider">Appendix 19: References</h2></div>
+      <span class="text-[10px] font-mono text-slate-400">SOURCES</span>
+    </div>
+    <ul class="space-y-1.5 text-xs text-slate-300 font-mono list-disc list-inside">
+      <li>Laporan keuangan audited emiten (XBRL IDX/BEI, 2021-2025).</li>
+      <li>Data harga penutupan harian &amp; indeks IHSG (database lokal IDX-Quant).</li>
+      <li>Indikator makro: BPS, Bank Indonesia.</li>
+      <li>Kerangka penulisan: CFA Institute Research Challenge.</li>
+    </ul>
+  </div>
+
+  <!-- DISCLOSURES -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-3">
+    <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider border-b border-white/[0.06] pb-2">Disclosures</h3>
+    <p class="text-xs text-slate-400 leading-relaxed text-justify">
+      Laporan disusun mengikuti kerangka penulisan riset ekuitas CFA Institute. Figur keuangan bersumber dari laporan keuangan audited pada database pipeline (BEI filings),
+      memakai angka <em>entitas induk</em> (laba bersih dan ekuitas yang dapat diatribusikan kepada pemilik entitas induk). Rasio &amp; model valuasi dihitung deterministik oleh engine.
+      Metrik yang tidak tersedia (EBIT, R&amp;D, employee count, ownership) ditandai <strong class="text-amber-400">N/A</strong> dan tidak diestimasi.
+      Tidak ada false claim: setiap angka di atas berasal dari sumber yang disebutkan. Bukan rekomendasi investasi.
+    </p>
+  </div>
+
+</div>

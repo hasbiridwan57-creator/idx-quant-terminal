@@ -1,0 +1,1 @@
+"""IDX-QuantTerminal — DuPont ALK & IHSG Research Platform."""

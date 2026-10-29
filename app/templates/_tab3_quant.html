@@ -1,0 +1,238 @@
+<!-- TAB 3: QUANT RISK & MONTE CARLO GBM (v5.2 Linear/Koyfin Dark UI) -->
+<section x-show="activeNav === 'quant'" class="space-y-6">
+  <!-- 11-Metric Institutional Risk Scorecard -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6">
+    <div class="border-b border-white/[0.06] pb-4 mb-5 flex items-center justify-between">
+      <div>
+        <h3 class="text-base font-semibold text-white">Scorecard Risiko Kuantitatif Institusional (11-Metrik)</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Dihitung dari deret return harian 252 hari perdagangan (Risk-Free: 6.85% SBN Benchmark)</p>
+      </div>
+      <span class="px-2.5 py-1 rounded-full bg-slate-800 border border-white/[0.06] text-xs font-mono text-slate-300">
+        Horizon: 1 Tahun (252 Hari)
+      </span>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3.5 font-mono text-xs">
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Sharpe Ratio</span>
+        <span class="text-xl font-semibold font-mono text-sky-400 block my-1">
+          {{ "%.2f"|format(risk.sharpe_ratio) if risk and risk.sharpe_ratio else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Excess Return / Vol</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Sortino Ratio</span>
+        <span class="text-xl font-semibold font-mono text-emerald-400 block my-1">
+          {{ "%.2f"|format(risk.sortino_ratio) if risk and risk.sortino_ratio else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Downside Risk Ratio</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Calmar Ratio</span>
+        <span class="text-xl font-semibold font-mono text-white block my-1">
+          {{ "%.2f"|format(risk.calmar_ratio) if risk and risk.calmar_ratio else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">CAGR / Max DD</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Max Drawdown</span>
+        <span class="text-xl font-semibold font-mono text-rose-400 block my-1">
+          {{ "%.2f"|format(risk.max_drawdown * 100) if risk and risk.max_drawdown else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-500">Penurunan Puncak-Lembah</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Max DD Duration</span>
+        <span class="text-xl font-semibold font-mono text-white block my-1">
+          {{ risk.max_drawdown_duration if risk else '—' }} Hari
+        </span>
+        <span class="text-[11px] text-slate-500">Durasi Pemulihan</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Historical VaR 95%</span>
+        <span class="text-xl font-semibold font-mono text-rose-400 block my-1">
+          {{ "%.2f"|format(risk.var_95 * 100) if risk and risk.var_95 else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-500">Batas Rugi 1-Hari 95%</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">CVaR / Expected Shortfall</span>
+        <span class="text-xl font-semibold font-mono text-rose-400 block my-1">
+          {{ "%.2f"|format(risk.cvar_95 * 100) if risk and risk.cvar_95 else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-500">Rata-rata Rugi Ekor</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Beta vs IHSG</span>
+        <span class="text-xl font-semibold font-mono text-white block my-1">
+          {{ "%.2f"|format(risk.beta) if risk and risk.beta else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Sensitivitas Pasar</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Annualized Alpha</span>
+        <span class="text-xl font-semibold font-mono block my-1 {{ 'text-emerald-400' if risk and risk.alpha_annualized and risk.alpha_annualized >= 0 else 'text-rose-400' }}">
+          {{ "%+.2f"|format(risk.alpha_annualized * 100) if risk and risk.alpha_annualized else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-500">Excess Jensen Alpha</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Information Ratio</span>
+        <span class="text-xl font-semibold font-mono text-white block my-1">
+          {{ "%.2f"|format(risk.information_ratio) if risk and risk.information_ratio else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Active Return / Tracking Err</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-3.5 text-center col-span-2">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Treynor Ratio</span>
+        <span class="text-xl font-semibold font-mono text-sky-400 block my-1">
+          {{ "%.2f"|format(risk.treynor_ratio) if risk and risk.treynor_ratio else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Excess Return per Unit Beta Sistematik</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monte Carlo Geometric Brownian Motion (GBM) Section -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 space-y-6">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
+      <div>
+        <h3 class="text-base font-semibold text-white">Simulasi Monte Carlo Geometric Brownian Motion (GBM)</h3>
+        <p class="text-xs text-slate-400 mt-0.5">200 Iterasi Jalur Stokastik &bull; Horizon 1 Tahun (252 Hari) &bull; Kalibrasi Volatilitas Historis</p>
+      </div>
+      <div class="flex items-center gap-2 font-mono text-xs">
+        <span class="text-slate-400">Harga Acuan:</span>
+        <span class="font-semibold text-sky-400 text-sm">
+          Rp {{ "{:,.0f}".format(monte_carlo.current_price) if monte_carlo else '—' }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Distribution & Probabilities KPI Strip (Subtle Luminance Cards) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3.5 font-mono text-xs text-center">
+      <div class="bg-rose-500/10 border border-rose-500/20 rounded-xl p-3.5">
+        <span class="text-xs text-rose-400 font-sans font-medium block">Bear Case (P10)</span>
+        <span class="text-lg font-semibold font-mono text-white block my-1">
+          Rp {{ "{:,.0f}".format(monte_carlo.p10_price) if monte_carlo else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-400">Persentil 10</span>
+      </div>
+
+      <div class="bg-sky-500/10 border border-sky-500/30 rounded-xl p-3.5">
+        <span class="text-xs text-sky-400 font-sans font-medium block">Base Median (P50)</span>
+        <span class="text-lg font-semibold font-mono text-sky-400 block my-1">
+          Rp {{ "{:,.0f}".format(monte_carlo.p50_price) if monte_carlo else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-400">Nilai Tengah</span>
+      </div>
+
+      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5">
+        <span class="text-xs text-emerald-400 font-sans font-medium block">Bull Case (P90)</span>
+        <span class="text-lg font-semibold font-mono text-white block my-1">
+          Rp {{ "{:,.0f}".format(monte_carlo.p90_price) if monte_carlo else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-400">Persentil 90</span>
+      </div>
+
+      <div class="bg-slate-800/40 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Expected Mean</span>
+        <span class="text-lg font-semibold font-mono text-white block my-1">
+          Rp {{ "{:,.0f}".format(monte_carlo.mean_price) if monte_carlo else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-400">Rata-rata Simulasi</span>
+      </div>
+
+      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Prob. Profit</span>
+        <span class="text-lg font-semibold font-mono text-emerald-400 block my-1">
+          {{ monte_carlo.prob_profit_pct if monte_carlo else '0' }}%
+        </span>
+        <span class="text-[11px] text-slate-400">S_T &gt; S_0</span>
+      </div>
+
+      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Prob. Upside &gt;20%</span>
+        <span class="text-lg font-semibold font-mono text-emerald-400 block my-1">
+          {{ monte_carlo.prob_upside_20_pct if monte_carlo else '0' }}%
+        </span>
+        <span class="text-[11px] text-slate-400">S_T &gt; 1.20&times;S_0</span>
+      </div>
+
+      <div class="bg-rose-500/10 border border-rose-500/20 rounded-xl p-3.5">
+        <span class="text-xs text-slate-400 font-sans font-medium block">Prob. DD &gt;20%</span>
+        <span class="text-lg font-semibold font-mono text-rose-400 block my-1">
+          {{ monte_carlo.prob_drawdown_20_pct if monte_carlo else '0' }}%
+        </span>
+        <span class="text-[11px] text-slate-400">S_T &lt; 0.80&times;S_0</span>
+      </div>
+    </div>
+
+    <!-- SVG Fan Chart (Confidence Cone & 5 Sample Paths) -->
+    <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-5 space-y-3">
+      <div class="flex items-center justify-between text-xs font-mono text-slate-400">
+        <span class="font-sans font-medium text-slate-300">Visualisasi Jalur Simulasi GBM &amp; Pita Rentang P10 - P50 - P90</span>
+        <div class="flex items-center gap-4">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-0.5 bg-sky-400"></span><span>P50 Median</span></span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-0.5 bg-emerald-400"></span><span>P90 Bull</span></span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-0.5 bg-rose-500"></span><span>P10 Bear</span></span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-0.5 bg-slate-600"></span><span>Jalur Sampel</span></span>
+        </div>
+      </div>
+
+      <!-- Responsive SVG Container -->
+      <div class="w-full h-72 flex items-center justify-center">
+        {% if monte_carlo and monte_carlo.p90_band and monte_carlo.p10_band %}
+        {% set min_p = monte_carlo.p10_band[-1] * 0.85 %}
+        {% set max_p = monte_carlo.p90_band[-1] * 1.15 %}
+        {% set range_p = max_p - min_p if (max_p - min_p) > 0 else 1.0 %}
+        {% set w = 1000 %}
+        {% set h = 260 %}
+        {% set n_pts = monte_carlo.sample_days|length %}
+
+        <svg viewBox="0 0 {{ w }} {{ h }}" class="w-full h-full overflow-visible">
+          <!-- Background Grid Lines -->
+          <line x1="50" y1="20" x2="{{ w - 20 }}" y2="20" stroke="#1E293B" stroke-dasharray="4"/>
+          <line x1="50" y1="80" x2="{{ w - 20 }}" y2="80" stroke="#1E293B" stroke-dasharray="4"/>
+          <line x1="50" y1="140" x2="{{ w - 20 }}" y2="140" stroke="#1E293B" stroke-dasharray="4"/>
+          <line x1="50" y1="200" x2="{{ w - 20 }}" y2="200" stroke="#1E293B" stroke-dasharray="4"/>
+
+          <!-- 5 Sample Trajectory Paths -->
+          {% for path in monte_carlo.sample_paths %}
+          <polyline fill="none" stroke="#334155" stroke-width="1.2" opacity="0.6"
+                    points="{% for val in path %}{{ 50 + loop.index0 * ((w - 70) / (n_pts - 1)) }},{{ h - 20 - ((val - min_p) / range_p) * (h - 40) }} {% endfor %}"/>
+          {% endfor %}
+
+          <!-- P10 Bear Band (Loss Line) -->
+          <polyline fill="none" stroke="#F43F5E" stroke-width="2" stroke-dasharray="4"
+                    points="{% for val in monte_carlo.p10_band %}{{ 50 + loop.index0 * ((w - 70) / (n_pts - 1)) }},{{ h - 20 - ((val - min_p) / range_p) * (h - 40) }} {% endfor %}"/>
+
+          <!-- P50 Median Band (Accent Line) -->
+          <polyline fill="none" stroke="#38BDF8" stroke-width="2.5"
+                    points="{% for val in monte_carlo.p50_band %}{{ 50 + loop.index0 * ((w - 70) / (n_pts - 1)) }},{{ h - 20 - ((val - min_p) / range_p) * (h - 40) }} {% endfor %}"/>
+
+          <!-- P90 Bull Band (Gain Line) -->
+          <polyline fill="none" stroke="#10B981" stroke-width="2" stroke-dasharray="4"
+                    points="{% for val in monte_carlo.p90_band %}{{ 50 + loop.index0 * ((w - 70) / (n_pts - 1)) }},{{ h - 20 - ((val - min_p) / range_p) * (h - 40) }} {% endfor %}"/>
+
+          <!-- Text Labels -->
+          <text x="55" y="15" fill="#94A3B8" font-size="10" font-family="monospace">P90: Rp {{ "{:,.0f}".format(monte_carlo.p90_price) }}</text>
+          <text x="55" y="{{ h / 2 }}" fill="#38BDF8" font-size="10" font-family="monospace">P50: Rp {{ "{:,.0f}".format(monte_carlo.p50_price) }}</text>
+          <text x="55" y="{{ h - 25 }}" fill="#F43F5E" font-size="10" font-family="monospace">P10: Rp {{ "{:,.0f}".format(monte_carlo.p10_price) }}</text>
+        </svg>
+        {% else %}
+        <span class="text-xs text-slate-500 font-mono">Data simulasi belum tersedia.</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>

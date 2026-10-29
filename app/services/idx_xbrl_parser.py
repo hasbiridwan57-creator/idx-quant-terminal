@@ -1,0 +1,217 @@
+"""
+Parse XBRL IDX (audited FY) -> dict metrik fundamental.
+ZERO-FAKE: hanya ambil konsep yang benar-benar ada di file. Tidak ada estimasi.
+Satuan XBRL = rupiah penuh (unitRef IDR).
+"""
+import lzma
+import re
+from typing import Any, Dict, Optional
+
+# Konsep yang dipakai, urut prioritas
+CONCEPTS = {
+    # P&L (duration)
+    "revenue_sales": ["SalesAndRevenue", "RevenueFromSales", "Revenue"],
+    "interest_income": ["InterestIncome"],
+    "other_op_income": ["IncomeFromOtherOperatingTransactions", "OtherOperatingIncome"],
+    "gross_profit": ["GrossProfit"],
+    "operating_expense": ["GeneralAndAdministrativeExpenses"],
+    "profit_before_tax": ["ProfitLossBeforeIncomeTax"],
+    "net_income_total": ["ProfitLoss"],
+    "net_income_parent": ["ProfitLossAttributableToParentEntity"],
+    "eps": ["BasicEarningsLossPerShareFromContinuingOperations", "BasicEarningsLossPerShare"],
+    # Bank syariah
+    "mudharib_revenue": ["RevenueFromFundManagementAsMudharib"],
+    "third_party_profit_share": ["ThirdPartiesShareOnReturnOfTemporarySyirkahFunds"],
+    "psak_revenue": ["SalesAndRevenue"],
+    # Multifinance / sekuritas / asuransi (tak ada baris "Pendapatan" tunggal)
+    "administration_income": ["AdministrationIncome"],
+    "income_consumer_financing": ["IncomeFromConsumerFinancing"],
+    "income_finance_lease": ["IncomeFromFinanceLease"],
+    "income_murabahah": ["IncomeFromMurabahahAndIstishna"],
+    "income_provision_commission": ["IncomeFromProvisionsAndCommissions"],
+    "recovery_written_off": ["IncomeFromRecoveryOfWrittenOffAssets"],
+    "income_ijarah": ["IncomeFromIjarah"],
+    "income_factoring": ["IncomeFromFactoring"],
+    # Sekuritas / perusahaan investasi
+    "income_brokerage": ["IncomeFromBrokerageActivity"],
+    "income_investment_mgmt": ["IncomeFromInvestmentManagementServices"],
+    "income_financing_tx": ["IncomeFromFinancingTransactions"],
+    "income_underwriting": ["IncomeFromUnderwritingActivitiesAndSellingFees"],
+    "finance_income": ["FinanceIncome"],
+    "other_income": ["OtherIncome"],
+    # Asuransi
+    "insurance_premiums": ["RevenueFromInsurancePremiums"],
+    "receipts_premiums": ["ReceiptsFromInsurancePremiums"],
+    "net_investment_income": ["NetInvestmentIncome"],
+    "receipts_investment_income": ["ReceiptsOfInvestmentIncome"],
+    # Balance sheet (instant)
+    "assets": ["Assets"],
+    "liabilities": ["Liabilities"],
+    "equity_total": ["Equity"],
+    "equity_parent": ["EquityAttributableToEquityOwnersOfParentEntity"],
+    "cash": ["CashAndCashEquivalents"],
+    "loans_gross": ["TotalLoansGross"],
+    "selling_expense": ["SellingExpenses"],
+    "ga_expense": ["GeneralAndAdministrativeExpenses"],
+    "finance_costs": ["InterestAndFinanceCosts", "FinanceCosts"],
+    "finance_income": ["FinanceIncome"],
+    "interest_expense": ["InterestExpenses", "BorrowingsInterestExpense"],
+    # Bank / FIG: PPOP asli dari filing (BUKAN proxy)
+    "ppop": ["ProfitFromOperation"],
+    "interest_income_bank": ["InterestIncome"],
+    # Beban CKPN / impairment yang diakui di laba rugi
+    "impairment_losses": ["ImpairmentLosses", "ImpairmentLoss",
+                          "AllowanceForImpairmentLosses"],
+    "total_loans": ["Loans", "TotalLoans"],
+    # Beban pajak P&L: cari konsep yang benar (bukan arus kas)
+    "tax_expense": ["TaxBenefitExpenses", "TaxExpense", "IncomeTaxExpense", "CurrentTaxExpense"],
+    "dividends_paid": ["DividendsPaidFromFinancingActivities", "DividendsPaidFromOperatingActivities"],
+    "treasury_stock": ["TreasuryStocks"],
+    "npl_gross": ["NonPerformingFinancingGross"],
+    "npl_net": ["NonPerformingFinancingNet"],
+    "capex": ["PaymentsForAcquisitionOfPropertyPlantAndEquipment", "PaymentsForAcquisitionOfIntangibleAssets"],
+    # Syariah: total liabilitas wajib + dana syirkah temporer (PSAK 101/105)
+    "liab_syirkah_equity": ["LiabilitiesTemporarySyirkahFundsAndEquity"],
+    "temporary_syirkah": ["TemporarySyirkahFunds"],
+}
+
+_MAIN_CTX_DUR = ("CurrentYearDuration", "PriorYearDuration")
+_MAIN_CTX_INST = ("CurrentYearInstant", "PriorEndYearInstant")
+
+
+def _extract(raw: str, concept: str):
+    """Return list of (contextRef, unitRef, value_str) untuk exact concept (bukan prefix)."""
+    out = []
+    pat = re.compile(r"<idx-cor:" + concept + r"\b([^>]*)>([-\d.,]+)</idx-cor:" + concept + r">")
+    for m in pat.finditer(raw):
+        attrs, val = m.group(1), m.group(2)
+        ctx = re.search(r'contextRef="([^"]+)"', attrs)
+        unit = re.search(r'unitRef="([^"]+)"', attrs)
+        out.append((ctx.group(1) if ctx else "", unit.group(1) if unit else "", val))
+    return out
+
+
+def _num(s: str) -> Optional[float]:
+    try:
+        return float(s.replace(",", ""))
+    except Exception:
+        return None
+
+
+def parse_xbrl_file(path: str) -> Dict[str, Any]:
+    with lzma.open(path, "rb") as f:
+        raw = f.read().decode("utf-8", "replace")
+
+    res: Dict[str, Any] = {"parse_ok": False}
+    currency = "IDR"
+    if 'unitRef="USD"' in raw:
+        currency = "USD"
+
+    for field, candidates in CONCEPTS.items():
+        is_flow = field in ("revenue_sales", "interest_income", "other_op_income",
+                            "gross_profit", "operating_expense", "profit_before_tax",
+                            "net_income_total", "net_income_parent", "eps",
+                            "mudharib_revenue", "third_party_profit_share", "psak_revenue",
+                            "administration_income", "income_consumer_financing",
+                            "income_finance_lease", "income_murabahah",
+                            "income_provision_commission", "recovery_written_off",
+                            "income_ijarah", "income_factoring",
+                            "income_brokerage", "income_investment_mgmt",
+                            "income_financing_tx", "income_underwriting",
+                            "finance_income", "other_income",
+                            "insurance_premiums", "receipts_premiums",
+                            "net_investment_income", "receipts_investment_income",
+                            "selling_expense", "ga_expense", "tax_expense",
+                            "finance_costs", "interest_expense",
+                            "ppop", "interest_income_bank", "impairment_losses",
+                            "dividends_paid", "capex")
+        allowed = _MAIN_CTX_DUR if is_flow else _MAIN_CTX_INST
+        val = None
+        used_concept = None
+        for c in candidates:
+            hits = [h for h in _extract(raw, c) if h[0] in allowed]
+            # pilih context utama
+            for want in allowed:
+                for ctx, unit, v in hits:
+                    if ctx == want:
+                        n = _num(v)
+                        if n is not None:
+                            val = n
+                            used_concept = c
+                        break
+                if val is not None:
+                    break
+            if val is not None:
+                break
+        res[field] = val
+        if used_concept:
+            res.setdefault("_concepts", {})[field] = used_concept
+
+    # --- REVENUE resolution (tiered, no invention) ---
+    # Tier A: baris "Pendapatan"/"Penjualan" PSAK umum
+    # Tier B: bank konvensional = InterestIncome + OtherOperatingIncome
+    # Tier C: bank syariah = mudharib revenue - hak pihak ketiga dana syirkah
+    # Tier D: multifinance/sekuritas/asuransi = penjumlahan baris pendapatan eksplisit
+    if res.get("revenue_sales") is None:
+        if (res.get("mudharib_revenue") or 0.0) > 0:
+            tps = res.get("third_party_profit_share") or 0.0
+            res["revenue_sales"] = res["mudharib_revenue"] + tps  # tps sudah negatif di XBRL
+            res.setdefault("_concepts", {})["revenue_sales"] = "derived:Mudharib+ThirdPartyShare"
+        elif (res.get("interest_income") or 0.0) > 0:
+            oth = res.get("other_op_income") or 0.0
+            res["revenue_sales"] = res["interest_income"] + oth
+            res.setdefault("_concepts", {})["revenue_sales"] = "derived:InterestIncome+OtherOpIncome"
+        else:
+            parts = ["administration_income", "income_consumer_financing", "income_finance_lease",
+                     "income_murabahah", "income_provision_commission", "income_ijarah",
+                     "income_factoring", "recovery_written_off",
+                     "income_brokerage", "income_investment_mgmt", "income_financing_tx",
+                     "income_underwriting", "finance_income", "other_income"]
+            got = {p: res.get(p) for p in parts if res.get(p) is not None}
+            if got and sum(got.values()) > 0:
+                res["revenue_sales"] = sum(got.values())
+                res["_concepts"] = res.get("_concepts", {})
+                res["_concepts"]["revenue_sales"] = "sum:" + "+".join(sorted(got))
+            elif res.get("insurance_premiums") is not None:
+                # asuransi: pendapatan premi + hasil investasi bersih
+                rev = (res.get("insurance_premiums") or 0.0) + (res.get("net_investment_income") or 0.0)
+                res["revenue_sales"] = rev
+                res.setdefault("_concepts", {})["revenue_sales"] = "derived:Premiums+NetInvestmentIncome"
+
+    # --- Neraca: sebagian bank (termasuk konvensional dengan unit syariah) melaporkan
+    # "Liabilitas, Dana Syirkah Temporer dan Ekuitas" sebagai total. Jika total itu yang
+    # cocok dengan aset sementara liabilitas+ekuitas tidak, maka dana syirkah temporer
+    # MATERIAL dan wajib dipakai untuk uji neraca. Ini fakta terhitung, bukan label.
+    a = res.get("assets")
+    liab = res.get("liabilities")
+    eq = res.get("equity_total")
+    syk = res.get("liab_syirkah_equity")
+    includes_syirkah = False
+    if a and syk and abs(a - syk) / abs(a) < 0.005:
+        gap = abs(syk - ((liab or 0.0) + (eq or 0.0)))
+        if gap / abs(a) > 0.005:
+            includes_syirkah = True
+    res["balance_includes_syirkah"] = includes_syirkah
+    res["balance_total_reported"] = syk if includes_syirkah else None
+    res["is_syariah"] = False  # tidak diklaim: tak bisa dipastikan dari neraca saja
+
+    # Bank/finansial: ada portofolio kredit, atau tak punya laba bruto & penjualan tapi punya pendapatan bunga/mudharib
+    res["is_bank"] = bool(
+        res.get("loans_gross") is not None
+        or (res.get("gross_profit") is None
+            and res.get("psak_revenue") is None
+            and ((res.get("interest_income") or 0.0) > 0
+                 or (res.get("mudharib_revenue") or 0.0) > 0))
+    )
+
+    res["currency"] = currency
+    res["parse_ok"] = res.get("assets") is not None and res.get("net_income_parent") is not None
+    return res
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    for p in sys.argv[1:]:
+        r = parse_xbrl_file(p)
+        print(json.dumps({"file": p.split("/")[-1], **r}, indent=2, default=str))

@@ -1,0 +1,58 @@
+# Python runtime
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Dependencies (install via pip)
+.venv
+.venv/bin/
+.venv/lib/
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Data (local scraping output — keep source code only)
+laporan/
+data/
+*.jsonl
+*.csv
+
+# Secrets (NEVER push API keys)
+.env
+.newsdata_keys
+*.pem
+*.key
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Backups
+*.bak
+*.backup

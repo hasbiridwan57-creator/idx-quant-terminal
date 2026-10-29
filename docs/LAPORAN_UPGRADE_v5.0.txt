@@ -1,0 +1,94 @@
+# LAPORAN AKHIR AUDIT & UPGRADE IDX-QUANTTERMINAL v5.0
+**Tanggal:** 27 Oktober 2026  
+**Status:** SELESAI (100% Lulus Verifikasi FASE 5)  
+**Host Target:** Local Mac (`~/idx-quant-terminal`)  
+**URL Live:** `http://127.0.0.1:8000/`
+
+---
+
+## 1. Ringkasan Eksekutif Upgrade v5.0
+Aplikasi **IDX-QuantTerminal** telah dirombak secara menyeluruh dari arsitektur v4.0 (2-tab) menjadi **v5.0 Institutional Research & Quant Suite (6-Tab Interaktif)** sesuai Master Blueprint. Seluruh bug logika akuntansi, skala satuan finansial, permodelan bank vs non-bank, dan tata letak UI telah diperbaiki tuntas.
+
+---
+
+## 2. Rincian Perbaikan per Modul
+
+### 2.1 `app/services/dupont_engine.py` (Mesin Analitik DuPont & Kualitas Laba)
+- **Rasio Arus Kas Operasional (`ocf_to_net_income`):**
+  - Dihitung di `compute_single_period_dupont`: `ocf_ratio = round(stmt.operating_cash_flow / stmt.net_income_parent, 4)`.
+  - Trigger `accrual_anomaly_detected = True` saat `ocf_ratio < 0.75x`.
+- **Accrual Warning di YoY Analysis:**
+  - Menghasilkan pesan peringatan otomatis jika kualitas laba didominasi pos akrual non-kas.
+- **6-Step ROE Attribution Waterfall (`roe_bridge_steps`):**
+  - Menghasilkan 6 langkah rekonsiliasi aditif:
+    1. Base ROE Tahun Sebelumnya (`BASE`)
+    2. Kontribusi Margin Operasi EBIT (`DELTA`)
+    3. Kontribusi Efisiensi Aset AT (`DELTA`)
+    4. Kontribusi Beban Bunga & Pajak (`DELTA`)
+    5. Kontribusi Pengungkit Utang EM (`DELTA`)
+    6. Total ROE Tahun Berjalan (`TOTAL`)
+  - Key `driver_contributions_pct` selalu memuat 4 kunci baku dengan fallback `0.0`.
+
+### 2.2 `app/services/terminal_pipeline.py` (Validasi Fraksi Harga BEI & S/R Matrix)
+- **Perbaikan Bug S/R Reset 1 Tick:**
+  - Logika diubah menggunakan fungsi round fraksi BEI murni:
+    - $S_1 = \min(p - \text{tick}, \text{round\_to\_idx\_tick}(p \times 0.97))$
+    - $S_2 = \min(S_1 - \text{tick}(S_1), \text{round\_to\_idx\_tick}(p \times 0.94))$
+    - $R_1 = \max(p + \text{tick}, \text{round\_to\_idx\_tick}(p \times 1.03))$
+    - $R_2 = \max(R_1 + \text{tick}(R_1), \text{round\_to\_idx\_tick}(p \times 1.06))$
+  - Seluruh level memenuhi relasi ketat $S_2 < S_1 \le \text{last\_price} \le R_1 < R_2$ dan mematuhi fraksi tick BEI (Rp1, Rp2, Rp5, Rp10, Rp25).
+
+### 2.3 `app/services/quant_engine.py` (Mesin Simulasi Monte Carlo & Screener Baru)
+- **`run_monte_carlo_gbm`:**
+  - Simulasi stokastik Geometric Brownian Motion (GBM) 200–5000 jalur.
+  - Menghasilkan persentil $P_{10}$ (Bear Case), $P_{50}$ (Base Median), $P_{90}$ (Bull Case), Mean, Probabilitas Untung ($S_T > S_0$), Probabilitas Upside >20%, dan Probabilitas Drawdown >20%.
+  - Menghasilkan jalur sampling 26 titik untuk digambar sebagai **SVG Fan Chart**.
+- **`build_peer_screener_rows`:**
+  - Mengambil data emiten unik dari database cache, menghitung DuPont bundle, Altman Solvency Score, Credit Grade, dan Fair Value secara dinamis.
+
+### 2.4 `app/main.py` (Controller & API Suite)
+- **Skala Satuan Konsisten (`factor_to_bn`):**
+  - Mengeliminasi kekeliruan pembagian ganda pada data ber-multiplier $10^9$.
+- **Pemisahan Bank vs Non-Bank:**
+  - Emiten bank (seperti BBCA) dialihkan ke **Justified PBV Multiple** ($BVPS \times \frac{ROE - g}{Ke - g}$). Menghasilkan BVPS ~Rp1.557 dan Fair Value ~Rp10.596 per lembar (bukan Rp0).
+  - Emiten non-bank (seperti ASII) diproses via **FCFF DCF Valuation** dengan `total_debt = interest_bearing_debt`. Menghasilkan Enterprise Value realistis ratusan Triliun IDR (~Rp394.7 T untuk ASII, bukan ratusan ribu Triliun IDR).
+- **Endpoint API Baru:**
+  - `GET /api/screener`: Mengembalikan daftar seluruh emiten tersaring.
+  - `GET /api/risk/{ticker}`: Metrik risiko 11-faktor + simulasi Monte Carlo.
+  - `GET /api/bonds/calculate`: Kalkulator analitik obligasi & SBN (Clean Price, Dirty Price, Duration, Convexity, PVBP).
+- **Auto-Generate Template Excel:**
+  - `BASE_DIR / static / template_lapkeu_bei.xlsx` otomatis dibuat saat startup dan dimount ke `/app/static`.
+
+### 2.5 `app/templates/base.html` & Tab Modular (UI/UX 6-Tab Workspace)
+UI dirombak ke dalam 6 tab modular dengan Alpine.js dan Tailwind CSS:
+1. **Tab 1 — DuPont & ALK (`_tab1_dupont.html`):** Executive KPI banner 6 metrik, Pohon DuPont 3-tier hierarkis, Waterfall ROE 6-langkah, dan tabel riwayat multi-tahun.
+2. **Tab 2 — Valuation & Banking (`_tab2_valuation.html`):** Scorecard intermediasi OJK/BI untuk bank; 4 KPI Cards, Proyeksi FCF 5-tahun, Skenario Bull/Base/Bear, Matriks Sensitivitas 2D 5x5, dan Slider DCF Interaktif real-time untuk non-bank.
+3. **Tab 3 — Quant Risk & GBM (`_tab3_quant.html`):** 11-Metrik Institutional Risk Scorecard dan SVG Fan Chart Monte Carlo.
+4. **Tab 4 — Screener & Peers (`_tab4_screener.html`):** Tabel screener dengan filter sektor, pencarian cepat, pengurutan kolom, dan modal komparasi *head-to-head* spread.
+5. **Tab 5 — Fixed Income & SBN (`_tab5_fixed_income.html`):** Panel peringkat solvabilitas kredit korporasi dan kalkulator interaktif obligasi/SBN live.
+6. **Tab 6 — IHSG Terminal (`_tab6_terminal.html`):** Big-cap movers, akumulasi/distribusi foreign flow, dan matriks support/resistance BEI lengkap dengan range position bar.
+7. **Modal Upload Laporan Keuangan:** Terpasang di top global header, mengunggah file `.xlsx`, `.pdf`, atau `.json` ke `/api/dupont/upload`.
+
+---
+
+## 3. Hasil Pengujian & Verifikasi (Checklist FASE 5)
+
+| Butir Pengujian | Target Kriteria | Hasil Aktual | Status |
+|---|---|---|---|
+| `pytest` Suite | 35 test lulus tanpa gagal | 35 passed in 1.83s | **LULUS** |
+| Versi Aplikasi | Muncul v5.0 di header & meta | Terpasang `v5.0` | **LULUS** |
+| Tab Navigasi | 6 Tab lengkap di HTML | 6 Tab aktif (`dupont`, `valuation`, `quant`, `screener`, `fixed_income`, `terminal`) | **LULUS** |
+| Upload Modal | Ada trigger dan modal upload form | Endpoint `/api/dupont/upload` aktif | **LULUS** |
+| DCF ASII Sensitivitas | Matriks sensitivitas & skenario ada | 5x5 Matrix + Bull/Base/Bear ter-render | **LULUS** |
+| Guardrail Bank ASII | Panel bank tidak muncul pada ASII | `Metrik Khusus Perbankan` tersembunyi | **LULUS** |
+| Skala EV ASII | Kisaran ratusan Triliun IDR | EV: Rp 394.7 T (WACC 11.66%) | **LULUS** |
+| Banking BBCA | Panel bank muncul, BVPS & Fair Value akurat | BVPS: Rp 1.557, Fair Value: Rp 10.596 | **LULUS** |
+| API Screener | HTTP 200, JSON valid | HTTP 200 (9 emiten terdaftar) | **LULUS** |
+| API Risk ASII | HTTP 200, JSON valid | HTTP 200 (11 metrik risiko + MC) | **LULUS** |
+| API Bonds Calc | HTTP 200, JSON valid | HTTP 200 (Clean Price: Rp 1.016.696,27) | **LULUS** |
+| Static Template | File Excel template tersedia | HTTP 200 (`/app/static/template_lapkeu_bei.xlsx`) | **LULUS** |
+
+---
+
+## 4. Kesimpulan
+Upgrade v5.0 telah selesai 100% dan server aktif melayani request di port 8000. Seluruh kode sumber, template, dan aset statis telah tersinkronisasi di direktori lokal Mac Anda.

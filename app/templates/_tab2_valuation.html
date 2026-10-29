@@ -1,0 +1,267 @@
+<!-- TAB 2: VALUATION & BANKING LAB (v5.2 Linear/Koyfin Dark UI) -->
+<section x-show="activeNav === 'valuation'" class="space-y-6">
+  {% if banking and banking.net_interest_margin %}
+  <!-- EMITEN BANK: Scorecard & Justified PBV Valuation -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 space-y-6">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
+      <div>
+        <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-medium bg-sky-500/10 border border-sky-500/30 text-sky-400">
+          Model Institusi Perbankan &bull; Standar OJK / BI &amp; CFA Institute
+        </span>
+        <h3 class="text-base font-semibold text-white mt-2">Intermediasi &amp; Valuasi Perbankan (Justified PBV)</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Analisis struktur margin bunga bersih dan kelipatan nilai buku wajar</p>
+      </div>
+      <div class="text-right font-mono">
+        <span class="text-xs text-slate-400 block font-sans">Nilai Wajar per Lembar:</span>
+        <span class="text-2xl font-bold font-mono tabular-nums text-emerald-400">
+          Rp {{ "{:,.0f}".format(banking.fair_value_per_share) if banking.fair_value_per_share else '—' }}
+        </span>
+      </div>
+    </div>
+
+    <!-- OJK Banking Scorecard (Subtle Luminance Cards) -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 text-center">
+        <span class="text-xs text-slate-400 font-medium block">Net Interest Margin (NIM)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums text-sky-400 block my-1">
+          {{ "%.2f"|format(banking.net_interest_margin * 100) }}%
+        </span>
+        <span class="text-[11px] text-slate-400 font-mono">Efisiensi Bunga Bersih</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 text-center">
+        <span class="text-xs text-slate-400 font-medium block">Return on Assets (ROA)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums text-emerald-400 block my-1">
+          {{ "%.2f"|format(banking.return_on_assets * 100) if banking.return_on_assets else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-400 font-mono">Profitabilitas Aset</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 text-center">
+        <span class="text-xs text-slate-400 font-medium block">Cost to Income (CIR)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums text-white block my-1">
+          {{ "%.2f"|format(banking.cost_to_income_ratio * 100) if banking.cost_to_income_ratio else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-400 font-mono">Rasio Beban Operasional</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 text-center">
+        <span class="text-xs text-slate-400 font-medium block">Debt to Equity (D/E)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums text-white block my-1">
+          {{ "%.2f"|format(banking.debt_to_equity) if banking.debt_to_equity else '—' }}x
+        </span>
+        <span class="text-[11px] text-slate-400 font-mono">Leverage Bank</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 text-center">
+        <span class="text-xs text-slate-400 font-medium block">Return on Equity (ROE)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums text-emerald-400 block my-1">
+          {{ "%.2f"|format(banking.return_on_equity * 100) if banking.return_on_equity else '—' }}%
+        </span>
+        <span class="text-[11px] text-slate-400 font-mono">Imbal Hasil Modal</span>
+      </div>
+    </div>
+
+    <!-- Justified PBV Card Breakdown -->
+    <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-5 grid grid-cols-1 md:grid-cols-4 gap-4 font-mono text-xs">
+      <div>
+        <span class="text-slate-400 block font-sans">Book Value per Share (BVPS)</span>
+        <span class="text-lg font-semibold text-white mt-1 block">
+          Rp {{ "{:,.0f}".format(banking.bvps) if banking.bvps else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">Ekuitas / Lembar Beredar</span>
+      </div>
+      <div>
+        <span class="text-slate-400 block font-sans">Justified PBV Multiple</span>
+        <span class="text-lg font-semibold text-sky-400 mt-1 block">
+          {{ "%.2f"|format(banking.justified_pbv) if banking.justified_pbv else '—' }}x
+        </span>
+        <span class="text-[11px] text-slate-500">(ROE - g) / (Ke - g)</span>
+      </div>
+      <div>
+        <span class="text-slate-400 block font-sans">Cost of Equity (Ke) / g</span>
+        <span class="text-lg font-semibold text-white mt-1 block">10.50% / 5.00%</span>
+        <span class="text-[11px] text-slate-500">Asumsi Pertumbuhan Berkelanjutan</span>
+      </div>
+      <div>
+        <span class="text-slate-400 block font-sans">Intrinsic Fair Value</span>
+        <span class="text-lg font-semibold text-emerald-400 mt-1 block">
+          Rp {{ "{:,.0f}".format(banking.fair_value_per_share) if banking.fair_value_per_share else '—' }}
+        </span>
+        <span class="text-[11px] text-slate-500">BVPS &times; Justified PBV</span>
+      </div>
+    </div>
+  </div>
+
+  {% elif dcf %}
+  <!-- EMITEN NON-BANK: Institutional DCF Suite -->
+  <div class="space-y-6">
+
+    <!-- 4 KPI Cards (Subtle Luminance Cards) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+        <span class="text-xs text-slate-400 font-medium block">Cost of Capital (WACC)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-white block my-1">
+          {{ dcf.wacc_pct }}%
+        </span>
+        <span class="text-xs text-slate-400 font-mono">Ke &amp; Kd Tertimbang</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+        <span class="text-xs text-slate-400 font-medium block">Enterprise Value (EV)</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-white block my-1">
+          Rp {{ "{:,.1f}".format(dcf.enterprise_value_trn) }} T
+        </span>
+        <span class="text-xs text-slate-400 font-mono">Nilai Entitas Usaha</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+        <span class="text-xs text-slate-400 font-medium block">Equity Value</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-sky-400 block my-1">
+          Rp {{ "{:,.1f}".format(dcf.equity_value_trn) }} T
+        </span>
+        <span class="text-xs text-slate-400 font-mono">Hak Pemegang Saham</span>
+      </div>
+
+      <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+        <span class="text-xs text-slate-400 font-medium block">Nilai Wajar per Lembar</span>
+        <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-emerald-400 block my-1">
+          Rp {{ "{:,.0f}".format(dcf.price_per_share) }}
+        </span>
+        <span class="text-xs font-mono {{ 'text-emerald-400' if (dcf.upside_pct if dcf.upside_pct is defined and dcf.upside_pct is not none else 0) >= 0 else 'text-rose-400' }}">
+          {{ dcf.valuation_status if dcf.valuation_status is defined else 'FAIR' }} ({{ "%+.1f"|format(dcf.upside_pct) if dcf.upside_pct is defined and dcf.upside_pct is not none else '+0.0' }}%)
+        </span>
+      </div>
+    </div>
+
+    <!-- 5-Year Free Cash Flow Projection Bar Visual -->
+    <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6">
+      <div class="border-b border-white/[0.06] pb-3 mb-4">
+        <h4 class="text-sm font-medium text-slate-200">Proyeksi Free Cash Flow (5-Tahun ke Depan)</h4>
+        <p class="text-xs text-slate-400 mt-0.5">Basis proyeksi EBIT, Pajak 22%, Capex &amp; Depresiasi historis (Miliar IDR)</p>
+      </div>
+      <div class="grid grid-cols-5 gap-3.5 font-mono text-xs text-center">
+        {% for fcf in dcf.fcf_projections_bn %}
+        <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-3.5">
+          <span class="text-slate-400 text-xs block">Tahun {{ loop.index }}</span>
+          <span class="text-lg font-semibold font-mono text-sky-400 block my-1">
+            Rp {{ "{:,.0f}".format(fcf) }} B
+          </span>
+          <span class="text-[11px] text-slate-500">FCF Proyeksi</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Scenario Cards (BULL, BASE, BEAR) -->
+    {% if dcf.scenarios %}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {% for sc_key, sc in dcf.scenarios.items() %}
+      <div class="rounded-2xl p-5 border {{ 'border-emerald-500/30 bg-emerald-500/5' if sc_key == 'BULL' else ('border-rose-500/30 bg-rose-500/5' if sc_key == 'BEAR' else 'border-sky-500/30 bg-sky-500/5') }}">
+        <div class="flex items-center justify-between mb-2">
+          <span class="font-semibold text-xs font-mono uppercase tracking-wider {{ 'text-emerald-400' if sc_key == 'BULL' else ('text-rose-400' if sc_key == 'BEAR' else 'text-sky-400') }}">
+            Skenario {{ sc_key }}
+          </span>
+          <span class="text-xs font-mono text-slate-400">WACC {{ sc.wacc }}%</span>
+        </div>
+        <span class="text-2xl font-semibold font-mono text-white block my-1">
+          Rp {{ "{:,.0f}".format(sc.price) }}
+        </span>
+        <span class="text-xs font-mono text-slate-400">Estimasi Harga Wajar (WACC {{ sc.wacc }}%)</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- 2D Sensitivity Matrix (5x5) -->
+    {% if dcf.sensitivity %}
+    <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 overflow-hidden">
+      <div class="border-b border-white/[0.06] pb-3 mb-4">
+        <h4 class="text-sm font-medium text-slate-200">Matriks Sensitivitas Valuasi 2D (Enterprise Value &bull; Triliun IDR)</h4>
+        <p class="text-xs text-slate-400 mt-0.5">Variasi WACC (Kolom) vs Terminal Growth Rate (Baris) &bull; Sel Tengah merupakan Baseline</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs font-mono text-center">
+          <thead>
+            <tr class="text-slate-400 border-b border-white/[0.06] bg-slate-800/30">
+              <th class="py-2.5 px-3 text-left">TG \ WACC</th>
+              {% for w in dcf.sensitivity.wacc_range %}
+              <th class="py-2.5 px-3 {{ 'text-sky-400 font-semibold' if loop.index0 == 2 else '' }}">{{ w }}%</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            {% for row in dcf.sensitivity.ev_matrix %}
+            {% set tg_idx = loop.index0 %}
+            <tr class="hover:bg-slate-800/30 transition-colors">
+              <td class="py-2.5 px-3 text-left font-semibold text-slate-400 bg-slate-900/40">
+                {{ dcf.sensitivity.tg_range[tg_idx] }}%
+              </td>
+              {% for val in row %}
+              <td class="py-2.5 px-3 tabular-nums {{ 'bg-sky-500/20 font-bold text-sky-400 border border-sky-500/40 rounded' if (tg_idx == 2 and loop.index0 == 2) else 'text-slate-200' }}">
+                Rp {{ "{:,.1f}".format(val) }} T
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Interactive Client-Side DCF Simulator (Alpine.js Sliders) -->
+    <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 space-y-4">
+      <div class="border-b border-white/[0.06] pb-3 flex items-center justify-between">
+        <div>
+          <h4 class="text-sm font-medium text-slate-200">Simulator DCF Interaktif (Live Sensitivity Sliders)</h4>
+          <p class="text-xs text-slate-400 mt-0.5">Ubah asumsi WACC dan Growth untuk melihat estimasi nilai wajar secara dinamis</p>
+        </div>
+        <button @click="resetDcfSliders()"
+                class="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-white/[0.06] rounded-lg text-xs font-mono text-slate-300 transition-colors">
+          Reset Default
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 font-mono text-xs">
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <span class="text-slate-400">Cost of Capital (WACC):</span>
+            <span class="font-semibold text-sky-400" x-text="simWacc + '%'"></span>
+          </div>
+          <input type="range" min="6.0" max="16.0" step="0.25" x-model.number="simWacc" class="w-full accent-sky-400">
+        </div>
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <span class="text-slate-400">FCF Growth Rate:</span>
+            <span class="font-semibold text-sky-400" x-text="simGrowth + '%'"></span>
+          </div>
+          <input type="range" min="0.0" max="15.0" step="0.5" x-model.number="simGrowth" class="w-full accent-sky-400">
+        </div>
+        <div>
+          <div class="flex justify-between mb-1.5">
+            <span class="text-slate-400">Terminal Growth (TG):</span>
+            <span class="font-semibold text-sky-400" x-text="simTg + '%'"></span>
+          </div>
+          <input type="range" min="1.0" max="5.0" step="0.25" x-model.number="simTg" class="w-full accent-sky-400">
+        </div>
+      </div>
+
+      <div class="bg-[#090D16] border border-white/[0.06] rounded-xl p-4 grid grid-cols-3 gap-4 text-center font-mono">
+        <div>
+          <span class="text-xs text-slate-400 block font-sans">Simulated EV</span>
+          <span class="text-xl font-semibold text-white mt-1 block">Rp <span x-text="simEV"></span> T</span>
+        </div>
+        <div>
+          <span class="text-xs text-slate-400 block font-sans">Simulated Equity Value</span>
+          <span class="text-xl font-semibold text-sky-400 mt-1 block">Rp <span x-text="simEq"></span> T</span>
+        </div>
+        <div>
+          <span class="text-xs text-slate-400 block font-sans">Simulated Fair Price</span>
+          <span class="text-xl font-semibold text-emerald-400 mt-1 block">Rp <span x-text="simTargetPrice.toLocaleString()"></span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</section>

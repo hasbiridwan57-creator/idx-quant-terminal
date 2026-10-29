@@ -1,0 +1,181 @@
+<!-- TAB 4: EQUITY SCREENER & PEER MATRIX (v5.2 Linear/Koyfin Dark UI) -->
+<section x-show="activeNav === 'screener'" class="space-y-6">
+
+  <!-- Screener Controls Banner (Subtle Luminance Box) -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-6 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h3 class="text-base font-semibold text-white">Screener Fundamental &amp; Matriks Komparasi Peer</h3>
+        <p class="text-xs text-slate-400 mt-0.5">Filter emiten berdasarkan kualitas dekomposisi DuPont, skor kredit, dan estimasi valuasi</p>
+      </div>
+
+      <button @click="showCompareModal = true"
+              class="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold rounded-xl text-xs font-mono transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span>Bandingkan Head-to-Head (Spread)</span>
+      </button>
+    </div>
+
+    <!-- Filters Strip -->
+    <div class="flex flex-wrap items-center gap-3 font-mono text-xs pt-3 border-t border-white/[0.06]">
+      <!-- Sector Pills -->
+      <div class="flex flex-wrap items-center gap-1.5">
+        <span class="text-slate-400 mr-1 text-xs font-sans">Sektor:</span>
+        <template x-for="sec in ['ALL', 'Industrials', 'Financials', 'Communication Services', 'Energy', 'Consumer Non-Cyclicals']" :key="sec">
+          <button @click="sectorFilter = sec"
+                  :class="sectorFilter === sec ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold' : 'bg-slate-800/40 text-slate-400 hover:text-white border border-white/[0.04]'"
+                  class="px-3 py-1 rounded-lg transition-colors text-xs" x-text="sec"></button>
+        </template>
+      </div>
+
+      <!-- Search Input -->
+      <div class="ml-auto w-full md:w-64">
+        <input type="text"
+               x-model="searchKw"
+               placeholder="Cari kode / nama emiten..."
+               class="w-full bg-[#090D16] border border-white/[0.08] focus:border-sky-500/50 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none transition-colors">
+      </div>
+    </div>
+  </div>
+
+  <!-- Peer Comparison Table -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs font-mono text-left">
+        <thead>
+          <tr class="text-slate-400 border-b border-white/[0.06] bg-slate-800/30 text-xs">
+            <th class="py-3 px-3 cursor-pointer hover:text-white" @click="sortBy('ticker')">Ticker</th>
+            <th class="py-3 px-2">Perusahaan</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('roe_pct')">ROE %</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('npm_pct')">NPM %</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('ebit_margin_pct')">EBIT %</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('asset_turnover')">AT</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('equity_multiplier')">EM</th>
+            <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('ocf_to_ni')">OCF/NI</th>
+            <th class="py-3 px-2 text-center cursor-pointer hover:text-white" @click="sortBy('credit_score')">Credit</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('fair_value')">Fair Value</th>
+            <th class="py-3 px-3 text-center">Aksi</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/[0.04]">
+          <template x-for="r in filteredRows" :key="r.ticker">
+            <tr class="hover:bg-slate-800/30 transition-colors">
+              <td class="py-3 px-3 font-semibold">
+                <a :href="'/?ticker=' + r.ticker" class="text-sky-400 hover:underline" x-text="r.ticker"></a>
+              </td>
+              <td class="py-3 px-2 text-slate-200 truncate max-w-[180px]" x-text="r.company_name" :title="r.company_name"></td>
+              <td class="py-3 px-2 text-right font-semibold tabular-nums"
+                  :class="r.roe_pct >= 15 ? 'text-emerald-400' : (r.roe_pct >= 8 ? 'text-sky-400' : 'text-rose-400')"
+                  x-text="r.roe_pct ? r.roe_pct.toFixed(2) + '%' : '—'"></td>
+              <td class="py-3 px-2 text-right tabular-nums text-slate-300" x-text="r.npm_pct ? r.npm_pct.toFixed(2) + '%' : '—'"></td>
+              <td class="py-3 px-2 text-right tabular-nums text-slate-300" x-text="r.ebit_margin_pct ? r.ebit_margin_pct.toFixed(2) + '%' : '—'"></td>
+              <td class="py-3 px-2 text-right tabular-nums text-slate-300" x-text="r.asset_turnover ? r.asset_turnover.toFixed(3) : '—'"></td>
+              <td class="py-3 px-2 text-right tabular-nums text-slate-300" x-text="r.equity_multiplier ? r.equity_multiplier.toFixed(2) + 'x' : '—'"></td>
+              <td class="py-3 px-2 text-right tabular-nums"
+                  :class="r.ocf_to_ni && r.ocf_to_ni < 0.75 ? 'text-amber-400 font-semibold' : 'text-slate-300'"
+                  x-text="r.ocf_to_ni ? r.ocf_to_ni.toFixed(2) + 'x' : '—'"></td>
+              <td class="py-3 px-2 text-center">
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 border border-white/[0.06] text-slate-200"
+                      x-text="r.credit_grade + ' (' + r.credit_score + ')'"></span>
+              </td>
+              <td class="py-3 px-3 text-right font-semibold font-mono text-emerald-400 tabular-nums"
+                  x-text="r.fair_value ? 'Rp ' + r.fair_value.toLocaleString() : '—'"></td>
+              <td class="py-3 px-3 text-center">
+                <a :href="'/?ticker=' + r.ticker"
+                   class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-sky-400 border border-white/[0.06] transition-colors">
+                  Pilih &rarr;
+                </a>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HEAD-TO-HEAD COMPARISON MODAL -->
+  <div x-show="showCompareModal"
+       x-transition.opacity
+       class="fixed inset-0 bg-[#080C14]/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+       style="display: none;">
+    <div class="bg-[#0E1525] border border-white/[0.1] rounded-2xl max-w-3xl w-full shadow-2xl p-6 space-y-5"
+         @click.away="showCompareModal = false">
+      <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        <h3 class="text-base font-semibold text-white">Perbandingan Head-to-Head &amp; Spread Valuasi</h3>
+        <button @click="showCompareModal = false" class="text-slate-400 hover:text-white font-mono text-xs">&times; TUTUP</button>
+      </div>
+
+      <!-- Selectors -->
+      <div class="grid grid-cols-2 gap-4 font-mono text-xs">
+        <div>
+          <label class="text-slate-400 block mb-1 font-sans">Emiten 1:</label>
+          <select x-model="compareTicker1" class="w-full bg-[#090D16] border border-white/[0.08] rounded-xl p-2.5 text-white font-mono">
+            <template x-for="r in allRows" :key="r.ticker">
+              <option :value="r.ticker" x-text="r.ticker + ' — ' + r.company_name"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="text-slate-400 block mb-1 font-sans">Emiten 2:</label>
+          <select x-model="compareTicker2" class="w-full bg-[#090D16] border border-white/[0.08] rounded-xl p-2.5 text-white font-mono">
+            <template x-for="r in allRows" :key="r.ticker">
+              <option :value="r.ticker" x-text="r.ticker + ' — ' + r.company_name"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+
+      <!-- Comparison Metrics Table -->
+      <div class="bg-[#090D16] border border-white/[0.06] rounded-xl overflow-hidden font-mono text-xs">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-white/[0.06] text-slate-400 bg-slate-800/30">
+              <th class="py-2.5 px-3 text-left">Metrik Analisis</th>
+              <th class="py-2.5 px-3 text-right text-sky-400 font-semibold" x-text="t1Data.ticker"></th>
+              <th class="py-2.5 px-3 text-right text-emerald-400 font-semibold" x-text="t2Data.ticker"></th>
+              <th class="py-2.5 px-3 text-right text-slate-400">Selisih (Spread)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/[0.04]">
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Return on Equity (ROE)</td>
+              <td class="py-2.5 px-3 text-right font-semibold text-white" x-text="(t1Data.roe_pct ?? 0).toFixed(2) + '%'"></td>
+              <td class="py-2.5 px-3 text-right font-semibold text-white" x-text="(t2Data.roe_pct ?? 0).toFixed(2) + '%'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-300" x-text="((t1Data.roe_pct ?? 0) - (t2Data.roe_pct ?? 0)).toFixed(2) + '%'"></td>
+            </tr>
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Net Profit Margin (NPM)</td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t1Data.npm_pct ?? 0).toFixed(2) + '%'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t2Data.npm_pct ?? 0).toFixed(2) + '%'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-300" x-text="((t1Data.npm_pct ?? 0) - (t2Data.npm_pct ?? 0)).toFixed(2) + '%'"></td>
+            </tr>
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Asset Turnover (AT)</td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t1Data.asset_turnover ?? 0).toFixed(3)"></td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t2Data.asset_turnover ?? 0).toFixed(3)"></td>
+              <td class="py-2.5 px-3 text-right text-slate-300" x-text="((t1Data.asset_turnover ?? 0) - (t2Data.asset_turnover ?? 0)).toFixed(3)"></td>
+            </tr>
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Equity Multiplier (EM)</td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t1Data.equity_multiplier ?? 0).toFixed(2) + 'x'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t2Data.equity_multiplier ?? 0).toFixed(2) + 'x'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-300" x-text="((t1Data.equity_multiplier ?? 0) - (t2Data.equity_multiplier ?? 0)).toFixed(2) + 'x'"></td>
+            </tr>
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Peringkat Kredit / Skor</td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t1Data.credit_grade ?? '—') + ' (' + (t1Data.credit_score ?? 0) + ')'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-200" x-text="(t2Data.credit_grade ?? '—') + ' (' + (t2Data.credit_score ?? 0) + ')'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-300" x-text="((t1Data.credit_score ?? 0) - (t2Data.credit_score ?? 0)) + ' pts'"></td>
+            </tr>
+            <tr>
+              <td class="py-2.5 px-3 text-slate-400">Nilai Wajar Intrinsik</td>
+              <td class="py-2.5 px-3 text-right font-semibold text-emerald-400" x-text="t1Data.fair_value ? 'Rp ' + t1Data.fair_value.toLocaleString() : '—'"></td>
+              <td class="py-2.5 px-3 text-right font-semibold text-emerald-400" x-text="t2Data.fair_value ? 'Rp ' + t2Data.fair_value.toLocaleString() : '—'"></td>
+              <td class="py-2.5 px-3 text-right text-slate-400">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
