@@ -483,6 +483,7 @@
         activeCopilotTicker: 'COMPOSITE',
         // Peer Comparison Matrix state
         peerMatrix: null,
+        tradingStatus: null,
         peerTickers: ['ASII'],
         newPeerTicker: '',
         async loadPeerMatrix() {
@@ -493,6 +494,12 @@
               this.peerTickers = (this.peerMatrix.peers || []).map(p => p.ticker);
             }
           } catch(e) { console.error('Peer matrix error:', e); }
+        },
+        async loadTradingStatus() {
+          try {
+            let res = await fetch('/api/trading-status/' + this.ticker);
+            if (res.ok) this.tradingStatus = await res.json();
+          } catch(e) { this.tradingStatus = null; }
         },
         addPeer() {
           let t = this.newPeerTicker.trim().toUpperCase();
@@ -523,6 +530,13 @@
         fmtPct(v) {
           if (v === null || v === undefined) return 'N/A';
           return v.toFixed(1) + '%';
+        },
+        // nf(value, digits, suffix): format angka null-safe. Dipakai luas di template
+        // karena emiten tersuspensi/delisting sering tidak punya harga -> field undefined.
+        nf(v, d, suffix) {
+          const n = (v === null || v === undefined || (typeof v === 'number' && !isFinite(v))) ? null : Number(v);
+          if (n === null || !isFinite(n)) return 'N/A';
+          return n.toFixed(d === undefined ? 1 : d) + (suffix || '');
         },
         colorMetric(v, median, direction) {
           if (v === null || v === undefined) return 'text-slate-500';
@@ -730,6 +744,7 @@
             const resEl = document.getElementById('research-data') || document.getElementById('research-json');
             this.researchData = resEl ? JSON.parse(resEl.textContent) : null;
           } catch(e) { console.error('Error parsing research JSON:', e); }
+          this.loadTradingStatus();
           setTimeout(() => {
             try {
               if (this.researchData) { this.renderAllCharts(); }

@@ -1,6 +1,28 @@
 <!-- TAB 0: ADVANCED MULTI-CHART TERMINAL (1 to 4 Grid Layout) -->
 <section x-show="activeNav === 'charting'" class="space-y-4">
 
+  <!-- TRADING STATUS BANNER: jelaskan kenapa harga tidak tersedia -->
+  <template x-if="tradingStatus && tradingStatus.tradable === false">
+    <div class="bg-amber-500/[0.07] border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3">
+      <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+      <div class="flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-sm font-semibold text-amber-300">Saham Tidak Diperdagangkan</span>
+          <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300"
+                x-text="tradingStatus.reason"></span>
+          <span class="text-[10px] font-mono text-amber-400/70"
+                x-show="tradingStatus.since"
+                x-text="'sejak ' + tradingStatus.since"></span>
+        </div>
+        <p class="text-xs text-amber-200/80 mt-1.5 leading-relaxed" x-text="tradingStatus.detail"></p>
+        <p class="text-[10px] text-amber-200/50 mt-1.5 font-sans">
+          Data fundamental (XBRL audited) tetap tersedia dan dapat dianalisis. Harga pasar &amp; valuasi relatif tidak dapat dihitung.
+          Sumber: pengumuman resmi BEI/IDX.
+        </p>
+      </div>
+    </div>
+  </template>
+
   <!-- Header Controls: Grid Mode & Ticker Quick Bar -->
   <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
     <div class="flex items-center gap-3">

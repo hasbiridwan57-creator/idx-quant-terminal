@@ -1007,6 +1007,30 @@ async def api_get_peer_matrix(ticker: str):
 
 
 # ===============================================================
+# 6b. STATUS PERDAGANGAN EMITEN (suspensi / delisting — terverifikasi BEI)
+# ===============================================================
+@app.get("/api/trading-status/{ticker}")
+async def api_get_trading_status(ticker: str):
+    """
+    Alasan kenapa sebuah emiten tidak punya harga pasar.
+    Sumber: pengumuman resmi BEI/IDX. Kosong = emiten aktif diperdagangkan.
+    """
+    import json, os
+    f_path = "/Users/hasbi/idx-quant-terminal/data/idx_trading_status.json"
+    if os.path.exists(f_path):
+        try:
+            with open(f_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            st = d.get("status", {}).get(ticker.upper().strip())
+            if st:
+                return {"ticker": ticker.upper(), "tradable": False, **st}
+            return {"ticker": ticker.upper(), "tradable": True, "reason": None, "detail": None}
+        except Exception as e:
+            return {"error": str(e)}
+    return {"ticker": ticker.upper(), "tradable": True, "reason": None, "detail": None}
+
+
+# ===============================================================
 # 6. FINTECH UNIT ECONOMICS (GOTO, BUKA, BELI)
 # ===============================================================
 @app.get("/api/fintech/{ticker}")

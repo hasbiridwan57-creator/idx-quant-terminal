@@ -33,7 +33,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <div class="text-xs font-mono text-slate-300">
             Target: <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
             (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                   x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(0) + '% ' + (researchData.upside_pct >= 0 ? 'Up' : 'Down') + 'side') : 'N/A'"></span>)
+                   x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + nf(researchData.upside_pct, 0, '% ') + (researchData.upside_pct >= 0 ? 'Up' : 'Down') + 'side') : 'N/A'"></span>)
           </div>
         </div>
         <div class="h-12 w-px bg-white/[0.08]"></div>
@@ -66,13 +66,13 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
               <template x-if="researchData && researchData.week52_low"><span x-text="'Rp ' + Number(researchData.week52_low).toLocaleString('id-ID')"></span></template>
               <template x-if="!researchData || !researchData.week52_low"><span class="text-slate-500">N/A</span></template></td></tr>
             <tr><td class="px-4 py-2.5 text-slate-400">EV / Revenue (LTM)</td><td class="px-4 py-2.5 text-right text-slate-200">
-              <template x-if="researchData && researchData.ev_to_ntm_revenue"><span x-text="Number(researchData.ev_to_ntm_revenue).toFixed(1) + 'x'"></span></template>
+              <template x-if="researchData && researchData.ev_to_ntm_revenue"><span x-text="nf(researchData.ev_to_ntm_revenue, 1, 'x')"></span></template>
               <template x-if="!researchData || !researchData.ev_to_ntm_revenue"><span class="text-slate-500">N/A</span></template></td></tr>
             <tr><td class="px-4 py-2.5 text-slate-400">P/E</td><td class="px-4 py-2.5 text-right text-slate-200">
-              <template x-if="researchData && researchData.pe_ratio"><span x-text="Number(researchData.pe_ratio).toFixed(1) + 'x'"></span></template>
+              <template x-if="researchData && researchData.pe_ratio"><span x-text="nf(researchData.pe_ratio, 1, 'x')"></span></template>
               <template x-if="!researchData || !researchData.pe_ratio"><span class="text-slate-500">N/A (Rugi)</span></template></td></tr>
             <tr><td class="px-4 py-2.5 text-slate-400">P/BV</td><td class="px-4 py-2.5 text-right text-slate-200">
-              <template x-if="researchData && researchData.pbv_ratio"><span x-text="Number(researchData.pbv_ratio).toFixed(2) + 'x'"></span></template>
+              <template x-if="researchData && researchData.pbv_ratio"><span x-text="nf(researchData.pbv_ratio, 2, 'x')"></span></template>
               <template x-if="!researchData || !researchData.pbv_ratio"><span class="text-slate-500">N/A</span></template></td></tr>
           </tbody>
         </table>
@@ -100,7 +100,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
               <template x-if="researchData && researchData.relative_fair_value"><span x-text="'Rp ' + Number(researchData.relative_fair_value).toLocaleString('id-ID')"></span></template>
               <template x-if="!researchData || !researchData.relative_fair_value"><span class="text-slate-500">N/A</span></template></td></tr>
             <tr class="bg-blue-600/10"><td class="px-4 py-2.5 text-blue-300 font-bold">Target Price (Blended)</td><td class="px-4 py-2.5 text-right text-blue-300">—</td><td class="px-4 py-2.5 text-right text-blue-300 font-black" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></td></tr>
-            <tr><td class="px-4 py-2.5 text-slate-400">Implied Upside / (Downside)</td><td class="px-4 py-2.5 text-right text-slate-400">—</td><td class="px-4 py-2.5 text-right font-bold" :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '%') : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">Implied Upside / (Downside)</td><td class="px-4 py-2.5 text-right text-slate-400">—</td><td class="px-4 py-2.5 text-right font-bold" :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + nf(researchData.upside_pct, 1, '%')) : 'N/A'"></td></tr>
           </tbody>
         </table>
         <div class="px-4 py-2 border-t border-white/[0.04] text-[10px] text-slate-500 font-mono">Source: IDX-Quant engine, 2026</div>
@@ -119,7 +119,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
             <tr><td class="px-4 py-2.5 text-slate-400">Total Assets</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? 'Rp ' + Number(researchData.total_assets_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
             <tr><td class="px-4 py-2.5 text-slate-400">Equity to Parent</td><td class="px-4 py-2.5 text-right text-slate-200" x-text="researchData ? 'Rp ' + Number(researchData.total_equity_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
             <tr><td class="px-4 py-2.5 text-slate-400">Net Cash / (Net Debt)</td><td class="px-4 py-2.5 text-right font-bold" :class="researchData && researchData.net_cash_bn >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="researchData ? 'Rp ' + Number(researchData.net_cash_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' B' : 'N/A'"></td></tr>
-            <tr><td class="px-4 py-2.5 text-slate-400">ROE</td><td class="px-4 py-2.5 text-right text-emerald-400 font-bold" x-text="researchData ? researchData.roe_pct.toFixed(1) + '%' : 'N/A'"></td></tr>
+            <tr><td class="px-4 py-2.5 text-slate-400">ROE</td><td class="px-4 py-2.5 text-right text-emerald-400 font-bold" x-text="nf(researchData?.roe_pct, 1, '%')"></td></tr>
           </tbody>
         </table>
         <div class="px-4 py-2 border-t border-white/[0.04] text-[10px] text-slate-500 font-mono">Source: Audited BEI filings — Entitas Induk</div>
@@ -156,10 +156,10 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <strong class="text-white" x-text="researchData ? researchData.company_name : ticker"></strong> (IDX: <span x-text="ticker"></span>)
           dengan target harga 12-bulan <strong class="text-blue-400" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
           (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                 x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '% ' + (researchData.upside_pct >= 0 ? 'upside' : 'downside')) : ''"></span>
+                 x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + nf(researchData.upside_pct, 1, '% ') + (researchData.upside_pct >= 0 ? 'upside' : 'downside')) : ''"></span>
           dari harga terakhir <span x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></span>).
           Valuasi berbasis DCF yang dibobot ke nilai intrinsik (Figure 2).
-          <span x-text="researchData ? ('ROE tercatat ' + researchData.roe_pct.toFixed(1) + '% dengan P/E ' + Number(researchData.pe_ratio).toFixed(1) + 'x dan P/BV ' + Number(researchData.pbv_ratio).toFixed(2) + 'x.') : ''"></span>
+          <span x-text="researchData ? ('ROE tercatat ' + nf(researchData.roe_pct, 1, '% dengan P/E ') + nf(researchData.pe_ratio, 1, 'x dan P/BV ') + nf(researchData.pbv_ratio, 2, 'x.')) : ''"></span>
         </p>
         <div x-show="llmResearchText" class="p-4 bg-gradient-to-r from-purple-950/40 via-slate-900 to-[#0E1525] border border-purple-500/30 rounded-xl space-y-2">
           <div class="flex items-center gap-2">
@@ -256,7 +256,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.revenue_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' Miliar' : 'N/A'"></strong>
           dengan laba bersih entitas induk
           <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.net_income_bn).toLocaleString('id-ID', {maximumFractionDigits:1}) + ' Miliar' : 'N/A'"></strong>
-          (net margin <span x-text="researchData ? ((researchData.net_income_bn / researchData.revenue_bn) * 100).toFixed(1) + '%' : 'N/A'"></span>).
+          (net margin <span x-text="researchData ? nf((researchData.net_income_bn / researchData.revenue_bn) * 100, 1, '%') : 'N/A'"></span>).
         </p>
         <div class="bg-[#080C14] border border-white/[0.08] rounded-xl overflow-x-auto">
           <table class="w-full text-xs font-mono text-center">
@@ -286,7 +286,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
               <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-amber-400 font-semibold">ROE (%)</td>
                 <template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'roe' + h.year">
                   <td class="px-3 py-2 text-amber-400 font-bold">
-                    <template x-if="h.roe_pct !== null"><span x-text="h.roe_pct.toFixed(1) + '%'"></span></template>
+                    <template x-if="h.roe_pct != null"><span x-text="nf(h.roe_pct, 1, '%')"></span></template>
                     <template x-if="h.roe_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
             </tbody>
           </table>
@@ -313,17 +313,17 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <div class="md:col-span-5 relative h-56 w-full flex items-center justify-center"><canvas id="dupontRadarCanvas"></canvas></div>
           <div class="md:col-span-7 space-y-2 font-mono text-xs">
             <div class="grid grid-cols-5 gap-2 text-center">
-              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Tax Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? (researchData.tax_burden * 100).toFixed(1) + '%' : 'N/A'"></div></div>
-              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Interest Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? (researchData.interest_burden * 100).toFixed(1) + '%' : 'N/A'"></div></div>
-              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">EBIT Margin</div><div class="text-xs font-bold text-emerald-400 mt-1" x-text="researchData ? (researchData.ebit_margin * 100).toFixed(1) + '%' : 'N/A'"></div></div>
-              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Asset Turnover</div><div class="text-xs font-bold text-sky-400 mt-1" x-text="researchData ? researchData.asset_turnover.toFixed(2) + 'x' : 'N/A'"></div></div>
-              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Eq. Multiplier</div><div class="text-xs font-bold text-amber-400 mt-1" x-text="researchData ? researchData.equity_multiplier.toFixed(2) + 'x' : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Tax Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? nf(researchData.tax_burden * 100, 1, '%') : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Interest Burden</div><div class="text-xs font-bold text-slate-200 mt-1" x-text="researchData ? nf(researchData.interest_burden * 100, 1, '%') : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">EBIT Margin</div><div class="text-xs font-bold text-emerald-400 mt-1" x-text="researchData ? nf(researchData.ebit_margin * 100, 1, '%') : 'N/A'"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Asset Turnover</div><div class="text-xs font-bold text-sky-400 mt-1" x-text="nf(researchData?.asset_turnover, 2, 'x')"></div></div>
+              <div class="bg-[#080C14] border border-white/[0.06] p-2.5 rounded-lg"><div class="text-[10px] text-slate-500">Eq. Multiplier</div><div class="text-xs font-bold text-amber-400 mt-1" x-text="nf(researchData?.equity_multiplier, 2, 'x')"></div></div>
             </div>
             <p class="text-xs text-slate-300 leading-relaxed font-sans pt-2 text-justify">
-              Dekomposisi 5-tahap: ROE <span class="font-mono" x-text="researchData ? researchData.roe_pct.toFixed(1) + '%' : 'N/A'"></span>
-              dari margin operasi <span x-text="researchData ? (researchData.ebit_margin * 100).toFixed(1) + '%' : 'N/A'"></span>,
-              perputaran aset <span x-text="researchData ? researchData.asset_turnover.toFixed(2) + 'x' : 'N/A'"></span>,
-              pengganda ekuitas <span x-text="researchData ? researchData.equity_multiplier.toFixed(2) + 'x' : 'N/A'"></span>.
+              Dekomposisi 5-tahap: ROE <span class="font-mono" x-text="nf(researchData?.roe_pct, 1, '%')"></span>
+              dari margin operasi <span x-text="researchData ? nf(researchData.ebit_margin * 100, 1, '%') : 'N/A'"></span>,
+              perputaran aset <span x-text="nf(researchData?.asset_turnover, 2, 'x')"></span>,
+              pengganda ekuitas <span x-text="nf(researchData?.equity_multiplier, 2, 'x')"></span>.
             </p>
           </div>
         </div>
@@ -336,8 +336,8 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
             <span class="text-[10px] font-mono text-cyan-400">SLOAN</span>
           </div>
           <div class="space-y-1.5 font-mono text-xs">
-            <div class="flex justify-between"><span class="text-slate-400">Sloan Accrual Ratio</span><strong class="text-slate-200" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.sloan_accrual_ratio.toFixed(2) + '%' : 'N/A'"></strong></div>
-            <div class="flex justify-between"><span class="text-slate-400">OCF / Net Income</span><strong class="text-emerald-400" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.ocf_to_ni.toFixed(2) + 'x' : 'N/A'"></strong></div>
+            <div class="flex justify-between"><span class="text-slate-400">Sloan Accrual Ratio</span><strong class="text-slate-200" x-text="researchData && researchData.earnings_quality ? nf(researchData?.earnings_quality?.sloan_accrual_ratio, 2, '%') : 'N/A'"></strong></div>
+            <div class="flex justify-between"><span class="text-slate-400">OCF / Net Income</span><strong class="text-emerald-400" x-text="researchData && researchData.earnings_quality ? nf(researchData?.earnings_quality?.ocf_to_ni, 2, 'x') : 'N/A'"></strong></div>
             <div class="flex justify-between"><span class="text-slate-400">Verdict</span><strong class="text-slate-200 text-right" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.verdict : 'N/A'"></strong></div>
           </div>
           <p class="text-[11px] text-slate-400 leading-relaxed text-justify" x-text="researchData && researchData.earnings_quality ? researchData.earnings_quality.commentary : ''"></p>
@@ -374,11 +374,11 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
         </div>
         <div class="space-y-1.5 font-mono text-xs">
           <div class="flex justify-between items-center"><span class="text-slate-400">Beta vs IHSG (2Y daily)</span>
-            <template x-if="researchData && researchData.beta_vs_ihsg"><strong class="text-cyan-400" x-text="researchData.beta_vs_ihsg.toFixed(2) + 'x'"></strong></template>
+            <template x-if="researchData && researchData.beta_vs_ihsg"><strong class="text-cyan-400" x-text="nf(researchData.beta_vs_ihsg, 2, 'x')"></strong></template>
             <template x-if="!researchData || !researchData.beta_vs_ihsg"><strong class="text-slate-500">N/A</strong></template></div>
-          <div class="flex justify-between items-center"><span class="text-slate-400">Hurst Exponent</span><strong class="text-sky-400" x-text="researchData ? researchData.hurst_exponent.toFixed(3) : 'N/A'"></strong></div>
+          <div class="flex justify-between items-center"><span class="text-slate-400">Hurst Exponent</span><strong class="text-sky-400" x-text="nf(researchData?.hurst_exponent, 3)"></strong></div>
           <div class="flex justify-between items-center"><span class="text-slate-400">Technical Signal</span><strong class="text-emerald-400" x-text="researchData ? researchData.technical_signal : 'N/A'"></strong></div>
-          <div class="flex justify-between items-center"><span class="text-slate-400">Confidence</span><strong class="text-slate-200" x-text="researchData ? researchData.technical_confidence.toFixed(0) + '%' : 'N/A'"></strong></div>
+          <div class="flex justify-between items-center"><span class="text-slate-400">Confidence</span><strong class="text-slate-200" x-text="nf(researchData?.technical_confidence, 0, '%')"></strong></div>
         </div>
       </div>
       <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-4 shadow-sm space-y-3">
@@ -422,14 +422,14 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
         </div>
         <div class="space-y-1 font-mono text-[11px] pt-1">
           <div class="flex justify-between"><span class="text-slate-400">Risk-Free (SBN 10Y)</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.rf_pct !== null ? researchData.wacc_build_up.rf_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.rf_pct != null ? nf(researchData.wacc_build_up.rf_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between"><span class="text-slate-400">Equity Risk Premium</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.erp_pct !== null ? researchData.wacc_build_up.erp_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.erp_pct != null ? nf(researchData.wacc_build_up.erp_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between"><span class="text-slate-400">Beta vs IHSG</span>
-            <strong class="text-cyan-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.beta !== null ? researchData.wacc_build_up.beta.toFixed(3) + 'x' : 'N/A'"></strong></div>
+            <strong class="text-cyan-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.beta != null ? nf(researchData.wacc_build_up.beta, 3, 'x') : 'N/A'"></strong></div>
           <div class="flex justify-between border-t border-white/[0.06] pt-1 mt-1">
             <span class="text-slate-300 font-semibold">Cost of Equity (Ke)</span>
-            <strong class="text-emerald-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.ke_pct !== null ? researchData.wacc_build_up.ke_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-emerald-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.ke_pct != null ? nf(researchData.wacc_build_up.ke_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="text-[9px] text-slate-500 pt-0.5" x-text="researchData && researchData.wacc_build_up ? 'Ke = Rf + β × ERP' : ''"></div>
         </div>
       </div>
@@ -442,15 +442,15 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
         </div>
         <div class="space-y-1 font-mono text-[11px] pt-1">
           <div class="flex justify-between"><span class="text-slate-400">CoD Pre-Tax</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.cod_pre_tax_pct !== null ? researchData.wacc_build_up.cod_pre_tax_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.cod_pre_tax_pct != null ? nf(researchData.wacc_build_up.cod_pre_tax_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between"><span class="text-slate-400">Effective Tax Rate</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.etr_pct !== null ? researchData.wacc_build_up.etr_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.etr_pct != null ? nf(researchData.wacc_build_up.etr_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between"><span class="text-slate-400">CoD Post-Tax</span>
-            <strong class="text-amber-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.kd_post_tax_pct !== null ? researchData.wacc_build_up.kd_post_tax_pct.toFixed(2) + '%' : 'N/A'"></strong></div>
+            <strong class="text-amber-400" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.kd_post_tax_pct != null ? nf(researchData.wacc_build_up.kd_post_tax_pct, 2, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between border-t border-white/[0.06] pt-1 mt-1"><span class="text-slate-400">Weight Equity</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.we_pct !== null ? researchData.wacc_build_up.we_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.we_pct != null ? nf(researchData.wacc_build_up.we_pct, 1, '%') : 'N/A'"></strong></div>
           <div class="flex justify-between"><span class="text-slate-400">Weight Debt</span>
-            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wd_pct !== null ? researchData.wacc_build_up.wd_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+            <strong class="text-slate-200" x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wd_pct != null ? nf(researchData.wacc_build_up.wd_pct, 1, '%') : 'N/A'"></strong></div>
           <div class="text-[9px] text-slate-500 pt-0.5" x-text="researchData && researchData.wacc_build_up ? researchData.wacc_build_up.debt_provenance : ''"></div>
         </div>
       </div>
@@ -463,13 +463,13 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
                 x-text="researchData && researchData.wacc_build_up ? researchData.wacc_build_up.method : 'N/A'"></span>
         </div>
         <div class="text-2xl font-black text-purple-400"
-             x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wacc_pct !== null ? researchData.wacc_build_up.wacc_pct.toFixed(2) + '%' : 'N/A'"></div>
+             x-text="researchData && researchData.wacc_build_up && researchData.wacc_build_up.wacc_pct != null ? nf(researchData.wacc_build_up.wacc_pct, 2, '%') : 'N/A'"></div>
         <div class="flex justify-between font-mono text-[11px] pt-1"><span class="text-slate-400">Terminal Growth</span>
-          <strong class="text-slate-200" x-text="researchData ? researchData.terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+          <strong class="text-slate-200" x-text="nf(researchData?.terminal_growth_pct, 1, '%')"></strong></div>
         <template x-if="researchData && researchData.is_bank && researchData.wacc_build_up">
           <div class="border-t border-white/[0.06] pt-1.5 mt-1 space-y-1 font-mono text-[11px]">
             <div class="flex justify-between"><span class="text-slate-400">Justified P/BV</span>
-              <strong class="text-cyan-400" x-text="researchData.wacc_build_up.justified_pbv !== null ? researchData.wacc_build_up.justified_pbv.toFixed(2) + 'x' : 'N/A'"></strong></div>
+              <strong class="text-cyan-400" x-text="researchData.wacc_build_up.justified_pbv != null ? nf(researchData.wacc_build_up.justified_pbv, 2, 'x') : 'N/A'"></strong></div>
             <div class="text-[9px] text-slate-500" x-text="researchData.wacc_build_up.justified_pbv_note || ''"></div>
           </div>
         </template>
@@ -483,14 +483,14 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
       <table class="w-full text-xs font-mono text-center">
         <thead><tr class="bg-[#161F30] text-slate-300">
           <th class="px-4 py-2.5 text-left">WACC \ Terminal Growth (g)</th>
-          <template x-for="tg in (researchData ? researchData.sensitivity_grid.tg_labels : [])" :key="tg">
+          <template x-for="tg in (researchData?.sensitivity_grid?.tg_labels || [])" :key="tg">
             <th class="px-4 py-2.5" x-text="'g = ' + tg"></th>
           </template></tr></thead>
         <tbody class="divide-y divide-white/[0.04]">
-          <template x-for="(wRow, rIdx) in (researchData ? researchData.sensitivity_grid.wacc_labels : [])" :key="rIdx">
+          <template x-for="(wRow, rIdx) in (researchData?.sensitivity_grid?.wacc_labels || [])" :key="rIdx">
             <tr class="hover:bg-white/[0.02]">
               <td class="px-4 py-2.5 text-left text-slate-400 font-semibold" x-text="'WACC = ' + wRow + (rIdx === 1 ? ' (Base)' : '')"></td>
-              <template x-for="(cellVal, cIdx) in researchData.sensitivity_grid.values[rIdx]" :key="cIdx">
+              <template x-for="(cellVal, cIdx) in researchData?.sensitivity_grid?.values?.[rIdx]" :key="cIdx">
                 <td class="px-4 py-2.5"
                     :class="rIdx === 1 && cIdx === 1 ? 'bg-blue-600/20 text-blue-300 font-bold border border-blue-500/40' : 'text-slate-200'"
                     x-text="'Rp ' + Number(cellVal).toLocaleString('id-ID')"></td>
@@ -581,10 +581,10 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
             <tr :class="p.ticker === ticker ? 'bg-blue-600/10 font-semibold' : 'hover:bg-white/[0.02]'">
               <td class="px-3 py-2 text-left" :class="p.ticker === ticker ? 'text-blue-400 font-bold' : 'text-slate-300'" x-text="p.ticker"></td>
               <td class="px-3 py-2 text-left text-slate-300 font-sans" x-text="p.name"></td>
-              <td class="px-3 py-2 text-slate-200" x-text="Number(p.npm).toFixed(1) + '%'"></td>
-              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="Number(p.roe).toFixed(1) + '%'"></td>
-              <td class="px-3 py-2 text-slate-200" x-text="Number(p.pe).toFixed(1) + 'x'"></td>
-              <td class="px-3 py-2 text-slate-200" x-text="Number(p.pbv).toFixed(2) + 'x'"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="nf(p.npm, 1, '%')"></td>
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="nf(p.roe, 1, '%')"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="nf(p.pe, 1, 'x')"></td>
+              <td class="px-3 py-2 text-slate-200" x-text="nf(p.pbv, 2, 'x')"></td>
               <td class="px-3 py-2 text-slate-400" x-text="p.net_gearing"></td>
             </tr>
           </template>
@@ -635,7 +635,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
               <td class="px-3 py-2 text-amber-400 font-bold" x-text="'Rp ' + Number(f.dps).toLocaleString('id-ID')"></td></template></tr>
           <tr class="bg-[#090D16]"><td class="px-3 py-2 text-left text-emerald-400 font-semibold">ROE (%)</td>
             <template x-for="f in (researchData ? researchData.forecast_5yr : [])" :key="'fo' + f.year">
-              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="Number(f.roe).toFixed(1) + '%'"></td></template></tr>
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="nf(f.roe, 1, '%')"></td></template></tr>
         </tbody>
       </table>
     </div>
@@ -783,10 +783,10 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <template x-for="m in (researchData ? researchData.margin_trend : [])" :key="m.year"><th class="px-3 py-2.5">FY<span x-text="m.year"></span></th></template>
         </tr></thead>
         <tbody class="divide-y divide-white/[0.04]">
-          <tr><td class="px-3 py-2 text-left text-slate-400">Gross Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'gm'+m.year"><td class="px-3 py-2 text-emerald-400"><template x-if="m.gross_margin_pct !== null"><span x-text="m.gross_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.gross_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
-          <tr><td class="px-3 py-2 text-left text-slate-400">Net Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'nm'+m.year"><td class="px-3 py-2 text-slate-200"><template x-if="m.net_margin_pct !== null"><span x-text="m.net_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.net_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
-          <tr><td class="px-3 py-2 text-left text-slate-400">Revenue Growth YoY (%)</td><template x-for="g in (researchData ? researchData.revenue_growth_series : [])" :key="'rg'+g.year"><td class="px-3 py-2 text-sky-400"><template x-if="g.growth_pct !== null"><span x-text="(g.growth_pct >= 0 ? '+' : '') + g.growth_pct.toFixed(1) + '%'"></span></template><template x-if="g.growth_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
-          <tr><td class="px-3 py-2 text-left text-slate-400">ROIC (%)</td><template x-for="r in (researchData ? researchData.roic_series : [])" :key="'roic'+r.year"><td class="px-3 py-2 text-amber-400"><template x-if="r.roic_pct !== null"><span x-text="r.roic_pct.toFixed(1) + '%'"></span></template><template x-if="r.roic_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Gross Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'gm'+m.year"><td class="px-3 py-2 text-emerald-400"><template x-if="m.gross_margin_pct != null"><span x-text="m.gross_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.gross_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Net Margin (%)</td><template x-for="m in (researchData ? researchData.margin_trend : [])" :key="'nm'+m.year"><td class="px-3 py-2 text-slate-200"><template x-if="m.net_margin_pct != null"><span x-text="m.net_margin_pct.toFixed(1) + '%'"></span></template><template x-if="m.net_margin_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">Revenue Growth YoY (%)</td><template x-for="g in (researchData ? researchData.revenue_growth_series : [])" :key="'rg'+g.year"><td class="px-3 py-2 text-sky-400"><template x-if="g.growth_pct != null"><span x-text="(g.growth_pct >= 0 ? '+' : '') + g.growth_pct.toFixed(1) + '%'"></span></template><template x-if="g.growth_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">ROIC (%)</td><template x-for="r in (researchData ? researchData.roic_series : [])" :key="'roic'+r.year"><td class="px-3 py-2 text-amber-400"><template x-if="r.roic_pct != null"><span x-text="r.roic_pct.toFixed(1) + '%'"></span></template><template x-if="r.roic_pct === null"><span class="text-slate-500">N/A</span></template></td></template></tr>
         </tbody>
       </table>
     </div>
@@ -852,8 +852,8 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
       <table class="w-full text-xs font-mono text-center">
         <thead><tr class="bg-[#161F30] text-slate-300"><th class="px-3 py-2.5 text-left">Rasio</th><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'np'+h.year"><th class="px-3 py-2.5">FY<span x-text="h.year"></span></th></template></tr></thead>
         <tbody class="divide-y divide-white/[0.04]">
-          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Gross (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npg'+h.year"><td class="px-3 py-2 text-teal-400"><template x-if="h.npl_gross_pct !== null && h.npl_gross_pct !== undefined"><span x-text="h.npl_gross_pct.toFixed(2) + '%'"></span></template><template x-if="h.npl_gross_pct === null || h.npl_gross_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
-          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Net (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npn'+h.year"><td class="px-3 py-2 text-slate-200"><template x-if="h.npl_net_pct !== null && h.npl_net_pct !== undefined"><span x-text="h.npl_net_pct.toFixed(2) + '%'"></span></template><template x-if="h.npl_net_pct === null || h.npl_net_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Gross (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npg'+h.year"><td class="px-3 py-2 text-teal-400"><template x-if="h.npl_gross_pct !== null && h.npl_gross_pct !== undefined"><span x-text="nf(h.npl_gross_pct, 2, '%')"></span></template><template x-if="h.npl_gross_pct === null || h.npl_gross_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
+          <tr><td class="px-3 py-2 text-left text-slate-400">NPL / NPF Net (%)</td><template x-for="h in (researchData ? researchData.historical_financials : [])" :key="'npn'+h.year"><td class="px-3 py-2 text-slate-200"><template x-if="h.npl_net_pct !== null && h.npl_net_pct !== undefined"><span x-text="nf(h.npl_net_pct, 2, '%')"></span></template><template x-if="h.npl_net_pct === null || h.npl_net_pct === undefined"><span class="text-slate-500">N/A</span></template></td></template></tr>
         </tbody>
       </table>
     </div>
@@ -872,10 +872,10 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
         <tbody class="divide-y divide-white/[0.04]">
           <template x-for="im in (researchData ? researchData.industry_multiples : [])" :key="im.metric">
             <tr><td class="px-3 py-2 text-left text-slate-300" x-text="im.metric"></td>
-              <td class="px-3 py-2 text-slate-200" x-text="im.peer_median !== null ? Number(im.peer_median).toFixed(2) : 'N/A'"></td>
-              <td class="px-3 py-2 text-slate-400" x-text="im.peer_min !== null ? Number(im.peer_min).toFixed(2) : 'N/A'"></td>
-              <td class="px-3 py-2 text-slate-400" x-text="im.peer_max !== null ? Number(im.peer_max).toFixed(2) : 'N/A'"></td>
-              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="im.subject !== null ? Number(im.subject).toFixed(2) : 'N/A'"></td></tr>
+              <td class="px-3 py-2 text-slate-200" x-text="nf(im.peer_median, 2)"></td>
+              <td class="px-3 py-2 text-slate-400" x-text="nf(im.peer_min, 2)"></td>
+              <td class="px-3 py-2 text-slate-400" x-text="nf(im.peer_max, 2)"></td>
+              <td class="px-3 py-2 text-emerald-400 font-bold" x-text="nf(im.subject, 2)"></td></tr>
           </template>
         </tbody>
       </table>
@@ -944,9 +944,9 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
     <div class="space-y-1.5 font-mono text-xs">
       <div class="flex justify-between"><span class="text-slate-400">Market Price</span><strong class="text-white" x-text="researchData && researchData.reverse_dcf ? 'Rp ' + Number(researchData.reverse_dcf.market_price).toLocaleString('id-ID') : 'N/A'"></strong></div>
       <div class="flex justify-between"><span class="text-slate-400">Model Fair Value</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? 'Rp ' + Number(researchData.reverse_dcf.model_fair_value).toLocaleString('id-ID') : 'N/A'"></strong></div>
-      <div class="flex justify-between"><span class="text-slate-400">Model Terminal Growth</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.model_terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
-      <div class="flex justify-between"><span class="text-slate-400">Implied Terminal Growth</span><strong class="text-amber-400" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.implied_terminal_growth_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
-      <div class="flex justify-between"><span class="text-slate-400">WACC</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.wacc_pct.toFixed(1) + '%' : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">Model Terminal Growth</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? nf(researchData.reverse_dcf.model_terminal_growth_pct, 1, '%') : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">Implied Terminal Growth</span><strong class="text-amber-400" x-text="researchData && researchData.reverse_dcf ? nf(researchData.reverse_dcf.implied_terminal_growth_pct, 1, '%') : 'N/A'"></strong></div>
+      <div class="flex justify-between"><span class="text-slate-400">WACC</span><strong class="text-slate-200" x-text="researchData && researchData.reverse_dcf ? nf(researchData.reverse_dcf.wacc_pct, 1, '%') : 'N/A'"></strong></div>
     </div>
     <p class="text-[11px] text-slate-400 leading-relaxed text-justify" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.interpretation : ''"></p>
     <p class="text-[10px] text-slate-500 font-mono" x-text="researchData && researchData.reverse_dcf ? researchData.reverse_dcf.method : ''"></p>
