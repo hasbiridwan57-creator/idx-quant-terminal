@@ -123,6 +123,13 @@
               <svg class="w-4 h-4 shrink-0 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
               <span>Peer Matrix (NEW)</span>
             </button>
+
+            <button @click="activeNav = 'performance'; loadPerformance()"
+                    :class="activeNav === 'performance' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'"
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs transition-colors text-left">
+              <svg class="w-4 h-4 shrink-0 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 7-7M14 8h7v7"/></svg>
+              <span>Backtesting (NEW)</span>
+            </button>
           </div>
         </div>
 
@@ -286,6 +293,7 @@
       {% include "_tab5_fixed_income.html" %}
       {% include "_tab6_terminal.html" %}
       {% include "_tab8_peers.html" %}
+      {% include "_tab9_performance.html" %}
     </div>
 
   </main>
@@ -484,6 +492,25 @@
         // Peer Comparison Matrix state
         peerMatrix: null,
         tradingStatus: null,
+        // Backtesting / Performance state
+        perfData: null,
+        perfBenchmark: 'IHSG',
+        perfRiskFree: 6.0,
+        maxGrowth: 1,
+        async loadPerformance() {
+          try {
+            const url = '/api/performance/' + this.ticker
+              + '?benchmark=' + this.perfBenchmark
+              + '&risk_free=' + this.perfRiskFree;
+            let res = await fetch(url);
+            if (res.ok) {
+              const d = await res.json();
+              this.perfData = d;
+              const eq = d.equity_curve || [];
+              this.maxGrowth = eq.length ? Math.max(...eq.map(p => p.growth), 1) : 1;
+            }
+          } catch(e) { console.error('Performance error:', e); }
+        },
         peerTickers: ['ASII'],
         newPeerTicker: '',
         async loadPeerMatrix() {

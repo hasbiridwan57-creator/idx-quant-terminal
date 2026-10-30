@@ -1,0 +1,272 @@
+<!-- TAB 9: PERFORMANCE & BACKTESTING (Institutional Grade) -->
+<div x-show="activeNav === 'performance'" x-cloak class="space-y-5"
+     x-init="$watch('activeNav', v => { if (v === 'performance' && !perfData) loadPerformance(); })">
+
+  <!-- HEADER -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 7-7M14 8h7v7"/></svg>
+        </div>
+        <div>
+          <h2 class="text-sm font-semibold text-white">Performance &amp; Risk Backtesting</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Sharpe &bull; Sortino &bull; Calmar &bull; Jensen Alpha &bull; Max Drawdown &bull; VaR/CVaR &bull; 5 tahun harian</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 font-mono text-xs">
+        <label class="text-slate-500 font-sans">Risk-Free:</label>
+        <input type="number" step="0.1" x-model.number="perfRiskFree" @change="loadPerformance()"
+               class="w-16 bg-[#090D16] border border-white/[0.08] rounded-lg px-2 py-1.5 text-slate-200 focus:border-indigo-500/50 focus:outline-none">
+        <span class="text-slate-500">%</span>
+        <label class="text-slate-500 font-sans ml-2">Benchmark:</label>
+        <select x-model="perfBenchmark" @change="loadPerformance()"
+                class="bg-[#090D16] border border-white/[0.08] rounded-lg px-2 py-1.5 text-slate-200 focus:border-indigo-500/50 focus:outline-none">
+          <option value="IHSG">IHSG</option>
+        </select>
+        <button @click="loadPerformance()"
+                class="ml-1 px-3 py-1.5 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/25 font-sans">Hitung</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EMPTY / LOADING / UNAVAILABLE -->
+  <template x-if="!perfData">
+    <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-10 text-center">
+      <div class="text-3xl mb-3">📈</div>
+      <p class="text-slate-300 text-sm font-medium">Belum dihitung</p>
+      <p class="text-slate-500 text-xs mt-1.5">Klik "Hitung" untuk memproses data harga historis dari database.</p>
+    </div>
+  </template>
+
+  <template x-if="perfData && !perfData.available">
+    <div class="bg-amber-500/[0.07] border border-amber-500/25 rounded-2xl p-6">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+        <div>
+          <p class="text-sm font-semibold text-amber-300">Metrik tidak dapat dihitung</p>
+          <p class="text-xs text-amber-200/75 mt-1.5 leading-relaxed" x-text="perfData.reason"></p>
+          <p class="text-[10px] text-amber-200/50 mt-2 font-sans">Tidak ada angka yang dikarang. Data harga harus tersedia minimal 60 observasi harian.</p>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- CONTENT -->
+  <template x-if="perfData && perfData.available">
+    <div class="space-y-5">
+
+      <!-- PERIOD META -->
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-mono text-slate-500 px-1">
+        <span x-text="perfData.ticker + ' · ' + perfData.observations + ' observasi'"></span>
+        <span x-text="perfData.period_start + ' → ' + perfData.period_end"></span>
+        <span x-text="perfData.years + ' tahun'"></span>
+        <span x-text="'RF ' + perfData.risk_free_pct + '%'"></span>
+        <span x-text="'Benchmark ' + perfData.benchmark"></span>
+      </div>
+
+      <!-- RETURN & RISK CARDS -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide">CAGR</div>
+          <div class="text-2xl font-bold font-mono mt-1.5"
+               :class="perfData.cagr_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+               x-text="nf(perfData.cagr_pct, 2, '%')"></div>
+          <div class="text-[10px] text-slate-500 mt-1" x-text="'Total ' + nf(perfData.total_return_pct, 1, '%')"></div>
+        </div>
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide">Volatilitas</div>
+          <div class="text-2xl font-bold font-mono text-amber-400 mt-1.5" x-text="nf(perfData.annual_volatility_pct, 2, '%')"></div>
+          <div class="text-[10px] text-slate-500 mt-1">Annualized (252d)</div>
+        </div>
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide">Max Drawdown</div>
+          <div class="text-2xl font-bold font-mono text-rose-400 mt-1.5" x-text="nf(perfData.max_drawdown_pct, 2, '%')"></div>
+          <div class="text-[10px] text-slate-500 mt-1" x-text="perfData.max_dd_duration_days !== null ? perfData.max_dd_duration_days + ' hari ke trough' : ''"></div>
+        </div>
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
+          <div class="text-[10px] text-slate-500 uppercase tracking-wide">Drawdown Saat Ini</div>
+          <div class="text-2xl font-bold font-mono mt-1.5"
+               :class="perfData.current_dd_pct < 0 ? 'text-rose-400' : 'text-emerald-400'"
+               x-text="nf(perfData.current_dd_pct, 2, '%')"></div>
+          <div class="text-[10px] text-slate-500 mt-1">dari puncak historis</div>
+        </div>
+      </div>
+
+      <!-- RISK-ADJUSTED RATIOS -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+        <h3 class="text-xs font-semibold text-slate-200 mb-4">Risk-Adjusted Performance</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 font-mono">
+          <div class="bg-[#090D16] border border-white/[0.05] rounded-lg p-3">
+            <div class="text-[10px] text-slate-500">Sharpe</div>
+            <div class="text-lg font-bold mt-1"
+                 :class="perfData.sharpe > 1 ? 'text-emerald-400' : (perfData.sharpe > 0 ? 'text-sky-400' : 'text-rose-400')"
+                 x-text="nf(perfData.sharpe, 2)"></div>
+            <div class="text-[9px] text-slate-600 mt-0.5">&gt;1 baik, &gt;2 sangat baik</div>
+          </div>
+          <div class="bg-[#090D16] border border-white/[0.05] rounded-lg p-3">
+            <div class="text-[10px] text-slate-500">Sortino</div>
+            <div class="text-lg font-bold mt-1"
+                 :class="perfData.sortino > 1 ? 'text-emerald-400' : (perfData.sortino > 0 ? 'text-sky-400' : 'text-rose-400')"
+                 x-text="nf(perfData.sortino, 2)"></div>
+            <div class="text-[9px] text-slate-600 mt-0.5">hanya downside risk</div>
+          </div>
+          <div class="bg-[#090D16] border border-white/[0.05] rounded-lg p-3">
+            <div class="text-[10px] text-slate-500">Calmar</div>
+            <div class="text-lg font-bold mt-1"
+                 :class="perfData.calmar > 0.5 ? 'text-emerald-400' : (perfData.calmar > 0 ? 'text-sky-400' : 'text-rose-400')"
+                 x-text="nf(perfData.calmar, 2)"></div>
+            <div class="text-[9px] text-slate-600 mt-0.5">CAGR / MaxDD</div>
+          </div>
+          <div class="bg-[#090D16] border border-white/[0.05] rounded-lg p-3">
+            <div class="text-[10px] text-slate-500">Information Ratio</div>
+            <div class="text-lg font-bold mt-1"
+                 :class="perfData.information_ratio > 0.5 ? 'text-emerald-400' : (perfData.information_ratio > 0 ? 'text-sky-400' : 'text-rose-400')"
+                 x-text="nf(perfData.information_ratio, 2)"></div>
+            <div class="text-[9px] text-slate-600 mt-0.5">excess / tracking error</div>
+          </div>
+          <div class="bg-[#090D16] border border-white/[0.05] rounded-lg p-3">
+            <div class="text-[10px] text-slate-500">Treynor</div>
+            <div class="text-lg font-bold mt-1"
+                 :class="perfData.treynor > 0 ? 'text-sky-400' : 'text-rose-400'"
+                 x-text="nf(perfData.treynor, 3)"></div>
+            <div class="text-[9px] text-slate-600 mt-0.5">excess / beta</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MARKET RELATIVE -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+          <h3 class="text-xs font-semibold text-slate-200 mb-3.5">Hubungan dengan Benchmark</h3>
+          <div class="space-y-2 font-mono text-xs">
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Beta</span>
+              <span class="text-slate-200 font-semibold" x-text="nf(perfData.beta, 2)"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Jensen Alpha (annual)</span>
+              <span class="font-semibold" :class="perfData.alpha_pct > 0 ? 'text-emerald-400' : 'text-rose-400'"
+                    x-text="nf(perfData.alpha_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Excess Return (annual)</span>
+              <span class="font-semibold" :class="perfData.excess_return_ann_pct > 0 ? 'text-emerald-400' : 'text-rose-400'"
+                    x-text="nf(perfData.excess_return_ann_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">CAGR Benchmark</span>
+              <span class="text-slate-300" x-text="nf(perfData.benchmark_cagr_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Tracking Error</span>
+              <span class="text-slate-300" x-text="nf(perfData.tracking_error_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">R&sup2;</span>
+              <span class="text-slate-300" x-text="nf(perfData.r_squared, 3)"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Korelasi</span>
+              <span class="text-slate-300" x-text="nf(perfData.correlation, 3)"></span></div>
+          </div>
+        </div>
+
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+          <h3 class="text-xs font-semibold text-slate-200 mb-3.5">Distribusi Return &amp; Tail Risk</h3>
+          <div class="space-y-2 font-mono text-xs">
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">VaR 95% (harian)</span>
+              <span class="text-rose-400 font-semibold" x-text="nf(perfData.var_95_daily_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">CVaR 95% (Expected Shortfall)</span>
+              <span class="text-rose-400 font-semibold" x-text="nf(perfData.cvar_95_daily_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">VaR 99% (harian)</span>
+              <span class="text-rose-400" x-text="nf(perfData.var_99_daily_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Hari Terburuk</span>
+              <span class="text-rose-400" x-text="nf(perfData.worst_day_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Hari Terbaik</span>
+              <span class="text-emerald-400" x-text="nf(perfData.best_day_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Skewness</span>
+              <span class="text-slate-300" x-text="nf(perfData.skewness, 3)"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Kurtosis (excess)</span>
+              <span class="text-slate-300" x-text="nf(perfData.kurtosis_excess, 3)"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONSISTENCY & DRAWDOWN DETAIL -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+          <h3 class="text-xs font-semibold text-slate-200 mb-3.5">Konsistensi</h3>
+          <div class="space-y-2 font-mono text-xs">
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Hit Rate Harian</span>
+              <span class="text-slate-200 font-semibold" x-text="nf(perfData.hit_rate_pct, 1, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Bulan Positif</span>
+              <span class="text-slate-200" x-text="perfData.positive_months + ' / ' + perfData.total_months"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Hit Rate Bulanan</span>
+              <span class="text-slate-200" x-text="nf(perfData.monthly_hit_rate_pct, 1, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Downside Deviation</span>
+              <span class="text-slate-300" x-text="nf(perfData.downside_deviation_pct, 2, '%')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Ulcer Index</span>
+              <span class="text-slate-300" x-text="nf(perfData.ulcer_index, 2)"></span></div>
+          </div>
+        </div>
+
+        <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+          <h3 class="text-xs font-semibold text-slate-200 mb-3.5">Detail Drawdown Terbesar</h3>
+          <div class="space-y-2 font-mono text-xs">
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Puncak</span>
+              <span class="text-slate-300" x-text="perfData.max_dd_start || 'N/A'"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Dasar (trough)</span>
+              <span class="text-slate-300" x-text="perfData.max_dd_trough || 'N/A'"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Pulih (recovery)</span>
+              <span :class="perfData.max_dd_recovery ? 'text-emerald-400' : 'text-amber-400'"
+                    x-text="perfData.max_dd_recovery || (perfData.max_dd_start ? 'Belum pulih' : 'N/A')"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Durasi ke trough</span>
+              <span class="text-slate-300" x-text="perfData.max_dd_duration_days !== null ? perfData.max_dd_duration_days + ' hari' : 'N/A'"></span></div>
+            <div class="flex justify-between"><span class="text-slate-400 font-sans">Drawdown terpanjang</span>
+              <span class="text-slate-300" x-text="perfData.longest_dd_days !== null ? perfData.longest_dd_days + ' hari' : 'N/A'"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EQUITY CURVE -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold text-slate-200">Kurva Pertumbuhan Modal (Growth of 1.0)</h3>
+          <span class="text-[10px] font-mono text-slate-500" x-text="perfData.equity_curve.length + ' titik'"></span>
+        </div>
+        <div class="h-44 flex items-end gap-[1px] bg-[#090D16] rounded-lg p-2 border border-white/[0.04]">
+          <template x-for="(pt, i) in perfData.equity_curve" :key="'eq'+i">
+            <div class="flex-1 transition-colors"
+                 :class="pt.growth >= 1 ? 'bg-emerald-500/60 hover:bg-emerald-400' : 'bg-rose-500/60 hover:bg-rose-400'"
+                 :style="'height:' + Math.max(2, Math.min(100, pt.growth / maxGrowth * 100)) + '%'"
+                 :title="pt.date + ' · ' + pt.growth.toFixed(3) + 'x'"></div>
+          </template>
+        </div>
+      </div>
+
+      <!-- DRAWDOWN CURVE -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold text-slate-200">Kurva Drawdown (%)</h3>
+          <span class="text-[10px] font-mono text-rose-400" x-text="'terburuk ' + nf(perfData.max_drawdown_pct, 2, '%')"></span>
+        </div>
+        <div class="h-32 flex items-end gap-[1px] bg-[#090D16] rounded-lg p-2 border border-white/[0.04]">
+          <template x-for="(pt, i) in perfData.drawdown_curve" :key="'dd'+i">
+            <div class="flex-1 bg-rose-500/50 hover:bg-rose-400 transition-colors"
+                 :style="'height:' + Math.max(1, Math.min(100, Math.abs(pt.dd_pct) / Math.abs(perfData.max_drawdown_pct || 1) * 100)) + '%'"
+                 :title="pt.date + ' · ' + pt.dd_pct.toFixed(2) + '%'"></div>
+          </template>
+        </div>
+      </div>
+
+      <!-- MONTHLY RETURNS -->
+      <div class="bg-[#0E1525] border border-white/[0.06] rounded-2xl p-5">
+        <h3 class="text-xs font-semibold text-slate-200 mb-3">Return Bulanan</h3>
+        <div class="flex flex-wrap gap-1">
+          <template x-for="(m, i) in perfData.monthly_returns" :key="'m'+i">
+            <div class="px-2 py-1 rounded text-[10px] font-mono border"
+                 :class="m.return_pct >= 0 ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400' : 'bg-rose-500/10 border-rose-500/25 text-rose-400'"
+                 :title="m.month"
+                 x-text="m.return_pct >= 0 ? '+' + m.return_pct.toFixed(1) : m.return_pct.toFixed(1)"></div>
+          </template>
+        </div>
+        <p class="text-[10px] text-slate-600 mt-2.5 font-sans">Hover untuk melihat bulan. Hijau = positif, merah = negatif.</p>
+      </div>
+
+      <div class="text-[10px] text-slate-600 font-sans px-1 leading-relaxed">
+        Metrik dihitung dari OHLCV harian tersimpan (adjusted close). Sharpe/Sortino/Alpha memakai Risk-Free
+        sesuai input di atas. VaR/CVaR memakai metode historis (bukan parametrik normal) agar ekor distribusi riil
+        tidak tersamarkan. Tidak ada angka yang disimulasikan.
+      </div>
+    </div>
+  </template>
+</div>

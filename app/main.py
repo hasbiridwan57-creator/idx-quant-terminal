@@ -1007,6 +1007,50 @@ async def api_get_peer_matrix(ticker: str):
 
 
 # ===============================================================
+# 6a. PERFORMANCE & RISK ANALYTICS (backtesting institusional)
+# ===============================================================
+@app.get("/api/performance/{ticker}")
+async def api_get_performance(
+    ticker: str,
+    benchmark: str = "IHSG",
+    risk_free: float = 6.0,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    """
+    Sharpe, Sortino, Calmar, Beta, Jensen Alpha, Max Drawdown, VaR/CVaR,
+    information ratio, skew/kurtosis, equity & drawdown curve.
+
+    ZERO-FAKE: semua dari OHLCV harian di DB. Data kurang -> available=false + alasan.
+    """
+    from sqlmodel import Session as _Session
+    from app.db.database import engine as _engine
+    from app.services.performance_engine import compute_performance
+
+    with _Session(_engine) as sess:
+        return compute_performance(sess, ticker, benchmark=benchmark,
+                                   risk_free_pct=risk_free, start=start, end=end)
+
+
+@app.get("/api/performance/compare/{tickers}")
+async def api_compare_performance(
+    tickers: str,
+    benchmark: str = "IHSG",
+    risk_free: float = 6.0,
+):
+    """Ranking beberapa emiten (dipisah koma) berdasarkan Sharpe."""
+    from sqlmodel import Session as _Session
+    from app.db.database import engine as _engine
+    from app.services.performance_engine import compute_performance_multi
+
+    tl = [t.strip().upper() for t in tickers.split(",") if t.strip()][:12]
+    if not tl:
+        return {"error": "Tidak ada ticker"}
+    with _Session(_engine) as sess:
+        return compute_performance_multi(sess, tl, benchmark=benchmark, risk_free_pct=risk_free)
+
+
+# ===============================================================
 # 6b. STATUS PERDAGANGAN EMITEN (suspensi / delisting — terverifikasi BEI)
 # ===============================================================
 @app.get("/api/trading-status/{ticker}")
