@@ -2,9 +2,9 @@
 <section x-show="activeNav === 'dupont'" class="space-y-6">
 
   <!-- 6-KPI Executive Summary Strip (Subtle Luminance Cards) -->
-  <div class="grid grid-cols-2 md:grid-cols-6 gap-3.5">
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 items-stretch">
     <!-- 1. ROE -->
-    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 flex flex-col justify-between min-h-[104px]">
       <span class="text-xs text-slate-400 font-medium block">Return on Equity</span>
       <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-white block my-1">
         {{ "%.2f"|format(bundle.current.roe * 100) if bundle.current.roe else 'NM' }}%
@@ -15,27 +15,30 @@
     </div>
 
     <!-- 2. Primary Driver -->
-    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 flex flex-col justify-between min-h-[104px]">
       <span class="text-xs text-slate-400 font-medium block">Pendorong Utama</span>
-      <span class="text-sm font-semibold text-sky-400 block my-1.5 leading-snug"
+      <span class="text-sm font-semibold text-sky-400 block my-1.5 leading-snug truncate"
             x-text="humanDriver('{{ bundle.primary_driver.value }}')">
       </span>
       <span class="text-xs text-slate-400 font-mono">Dekomposisi YoY</span>
     </div>
 
     <!-- 3. Earnings Quality -->
-    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
-      <span class="text-xs text-slate-400 font-medium block">Kualitas Laba</span>
-      <span class="text-sm font-semibold block my-1.5 {{ 'text-emerald-400' if 'High Quality' in anomaly.quality_verdict else 'text-amber-400' }}">
-        {{ anomaly.quality_verdict }}
-      </span>
-      <span class="text-xs text-slate-400 font-mono">
-        OCF/NI: {{ "%.2f"|format(bundle.current.ocf_to_net_income) if bundle.current.ocf_to_net_income else '—' }}x
-      </span>
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 flex flex-col justify-between min-h-[104px]">
+      <div>
+        <span class="text-xs text-slate-400 font-medium block">Kualitas Laba</span>
+        <span class="text-sm font-semibold block my-1.5 leading-snug truncate {{ 'text-emerald-400' if 'High Quality' in (anomaly.quality_verdict or '') else 'text-amber-400' }}">
+          {{ anomaly.quality_verdict or 'N/A' }}
+        </span>
+      </div>
+      <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1 border-t border-white/[0.04] gap-1">
+        <span>OCF/NI: {{ "%.2f"|format(bundle.current.ocf_to_net_income) if bundle.current.ocf_to_net_income else '—' }}x</span>
+        <span class="text-slate-500 truncate" x-text="researchData && researchData.forensic_sloan && researchData.forensic_sloan.sloan_ratio_pct !== null ? (researchData.forensic_sloan.sloan_ratio_pct + '% Sloan') : ''"></span>
+      </div>
     </div>
 
     <!-- 4. Credit Rating -->
-    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 flex flex-col justify-between min-h-[104px]">
       <span class="text-xs text-slate-400 font-medium block">Peringkat Kredit</span>
       <div class="flex items-baseline gap-2 my-1">
         <span class="text-2xl font-semibold font-mono text-white">{{ credit.credit_grade if credit else '—' }}</span>
@@ -47,7 +50,7 @@
     </div>
 
     <!-- 5. Fair Value -->
-    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4">
+    <div class="bg-slate-800/40 hover:bg-slate-800/60 transition-colors rounded-xl p-4 flex flex-col justify-between min-h-[104px]">
       <span class="text-xs text-slate-400 font-medium block">Nilai Wajar Intrinsik</span>
       {% if banking and banking.fair_value_per_share %}
       <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-emerald-400 block my-1">
@@ -218,6 +221,111 @@
           <span class="font-bold shrink-0">Perhatian:</span>
           <span>{{ anomaly.risk_watchout }}</span>
         </div>
+
+        <!-- FORENSIC ACCOUNTING & EARNINGS QUALITY SUITE (Beneish M-Score & Sloan Accruals) -->
+        <template x-if="researchData && researchData.forensic_beneish && researchData.forensic_beneish.m_score !== null">
+          <div class="bg-[#090D16] border border-white/[0.08] rounded-xl p-4 space-y-3 font-mono">
+            <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+              <span class="text-xs font-semibold text-slate-200">Forensic Earnings Quality (CFA / Institutional)</span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20">COMPUTED</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3 text-xs">
+              <!-- Beneish M-Score -->
+              <div class="bg-slate-800/30 border border-white/[0.04] p-3 rounded-lg space-y-1">
+                <span class="text-[10px] text-slate-400 block uppercase">Beneish M-Score (1999)</span>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-lg font-bold text-white" x-text="researchData.forensic_beneish.m_score"></span>
+                  <span class="text-[10px] text-slate-500">Threshold: -1.78</span>
+                </div>
+                <div class="text-[11px] font-sans pt-1 font-semibold"
+                     :class="researchData.forensic_beneish.is_manipulator ? 'text-rose-400' : 'text-emerald-400'"
+                     x-text="researchData.forensic_beneish.label"></div>
+              </div>
+
+              <!-- Sloan Accruals Ratio -->
+              <div class="bg-slate-800/30 border border-white/[0.04] p-3 rounded-lg space-y-1">
+                <span class="text-[10px] text-slate-400 block uppercase">Sloan Accruals Ratio (1996)</span>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-lg font-bold text-white" x-text="(researchData.forensic_sloan && researchData.forensic_sloan.sloan_ratio_pct !== null && researchData.forensic_sloan.sloan_ratio_pct !== undefined) ? researchData.forensic_sloan.sloan_ratio_pct + '%' : 'N/A'"></span>
+                  <span class="text-[10px] text-slate-500">Benchmark: &plusmn;10%</span>
+                </div>
+                <div class="text-[11px] font-sans pt-1 font-semibold text-sky-400"
+                     x-text="researchData.forensic_sloan ? researchData.forensic_sloan.label : ''"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- EBITDA QUALITY & WORKING CAPITAL (CCC) — Institutional Capital Efficiency -->
+        <template x-if="researchData && (researchData.ebitda_analysis || researchData.working_capital)">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 font-mono">
+
+            <!-- EBITDA Quality -->
+            <div class="bg-[#090D16] border border-white/[0.08] rounded-xl p-4 space-y-2.5">
+              <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+                <span class="text-xs font-semibold text-slate-200">EBITDA Quality</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">COMPUTED</span>
+              </div>
+              <template x-if="researchData.ebitda_analysis && researchData.ebitda_analysis.available">
+                <div class="space-y-1.5 text-xs">
+                  <div class="flex justify-between items-baseline">
+                    <span class="text-slate-400">EBITDA</span>
+                    <span class="text-base font-bold text-white tabular-nums"
+                          x-text="'Rp ' + Number(researchData.ebitda_analysis.ebitda_bn).toLocaleString('id-ID', {maximumFractionDigits: 0}) + ' B'"></span>
+                  </div>
+                  <div class="flex justify-between"><span class="text-slate-400">EBITDA Margin</span>
+                    <span class="text-emerald-400 font-semibold" x-text="researchData.ebitda_analysis.ebitda_margin_pct + '%'"></span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">EBIT</span>
+                    <span class="text-slate-300" x-text="'Rp ' + Number(researchData.ebitda_analysis.ebit_bn).toLocaleString('id-ID', {maximumFractionDigits: 0}) + ' B'"></span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">D&amp;A</span>
+                    <span class="text-slate-300" x-text="'Rp ' + Number(researchData.ebitda_analysis.da_bn).toLocaleString('id-ID', {maximumFractionDigits: 0}) + ' B'"></span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">D&amp;A / Revenue</span>
+                    <span class="text-slate-400" x-text="researchData.ebitda_analysis.da_pct_revenue + '%'"></span></div>
+                </div>
+              </template>
+              <template x-if="!(researchData.ebitda_analysis && researchData.ebitda_analysis.available)">
+                <div class="text-[11px] text-slate-500 space-y-1">
+                  <div class="text-amber-400 font-semibold">N/A</div>
+                  <div class="font-sans leading-snug">D&amp;A tidak dilaporkan (nilai <code class="text-slate-400">xsi:nil</code> pada tag Depreciation/Amortization di filing XBRL). EBITDA tidak dapat dihitung tanpa D&amp;A — tidak dikarang.</div>
+                </div>
+              </template>
+            </div>
+
+            <!-- Working Capital / CCC -->
+            <div class="bg-[#090D16] border border-white/[0.08] rounded-xl p-4 space-y-2.5">
+              <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+                <span class="text-xs font-semibold text-slate-200">Cash Conversion Cycle</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] bg-sky-500/10 text-sky-400 border border-sky-500/20">COMPUTED</span>
+              </div>
+              <template x-if="researchData.working_capital && researchData.working_capital.available">
+                <div class="space-y-1.5 text-xs">
+                  <div class="flex justify-between items-baseline">
+                    <span class="text-slate-400">CCC</span>
+                    <span class="text-base font-bold tabular-nums"
+                          :class="researchData.working_capital.ccc_days < 0 ? 'text-emerald-400' : (researchData.working_capital.ccc_days <= 90 ? 'text-emerald-400' : (researchData.working_capital.ccc_days <= 180 ? 'text-amber-400' : 'text-rose-400'))"
+                          x-text="researchData.working_capital.ccc_days + ' hari'"></span>
+                  </div>
+                  <div class="flex justify-between"><span class="text-slate-400">DIO (Inventory)</span>
+                    <span class="text-slate-300" x-text="researchData.working_capital.dio_days + ' hari'"></span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">DSO (Receivables)</span>
+                    <span class="text-slate-300" x-text="researchData.working_capital.dso_days + ' hari'"></span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">DPO (Payables)</span>
+                    <span class="text-slate-300" x-text="researchData.working_capital.dpo_days + ' hari'"></span></div>
+                  <div class="text-[10px] font-sans pt-1 border-t border-white/[0.05]"
+                       :class="researchData.working_capital.interpretation?.tone === 'good' ? 'text-emerald-400' : (researchData.working_capital.interpretation?.tone === 'warn' ? 'text-amber-400' : (researchData.working_capital.interpretation?.tone === 'bad' ? 'text-rose-400' : 'text-slate-400'))"
+                       x-text="researchData.working_capital.interpretation?.label + ' — ' + researchData.working_capital.interpretation?.note"></div>
+                </div>
+              </template>
+              <template x-if="!(researchData.working_capital && researchData.working_capital.available)">
+                <div class="text-[11px] text-slate-500 space-y-1">
+                  <div class="text-amber-400 font-semibold">N/A</div>
+                  <div class="font-sans leading-snug" x-text="researchData.working_capital?.reason || 'Komponen modal kerja tidak lengkap di XBRL audited.'"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 

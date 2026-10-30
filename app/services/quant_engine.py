@@ -45,16 +45,10 @@ def run_monte_carlo_gbm(
 
     # Deterministic pseudo-random normal via Box-Muller with LCG seed
     def _lcg_generator(s: int):
-        state = s
+        import random as _rnd
+        _r = _rnd.Random(s)
         while True:
-            state = (1664525 * state + 1013904223) & 0xFFFFFFFF
-            u1 = (state + 1) / 4294967296.0
-            state = (1664525 * state + 1013904223) & 0xFFFFFFFF
-            u2 = (state + 1) / 4294967296.0
-            z0 = math.sqrt(-2.0 * math.log(max(u1, 1e-12))) * math.cos(2.0 * math.pi * u2)
-            z1 = math.sqrt(-2.0 * math.log(max(u1, 1e-12))) * math.sin(2.0 * math.pi * u2)
-            yield z0
-            yield z1
+            yield _r.gauss(0.0, 1.0)
 
     rng = _lcg_generator(seed)
 

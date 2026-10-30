@@ -59,10 +59,31 @@ CONCEPTS = {
     # Bank / FIG: PPOP asli dari filing (BUKAN proxy)
     "ppop": ["ProfitFromOperation"],
     "interest_income_bank": ["InterestIncome"],
-    # Beban CKPN / impairment yang diakui di laba rugi
-    "impairment_losses": ["ImpairmentLosses", "ImpairmentLoss",
-                          "AllowanceForImpairmentLosses"],
-    "total_loans": ["Loans", "TotalLoans"],
+    # Beban CKPN / impairment yang diakui di laba rugi (nama tag XBRL IDX sebenarnya)
+    "impairment_losses": ["ProvisionDuringTheYearofAllowanceforImpairmentLossesonLoans",
+                          "ProvisionDuringTheYearOfAllowanceForImpairmentLossesOnShariaReceivables"],
+    # Saldo penyisihan CKPN (neraca)
+    "allowance_impairment_loans": ["AllowanceForImpairmentLossesForLoans"],
+    # Portofolio kredit bruto/neto (nama tag sebenarnya di taksonomi IDX)
+    "loans_gross_tag": ["TotalLoansGross"],
+    "loans_net_tag": ["TotalLoansNet"],
+    "loans_third_parties": ["LoansThirdParties"],
+    "loans_related_parties": ["LoansRelatedParties"],
+    # HPP (Cost of Sales and Revenue) — derivasi gross profit
+    "cost_of_sales": ["CostOfSalesAndRevenue"],
+    "other_operating_income": ["OtherOperatingIncome"],
+    "total_loans": ["TotalLoansGross", "TotalLoansNet"],
+    "other_operating_expenses": ["OtherOperatingExpenses"],
+    # D&A (flow) — untuk EBITDA yang jujur. Tag Depreciation & Amortization terpisah di IDX.
+    "depreciation": ["Depreciation", "DepreciationAndAmortisationExpenses"],
+    "amortization": ["Amortization"],
+    # Working capital (instant) — untuk Cash Conversion Cycle
+    "inventories": ["Inventories", "CurrentInventories"],
+    "trade_receivables": ["TradeReceivablesThirdParties", "TradeReceivablesRelatedParties"],
+    "trade_payables": ["TradePayablesThirdParties", "TradePayablesRelatedParties"],
+    # Arus kas operasi (CFO) — tag ada di 4.185/4.185 filing. Wajib untuk Sloan Accruals.
+    "operating_cash_flow": ["NetCashFlowsReceivedFromUsedInOperatingActivities",
+                            "CashFlowsFromUsedInOperatingActivities"],
     # Beban pajak P&L: cari konsep yang benar (bukan arus kas)
     "tax_expense": ["TaxBenefitExpenses", "TaxExpense", "IncomeTaxExpense", "CurrentTaxExpense"],
     "dividends_paid": ["DividendsPaidFromFinancingActivities", "DividendsPaidFromOperatingActivities"],
@@ -124,6 +145,9 @@ def parse_xbrl_file(path: str) -> Dict[str, Any]:
                             "selling_expense", "ga_expense", "tax_expense",
                             "finance_costs", "interest_expense",
                             "ppop", "interest_income_bank", "impairment_losses",
+                            "cost_of_sales", "other_operating_income",
+                            "other_operating_expenses", "depreciation", "amortization",
+                            "operating_cash_flow",
                             "dividends_paid", "capex")
         allowed = _MAIN_CTX_DUR if is_flow else _MAIN_CTX_INST
         val = None
@@ -194,6 +218,57 @@ def parse_xbrl_file(path: str) -> Dict[str, Any]:
     res["balance_includes_syirkah"] = includes_syirkah
     res["balance_total_reported"] = syk if includes_syirkah else None
     res["is_syariah"] = False  # tidak diklaim: tak bisa dipastikan dari neraca saja
+
+    # --- BANK: portofolio kredit bruto = LoansThirdParties + LoansRelatedParties ---
+    if res.get("loans_gross") is None:
+        ltp = res.get("loans_third_parties")
+        lrp = res.get("loans_related_parties")
+        if ltp is not None:
+            res["loans_gross"] = ltp + (lrp or 0.0)
+            res.setdefault("_concepts", {})["loans_gross"] = "derived:LoansThirdParties+LoansRelatedParties"
+    if res.get("total_loans") is None and res.get("loans_gross") is not None:
+        res["total_loans"] = res["loans_gross"]
+
+    # --- Working capital: trade receivable/payable dipecah TP + RP, wajib dijumlah ---
+    # Ekstrak dua komponen secara eksplisit (CONCEPTS hanya menyimpan hit pertama)
+    for field, cands in (("_ar_tp", ["TradeReceivablesThirdParties"]),
+                         ("_ar_rp", ["TradeReceivablesRelatedParties"]),
+                         ("_ap_tp", ["TradePayablesThirdParties"]),
+                         ("_ap_rp", ["TradePayablesRelatedParties"])):
+        val_c = None
+        for c in cands:
+            for ctx, unit, v in _extract(raw, c):
+                if ctx == "CurrentYearInstant":
+                    val_c = _num(v)
+                    break
+            if val_c is not None:
+                break
+        res[field] = val_c
+    _ar_tp, _ar_rp = res.pop("_ar_tp", None), res.pop("_ar_rp", None)
+    _ap_tp, _ap_rp = res.pop("_ap_tp", None), res.pop("_ap_rp", None)
+    if _ar_tp is not None or _ar_rp is not None:
+        res["trade_receivables"] = (_ar_tp or 0.0) + (_ar_rp or 0.0)
+        res.setdefault("_concepts", {})["trade_receivables"] = "derived:TradeReceivablesTP+RP"
+    if _ap_tp is not None or _ap_rp is not None:
+        res["trade_payables"] = (_ap_tp or 0.0) + (_ap_rp or 0.0)
+        res.setdefault("_concepts", {})["trade_payables"] = "derived:TradePayablesTP+RP"
+
+    # --- D&A gabungan: Depreciation + Amortization (keduanya flow terpisah di IDX) ---
+    _dep, _amort = res.get("depreciation"), res.get("amortization")
+    if _dep is not None or _amort is not None:
+        res["depreciation_amortization"] = (_dep or 0.0) + (_amort or 0.0)
+        res.setdefault("_concepts", {})["depreciation_amortization"] = "derived:Depreciation+Amortization"
+    else:
+        res["depreciation_amortization"] = None
+
+    # --- GROSS PROFIT derivation (jika tidak dilaporkan langsung) ---
+    # GrossProfit = SalesAndRevenue - CostOfSalesAndRevenue (identitas akuntansi)
+    if res.get("gross_profit") is None:
+        rev0 = res.get("revenue_sales")
+        cogs = res.get("cost_of_sales")
+        if rev0 is not None and cogs is not None and rev0 != 0:
+            res["gross_profit"] = rev0 - cogs
+            res.setdefault("_concepts", {})["gross_profit"] = "derived:SalesAndRevenue-CostOfSalesAndRevenue"
 
     # Bank/finansial: ada portofolio kredit, atau tak punya laba bruto & penjualan tapi punya pendapatan bunga/mudharib
     res["is_bank"] = bool(

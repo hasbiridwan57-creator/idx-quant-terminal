@@ -264,210 +264,96 @@ def save_or_get_cached_statement(
     session.refresh(record)
     return record
 
-def seed_initial_idx_statements(session: Session) -> None:
-    """Seed data lengkap 4 emiten non-bank + 1 bank (BBCA) dengan seluruh 15 field extended."""
-    samples = [
-        # ── ASII 2024 & 2025 (Industrials) ──────────────────────────
-        FinancialStatementInput(
-            ticker="ASII", company_name="PT Astra International Tbk", year=2024, period_type=PeriodType.FY,
-            revenue=316565, ebit=44200, ebt=42800, net_income_parent=33839,
-            total_assets=445679, total_liabilities=195261, total_equity_parent=250418,
-            unit_multiplier=1e9,
-            sector="Industrials",
-            shares_outstanding=40483553140.0,
-            cash_and_equivalents=42000.0,
-            interest_bearing_debt=62000.0,
-            current_assets=118000.0,
-            current_liabilities=89000.0,
-            interest_income=1800.0,
-            interest_expense=5600.0,
-            tax_provision=8970.0,
-            operating_cash_flow=52000.0,
-            capex=18000.0,
-            depreciation=11200.0,
-            minority_interest=7800.0,
-        ),
-        FinancialStatementInput(
-            ticker="ASII", company_name="PT Astra International Tbk", year=2025, period_type=PeriodType.FY,
-            revenue=338400, ebit=50760, ebt=49100, net_income_parent=38789,
-            total_assets=462000, total_liabilities=198000, total_equity_parent=264000,
-            unit_multiplier=1e9,
-            sector="Industrials",
-            shares_outstanding=40483553140.0,
-            cash_and_equivalents=48000.0,
-            interest_bearing_debt=65000.0,
-            current_assets=125000.0,
-            current_liabilities=92000.0,
-            interest_income=2200.0,
-            interest_expense=5200.0,
-            tax_provision=10320.0,
-            operating_cash_flow=58000.0,
-            capex=19000.0,
-            depreciation=11800.0,
-            minority_interest=8200.0,
-        ),
-        # ── ICBP 2024 & 2025 (Consumer Non-Cyclicals) ────────────────
-        FinancialStatementInput(
-            ticker="ICBP", company_name="PT Indofood CBP Sukses Makmur Tbk", year=2024, period_type=PeriodType.FY,
-            revenue=67910, ebit=14260, ebt=11900, net_income_parent=8950,
-            total_assets=119200, total_liabilities=57100, total_equity_parent=62100,
-            unit_multiplier=1e9,
-            sector="Consumer Non-Cyclicals",
-            shares_outstanding=11661908000.0,
-            cash_and_equivalents=9500.0,
-            interest_bearing_debt=28000.0,
-            current_assets=42000.0,
-            current_liabilities=31000.0,
-            interest_income=420.0,
-            interest_expense=2360.0,
-            tax_provision=2950.0,
-            operating_cash_flow=13500.0,
-            capex=6200.0,
-            depreciation=4800.0,
-            minority_interest=4500.0,
-        ),
-        FinancialStatementInput(
-            ticker="ICBP", company_name="PT Indofood CBP Sukses Makmur Tbk", year=2025, period_type=PeriodType.FY,
-            revenue=72400, ebit=16652, ebt=14500, net_income_parent=11165,
-            total_assets=123500, total_liabilities=56500, total_equity_parent=67000,
-            unit_multiplier=1e9,
-            sector="Consumer Non-Cyclicals",
-            shares_outstanding=11661908000.0,
-            cash_and_equivalents=11200.0,
-            interest_bearing_debt=26000.0,
-            current_assets=45000.0,
-            current_liabilities=29500.0,
-            interest_income=510.0,
-            interest_expense=2152.0,
-            tax_provision=3340.0,
-            operating_cash_flow=15800.0,
-            capex=6800.0,
-            depreciation=5000.0,
-            minority_interest=4700.0,
-        ),
-        # ── TLKM 2024 & 2025 (Communication Services) ───────────────
-        FinancialStatementInput(
-            ticker="TLKM", company_name="PT Telkom Indonesia (Persero) Tbk", year=2024, period_type=PeriodType.FY,
-            revenue=149216, ebit=44764, ebt=40800, net_income_parent=24560,
-            total_assets=287042, total_liabilities=130480, total_equity_parent=156562,
-            unit_multiplier=1e9,
-            sector="Communication Services",
-            shares_outstanding=99062216600.0,
-            cash_and_equivalents=32000.0,
-            interest_bearing_debt=78000.0,
-            current_assets=38000.0,
-            current_liabilities=65000.0,
-            interest_income=2800.0,
-            interest_expense=3964.0,
-            tax_provision=16240.0,
-            operating_cash_flow=48000.0,
-            capex=35000.0,
-            depreciation=22000.0,
-            minority_interest=0.0,
-        ),
-        FinancialStatementInput(
-            ticker="TLKM", company_name="PT Telkom Indonesia (Persero) Tbk", year=2025, period_type=PeriodType.FY,
-            revenue=152000, ebit=44840, ebt=39200, net_income_parent=24300,
-            total_assets=335000, total_liabilities=197000, total_equity_parent=138000,
-            unit_multiplier=1e9,
-            sector="Communication Services",
-            shares_outstanding=99062216600.0,
-            cash_and_equivalents=29000.0,
-            interest_bearing_debt=95000.0,
-            current_assets=41000.0,
-            current_liabilities=78000.0,
-            interest_income=3100.0,
-            interest_expense=5640.0,
-            tax_provision=14900.0,
-            operating_cash_flow=45000.0,
-            capex=38000.0,
-            depreciation=23000.0,
-            minority_interest=0.0,
-        ),
-        # ── ADRO 2024 & 2025 (Energy) ────────────────────────────────
-        FinancialStatementInput(
-            ticker="ADRO", company_name="PT Alamtri Resources Indonesia Tbk", year=2024, period_type=PeriodType.FY,
-            revenue=98500, ebit=31520, ebt=30900, net_income_parent=24100,
-            total_assets=162000, total_liabilities=47000, total_equity_parent=115000,
-            unit_multiplier=1e9,
-            sector="Energy",
-            shares_outstanding=30758665900.0,
-            cash_and_equivalents=18000.0,
-            interest_bearing_debt=32000.0,
-            current_assets=42000.0,
-            current_liabilities=22000.0,
-            interest_income=900.0,
-            interest_expense=620.0,
-            tax_provision=6800.0,
-            operating_cash_flow=38000.0,
-            capex=15000.0,
-            depreciation=9500.0,
-            minority_interest=1200.0,
-        ),
-        FinancialStatementInput(
-            ticker="ADRO", company_name="PT Alamtri Resources Indonesia Tbk", year=2025, period_type=PeriodType.FY,
-            revenue=106200, ebit=36108, ebt=35400, net_income_parent=27612,
-            total_assets=170000, total_liabilities=46000, total_equity_parent=124000,
-            unit_multiplier=1e9,
-            sector="Energy",
-            shares_outstanding=30758665900.0,
-            cash_and_equivalents=21000.0,
-            interest_bearing_debt=30000.0,
-            current_assets=48000.0,
-            current_liabilities=21000.0,
-            interest_income=1100.0,
-            interest_expense=708.0,
-            tax_provision=7788.0,
-            operating_cash_flow=42000.0,
-            capex=14000.0,
-            depreciation=9800.0,
-            minority_interest=1300.0,
-        ),
-        # ── BBCA 2024 & 2025 (Financials — Bank Model out-of-the-box) ──
-        # Satuan Miliar Rupiah (unit_multiplier=1e9) konsisten dengan emiten lain
-        # BBCA FY2024: Revenue Rp 109.9T, EBIT Rp 64.6T, NI Rp 52.6T, Aset Rp 1.765T, Ekuitas Rp 209T
-        # BBCA FY2025: Revenue Rp 116.3T, EBIT Rp 69.4T, NI Rp 56.8T, Aset Rp 1.950T, Ekuitas Rp 232T
-        FinancialStatementInput(
-            ticker="BBCA", company_name="PT Bank Central Asia Tbk", year=2024, period_type=PeriodType.FY,
-            revenue=109900.0, ebit=64600.0, ebt=75200.0, net_income_parent=52600.0,
-            total_assets=1765000.0, total_liabilities=1556000.0, total_equity_parent=209000.0,
-            unit_multiplier=1e9,
-            sector="Financials",
-            shares_outstanding=123275050000.0,
-            cash_and_equivalents=312000.0,
-            interest_bearing_debt=1150000.0,
-            current_assets=0.0,
-            current_liabilities=0.0,
-            interest_income=82300.0,
-            interest_expense=28400.0,
-            tax_provision=22600.0,
-            operating_cash_flow=95000.0,
-            capex=8500.0,
-            depreciation=6200.0,
-            minority_interest=0.0,
-        ),
-        FinancialStatementInput(
-            ticker="BBCA", company_name="PT Bank Central Asia Tbk", year=2025, period_type=PeriodType.FY,
-            revenue=116300.0, ebit=69400.0, ebt=80700.0, net_income_parent=56800.0,
-            total_assets=1950000.0, total_liabilities=1718000.0, total_equity_parent=232000.0,
-            unit_multiplier=1e9,
-            sector="Financials",
-            shares_outstanding=123275050000.0,
-            cash_and_equivalents=355000.0,
-            interest_bearing_debt=1240000.0,
-            current_assets=0.0,
-            current_liabilities=0.0,
-            interest_income=96400.0,
-            interest_expense=32600.0,
-            tax_provision=23900.0,
-            operating_cash_flow=102000.0,
-            capex=9200.0,
-            depreciation=6600.0,
-            minority_interest=0.0,
-        ),
-    ]
-    for s in samples:
-        save_or_get_cached_statement(session, s)
+def sync_audited_to_statement_cache(session: Session) -> int:
+    """
+    ZERO-DUMMY: isi FinancialStatementCache HANYA dari XBRL audited BEI.
+    Menggantikan seed hardcoded. Idempoten: update jika sudah ada, insert jika belum.
+    Return jumlah baris yang di-sync.
+    """
+    from app.services.idx_audited_financials import _load, five_year_table
+
+    data = _load()
+    if not data:
+        print("[sync] XBRL audited kosong — tidak ada yang di-sync")
+        return 0
+
+    existing = {
+        (r.ticker, r.year, str(r.period_type)): r
+        for r in session.exec(select(FinancialStatementCache)).all()
+    }
+
+    synced = 0
+    skipped = 0
+    for tk in data.keys():
+        try:
+            rows = five_year_table(tk)
+        except Exception:
+            continue
+        for fy in rows:
+            if not fy.get("year"):
+                continue
+            key = (tk, int(fy["year"]), "FY")
+            rec = existing.get(key)
+            def _f(k):
+                v = fy.get(k)
+                return float(v) if v is not None else None
+
+            # ZERO-FAKE: baris dengan komponen inti kosong DILEWATI, bukan diisi 0.
+            # Skema DB mewajibkan revenue/ebit/ebt/NI/assets/liabilities/equity.
+            _core = ["revenue_bn", "ebit_bn", "profit_before_tax_bn", "net_income_parent_bn",
+                     "assets_bn", "liabilities_bn", "equity_parent_bn"]
+            if any(fy.get(k) is None for k in _core):
+                skipped += 1
+                continue
+            # Skema Pydantic menolak revenue negatif; revenue negatif = artefak
+            # pencatatan bank syariah, bukan angka bisnis. Lewati (jangan di-nol-kan).
+            if fy.get("revenue_bn") is not None and fy["revenue_bn"] < 0:
+                skipped += 1
+                continue
+
+            payload = dict(
+                company_name=fy.get("company_name") or tk,
+                currency=fy.get("currency") or "IDR",
+                unit_multiplier=1e9,
+                revenue=_f("revenue_bn"),
+                ebit=_f("ebit_bn"),
+                ebt=_f("profit_before_tax_bn"),
+                net_income_parent=_f("net_income_parent_bn"),
+                total_assets=_f("assets_bn"),
+                total_liabilities=_f("liabilities_bn"),
+                total_equity_parent=_f("equity_parent_bn"),
+                total_equity_consolidated=_f("equity_total_bn"),
+                sector=fy.get("sector"),
+                cash_and_equivalents=_f("cash_bn"),
+                depreciation=_f("depreciation_amortization_bn"),
+                capex=_f("capex_bn"),
+                operating_cash_flow=_f("operating_cash_flow_bn"),
+                interest_income=_f("interest_income_bn"),
+                interest_expense=_f("interest_expense_bn"),
+                tax_provision=_f("tax_provision_bn"),
+                shares_outstanding=_f("shares_outstanding"),
+                interest_bearing_debt=_f("total_loans_bn"),
+            )
+
+            if rec:
+                changed = False
+                for k, v in payload.items():
+                    if getattr(rec, k, None) != v:
+                        setattr(rec, k, v)
+                        changed = True
+                if changed:
+                    session.add(rec)
+                    synced += 1
+            else:
+                session.add(FinancialStatementCache(
+                    ticker=tk, year=int(fy["year"]), period_type="FY",
+                    file_hash=f"xbrl-audited-{tk}-{fy['year']}", **payload
+                ))
+                synced += 1
+    session.commit()
+    print(f"[sync] XBRL audited -> statement cache: {synced} baris tersinkron, {skipped} dilewati (komponen inti kosong)")
+    return synced
+
 
 _PERIOD_RANK = {"Q1": 1, "Q2": 2, "Q3": 3, "FY": 4}
 

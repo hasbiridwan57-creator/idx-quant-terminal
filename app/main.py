@@ -58,7 +58,7 @@ from app.providers import (
 from app.services.parser import (
     parse_idx_file_bytes,
     save_or_get_cached_statement,
-    seed_initial_idx_statements,
+    sync_audited_to_statement_cache,
     load_ticker_pair,
     load_ticker_history,
     generate_idx_excel_template_bytes,
@@ -75,7 +75,9 @@ from datetime import datetime, timezone
 async def lifespan(app: FastAPI):
     init_db()
     with Session(engine) as session:
-        seed_initial_idx_statements(session)
+        # ZERO-DUMMY POLICY: tidak ada seed hardcoded. Semua angka berasal dari
+        # XBRL audited BEI (4.185 filing, 937 emiten) via idx_audited_financials.
+        sync_audited_to_statement_cache(session)
     static_dir = BASE_DIR / "static"
     static_dir.mkdir(exist_ok=True)
     try:
@@ -931,3 +933,126 @@ async def api_ingest_terminal(
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     return update_terminal_snapshot(payload)
+
+
+# ===============================================================
+# 4. AI ANALYST COPILOT (9Router VPS / dahl) & PDF EXPORT
+# ===============================================================
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+
+class CopilotChatRequest(BaseModel):
+    ticker: str
+    query: str
+    context: Optional[Dict[str, Any]] = None
+    history: Optional[List[Dict[str, str]]] = None
+
+@app.post("/api/copilot/chat")
+async def api_copilot_chat(req: CopilotChatRequest):
+    """
+    Interaktif chat dengan Senior Equity Research Analyst (FIG & FinTech).
+    Didukung oleh 9Router VPS gateway (dahl) dan grounded 100% pada data riil.
+    """
+    from app.services.analyst_copilot import query_analyst_copilot
+    clean_tk = req.ticker.upper().strip()
+# Fallback jika context kosong dari frontend: bangun context otomatis dari DB audited BEI
+    if not req.context or not req.context.get("company_name"):
+        try:
+            from app.services.idx_audited_financials import five_year_table
+            _hist = five_year_table(clean_tk)  # list chronos 5 tahun
+            if _hist:
+                _latest = _hist[-1]  # tahun paling baru
+                _hist3 = _hist[-3:]  # 3 tahun terakhir
+                req.context = {
+                    "ticker": clean_tk,
+                    "company_name": _latest.get("company_name", clean_tk),
+                    "sector": _latest.get("sector", "N/A"),
+                    "revenue_bn": _latest.get("revenue_bn"),
+                    "net_income_bn": _latest.get("net_income_bn"),
+                    "total_equity_bn": _latest.get("total_equity_bn"),
+                    "is_bank": bool(_latest.get("is_bank")),
+                    "roe_pct": round((_latest.get("net_income_bn", 0) / _latest.get("total_equity_bn", 1)) * 100, 2) if _latest.get("total_equity_bn") else None,
+                    "historical_financials": [
+                        {"year": r.get("year"), "revenue_bn": r.get("revenue_bn"),
+                         "net_income_bn": r.get("net_income_bn"), "total_equity_bn": r.get("total_equity_bn")}
+                        for r in _hist3
+                    ],
+                    "fundamentals_source": f"IDX_XBRL_AUDITED_FY{_latest.get('year')}",
+                }
+        except Exception as e:
+            pass  # jika gagal, lanjut dengan context kosong; AI akan bilang N/A
+
+    res = query_analyst_copilot(
+        ticker=clean_tk,
+        user_query=req.query,
+        context=req.context or {},
+        chat_history=req.history or [],
+    )
+    return res
+
+
+# ===============================================================
+# 5. PEER COMPARISON MATRIX — GET & ADD/REFRESH
+# ===============================================================
+@app.get("/api/peers/{ticker}")
+async def api_get_peer_matrix(ticker: str):
+    from app.services.peer_matrix import build_peer_matrix
+    try:
+        result = build_peer_matrix(ticker.upper().strip())
+        if "error" in result:
+            return {"error": result["error"]}
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ===============================================================
+# 6. FINTECH UNIT ECONOMICS (GOTO, BUKA, BELI)
+# ===============================================================
+@app.get("/api/fintech/{ticker}")
+async def api_get_fintech_metrics(ticker: str):
+    import json, os
+    f_path = "/Users/hasbi/idx-quant-terminal/data/fintech_unit_economics.json"
+    if os.path.exists(f_path):
+        try:
+            with open(f_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            return d.get(ticker.upper().strip(), {})
+        except Exception as e:
+            return {"error": str(e)}
+    return {}
+
+
+@app.post("/api/peers/{ticker}")
+async def api_post_peer_matrix(ticker: str, req: dict = None):
+    from app.services.peer_matrix import build_peer_matrix
+    try:
+        extra = req.get("peers") if req else None
+        result = build_peer_matrix(ticker.upper().strip(), peer_tickers=extra)
+        if "error" in result:
+            return {"error": result["error"]}
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/research/{ticker}/pdf")
+async def api_research_pdf(ticker: str, session: Session = Depends(get_session)):
+    """
+    One-Click Institutional Equity Research Tear-Sheet Export (PDF).
+    Menggunakan ReportLab NumberedCanvas.
+    """
+    from fastapi.responses import Response
+    from app.services.research_paper_engine import generate_equity_research_report
+    clean_tk = ticker.upper().strip()
+    try:
+        pdf_bytes = generate_equity_research_report(clean_tk)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=IDX_Research_{clean_tk}.pdf"
+            },
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Gagal generate PDF: {exc}")

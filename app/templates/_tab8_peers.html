@@ -1,0 +1,231 @@
+<!-- =========================================================
+     TAB 8: PEER COMPARISON MATRIX — Institutional Side-by-Side
+     Standards: CFA Institute, Goldman Sachs GIR, FactSet peer templates.
+     Data: 100% from IDX XBRL Audited BEI (zero synthetic data).
+     ========================================================= -->
+<div x-show="activeNav === 'peers'" x-cloak class="space-y-5">
+
+  <!-- PAGE HEADER -->
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 border border-violet-500/30 flex items-center justify-center">
+        <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+      </div>
+      <div>
+        <h2 class="text-base font-bold text-white">Peer Comparison Matrix</h2>
+        <p class="text-[11px] text-slate-500 font-mono">Institutional Benchmark — Multi-Ticker Side-by-Side</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[10px] font-mono">
+        <span x-text="peerMatrix ? (peerMatrix.total_companies + ' Emiten') : '...'"></span>
+      </span>
+      <span class="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+        LIVE XBRL
+      </span>
+    </div>
+  </div>
+
+  <!-- TICKER SELECTOR STRIP -->
+  <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
+    <div class="flex items-center gap-3 mb-3">
+      <span class="text-xs text-slate-400 font-medium">Bandingkan dengan:</span>
+      <div class="flex gap-2 flex-wrap">
+        <template x-for="peer in peerTickers" :key="peer">
+          <span class="px-2.5 py-1 rounded-lg text-[11px] font-mono"
+                :class="peer === ticker ? 'bg-violet-500/20 border border-violet-500/40 text-violet-300' : 'bg-slate-700/50 border border-white/[0.08] text-slate-300'">
+            <span x-text="peer"></span>
+          </span>
+        </template>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="text" x-model="newPeerTicker"
+             @keydown.enter.prevent="addPeer()"
+             placeholder="Ticker baru (cth: BBCA)"
+             class="flex-1 bg-[#080C14] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-violet-500/50 outline-none font-mono uppercase">
+      <button @click="addPeer()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium">
+        + Bandingkan
+      </button>
+    </div>
+  </div>
+
+  <!-- PEER DATA TABLE -->
+  <template x-if="peerMatrix && peerMatrix.peers">
+  <div class="overflow-x-auto rounded-xl border border-white/[0.06]">
+    <table class="w-full text-xs font-mono">
+      <!-- STICKY HEADER -->
+      <thead class="bg-[#0E1525] border-b border-white/[0.08]">
+        <tr>
+          <th class="sticky left-0 bg-[#0E1525] z-10 text-left px-4 py-3 text-slate-400 font-medium">Ticker</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Sector</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Tahun</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Revenue</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Rev YoY</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">GP Margin</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">EBIT Margin</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">EBITDA Margin</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">CCC (hari)</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Net Margin</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">ROE</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">ROIC</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">WACC</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">EVA Spread</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Altman Z''</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Equity</th>
+          <th class="text-right px-3 py-3 text-slate-400 font-medium">Debt/Equity</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-white/[0.04]">
+        <template x-for="peer in peerMatrix.peers" :key="peer.ticker">
+          <tr :class="peer.is_primary ? 'bg-violet-500/5' : 'hover:bg-white/[0.02]'" class="transition-colors">
+            <!-- Ticker + Company -->
+            <td class="sticky left-0 z-10 px-4 py-3" :class="peer.is_primary ? 'bg-violet-500/5' : 'bg-[#0E1525]'">
+              <div class="font-bold text-sm" :class="peer.is_primary ? 'text-violet-300' : 'text-white'" x-text="peer.ticker"></div>
+              <div class="text-[10px] text-slate-500 truncate max-w-[140px]" x-text="peer.company_name || peer.ticker"></div>
+              <span x-show="peer.is_primary" class="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[8px] bg-violet-500/20 border border-violet-500/30 text-violet-300 font-bold">FOKUS</span>
+            </td>
+            <td class="text-right px-3 py-3 text-slate-400" x-text="peer.sector || 'N/A'"></td>
+            <td class="text-right px-3 py-3 text-slate-400" x-text="peer.year || 'N/A'"></td>
+
+            <!-- Revenue -->
+            <td class="text-right px-3 py-3">
+              <span class="font-semibold text-white" x-text="peer.revenue_bn ? 'Rp ' + formatBn(peer.revenue_bn) : 'N/A'"></span>
+            </td>
+
+            <!-- Rev YoY -->
+            <td class="text-right px-3 py-3">
+              <span class="font-medium" :class="colorYoY(peer.revenue_yoy)" x-text="fmtPct(peer.revenue_yoy)"></span>
+            </td>
+
+            <!-- GP Margin -->
+            <td class="text-right px-3 py-3">
+              <div class="flex flex-col items-end">
+                <span :class="colorMetric(peer.gp_margin_pct, peerMatrix.sector_median?.gp_margin_pct, 'higher')" x-text="fmtPct(peer.gp_margin_pct)"></span>
+                <div class="w-10 h-1 rounded-full bg-slate-700 mt-0.5 overflow-hidden">
+                  <div class="h-full rounded-full" :class="barColor(peer.gp_margin_pct, peerMatrix.sector_median?.gp_margin_pct)"
+                       :style="'width:' + Math.min(peer.gp_margin_pct || 0, 100) + '%'"></div>
+                </div>
+              </div>
+            </td>
+
+            <!-- EBIT Margin -->
+            <td class="text-right px-3 py-3">
+              <div class="flex flex-col items-end">
+                <span :class="colorMetric(peer.ebit_margin_pct, peerMatrix.sector_median?.ebit_margin_pct, 'higher')" x-text="fmtPct(peer.ebit_margin_pct)"></span>
+                <div class="w-10 h-1 rounded-full bg-slate-700 mt-0.5 overflow-hidden">
+                  <div class="h-full rounded-full" :class="barColor(peer.ebit_margin_pct, peerMatrix.sector_median?.ebit_margin_pct)"
+                       :style="'width:' + Math.min(peer.ebit_margin_pct || 0, 50) + '%'"></div>
+                </div>
+              </div>
+            </td>
+
+            <!-- EBITDA Margin -->
+            <td class="text-right px-3 py-3">
+              <span :class="colorMetric(peer.ebitda_margin_pct, peerMatrix.sector_median?.ebitda_margin_pct, 'higher')"
+                    x-text="fmtPct(peer.ebitda_margin_pct)"></span>
+            </td>
+
+            <!-- CCC -->
+            <td class="text-right px-3 py-3">
+              <span :class="peer.ccc_days !== null && peer.ccc_days !== undefined ? (peer.ccc_days < 0 ? 'text-emerald-400 font-semibold' : (peer.ccc_days <= 90 ? 'text-emerald-400' : (peer.ccc_days <= 180 ? 'text-amber-400' : 'text-rose-400'))) : 'text-slate-500'"
+                    x-text="peer.ccc_days !== null && peer.ccc_days !== undefined ? peer.ccc_days.toFixed(0) : 'N/A'"></span>
+            </td>
+
+            <!-- Net Margin -->
+            <td class="text-right px-3 py-3">
+              <span :class="colorMetric(peer.net_margin_pct, peerMatrix.sector_median?.net_margin_pct, 'higher')" x-text="fmtPct(peer.net_margin_pct)"></span>
+            </td>
+
+            <!-- ROE -->
+            <td class="text-right px-3 py-3">
+              <div class="flex flex-col items-end">
+                <span :class="colorMetric(peer.roe_pct, peerMatrix.sector_median?.roe_pct, 'higher')" x-text="fmtPct(peer.roe_pct)"></span>
+                <div class="w-10 h-1 rounded-full bg-slate-700 mt-0.5 overflow-hidden">
+                  <div class="h-full rounded-full" :class="barColor(peer.roe_pct, peerMatrix.sector_median?.roe_pct)"
+                       :style="'width:' + Math.min(peer.roe_pct || 0, 40) + '%'"></div>
+                </div>
+              </div>
+            </td>
+
+            <!-- ROIC -->
+            <td class="text-right px-3 py-3">
+              <span :class="colorMetric(peer.roic_pct, peerMatrix.sector_median?.roic_pct, 'higher')" x-text="fmtPct(peer.roic_pct)"></span>
+            </td>
+
+            <!-- WACC -->
+            <td class="text-right px-3 py-3">
+              <span class="text-slate-300" x-text="fmtPct(peer.wacc_pct)"></span>
+            </td>
+
+            <!-- EVA Spread (ROIC - WACC) -->
+            <td class="text-right px-3 py-3">
+              <span class="font-semibold"
+                    :class="peer.eva_spread_pct === null || peer.eva_spread_pct === undefined ? 'text-slate-500' : (peer.eva_spread_pct > 0 ? 'text-emerald-400' : 'text-rose-400')"
+                    x-text="peer.eva_spread_pct === null || peer.eva_spread_pct === undefined ? 'N/A' : (peer.eva_spread_pct > 0 ? '+' : '') + peer.eva_spread_pct.toFixed(2) + '%'"></span>
+              <div class="text-[9px] text-slate-500"
+                   x-text="peer.eva_bn === null || peer.eva_bn === undefined ? '' : (peer.eva_bn >= 0 ? '+Rp ' : '-Rp ') + formatBn(Math.abs(peer.eva_bn))"></div>
+            </td>
+
+            <!-- Altman Z'' -->
+            <td class="text-right px-3 py-3">
+              <span class="font-semibold" :class="colorAltman(peer.altman_z_double_prime)" x-text="peer.altman_z_double_prime ? peer.altman_z_double_prime.toFixed(2) : 'N/A'"></span>
+            </td>
+
+            <!-- Equity -->
+            <td class="text-right px-3 py-3 text-slate-300" x-text="peer.equity_bn ? 'Rp ' + formatBn(peer.equity_bn) : 'N/A'"></td>
+
+            <!-- Debt/Equity -->
+            <td class="text-right px-3 py-3">
+              <span class="text-slate-300" x-text="peer.equity_bn && peer.liabilities_bn ? (peer.liabilities_bn / peer.equity_bn).toFixed(2) + 'x' : 'N/A'"></span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+
+      <!-- SECTOR MEDIAN ROW -->
+      <tfoot>
+        <tr class="bg-slate-800/30 border-t border-white/[0.08]">
+          <td class="sticky left-0 bg-slate-800/30 z-10 px-4 py-3 text-[11px] font-bold text-slate-400">MEDIAN SEKTOR</td>
+          <td></td><td></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px] font-medium" x-text="peerMatrix.sector_median ? 'Rp ' + formatBn(peerMatrix.sector_median.revenue_bn) : '—'"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.revenue_yoy)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.gp_margin_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.ebit_margin_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.ebitda_margin_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="peerMatrix.sector_median?.ccc_days !== null && peerMatrix.sector_median?.ccc_days !== undefined ? peerMatrix.sector_median.ccc_days.toFixed(0) : '—'"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.net_margin_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.roe_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.roic_pct)"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="fmtPct(peerMatrix.sector_median?.wacc_pct)"></td>
+          <td class="text-right px-3 py-3 text-[11px]"
+              :class="peerMatrix.sector_median?.eva_spread_pct > 0 ? 'text-emerald-400' : 'text-rose-400'"
+              x-text="peerMatrix.sector_median?.eva_spread_pct === null || peerMatrix.sector_median?.eva_spread_pct === undefined ? '—' : (peerMatrix.sector_median.eva_spread_pct > 0 ? '+' : '') + peerMatrix.sector_median.eva_spread_pct.toFixed(2) + '%'"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="peerMatrix.sector_median?.altman_z_double_prime ? peerMatrix.sector_median.altman_z_double_prime.toFixed(2) : '—'"></td>
+          <td></td><td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  </template>
+
+  <!-- LOADING STATE -->
+  <template x-if="!peerMatrix">
+    <div class="flex items-center justify-center py-24">
+      <div class="text-center space-y-3">
+        <div class="w-12 h-12 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin mx-auto"></div>
+        <p class="text-slate-400 text-sm font-mono">Memuat Peer Comparison Matrix...</p>
+      </div>
+    </div>
+  </template>
+
+  <!-- DATA FOOTER -->
+  <div class="flex items-center justify-between text-[10px] text-slate-600 font-mono px-1">
+    <span>📊 Data: IDX XBRL Audited BEI — 100% Real, No Synthetic. N/A = Data tidak dilaporkan.</span>
+    <span>Peer Matrix — IDX-Quant v5.3</span>
+  </div>
+
+</div>

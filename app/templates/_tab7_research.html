@@ -33,7 +33,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <div class="text-xs font-mono text-slate-300">
             Target: <strong class="text-white" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
             (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                   x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(0) + '% ' + (researchData.upside_pct >= 0 ? 'Up' : 'Down') + 'side') : 'N/A'"></span>)
+                   x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(0) + '% ' + (researchData.upside_pct >= 0 ? 'Up' : 'Down') + 'side') : 'N/A'"></span>)
           </div>
         </div>
         <div class="h-12 w-px bg-white/[0.08]"></div>
@@ -156,7 +156,7 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           <strong class="text-white" x-text="researchData ? researchData.company_name : ticker"></strong> (IDX: <span x-text="ticker"></span>)
           dengan target harga 12-bulan <strong class="text-blue-400" x-text="researchData ? 'Rp ' + Number(researchData.target_price).toLocaleString('id-ID') : 'N/A'"></strong>
           (<span :class="researchData && researchData.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                 x-text="researchData ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '% ' + (researchData.upside_pct >= 0 ? 'upside' : 'downside') : '')"></span>
+                 x-text="researchData && researchData.upside_pct != null ? ((researchData.upside_pct >= 0 ? '+' : '') + researchData.upside_pct.toFixed(1) + '% ' + (researchData.upside_pct >= 0 ? 'upside' : 'downside')) : ''"></span>
           dari harga terakhir <span x-text="researchData ? 'Rp ' + Number(researchData.current_price).toLocaleString('id-ID') : 'N/A'"></span>).
           Valuasi berbasis DCF yang dibobot ke nilai intrinsik (Figure 2).
           <span x-text="researchData ? ('ROE tercatat ' + researchData.roe_pct.toFixed(1) + '% dengan P/E ' + Number(researchData.pe_ratio).toFixed(1) + 'x dan P/BV ' + Number(researchData.pbv_ratio).toFixed(2) + 'x.') : ''"></span>
@@ -980,6 +980,33 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
       Jumlah karyawan, pemegang saham utama, dan profil direksi/komisaris <strong class="text-amber-400">tidak ditampilkan</strong> karena tidak tersedia dalam XBRL audited BEI/IDX (tidak dikarang). Untuk mengaktifkan diperlukan ingest laporan tahunan (CALK) atau profil perusahaan BEI.
     </p>
   </div>
+
+  <!-- SECTOR-SPECIFIC OPERATIONAL BENCHMARK (Institutional Cluster) -->
+  <template x-if="researchData && researchData.sector_analytics && researchData.sector_analytics.metrics && researchData.sector_analytics.metrics.length > 0">
+    <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+      <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider">Sector-Specific Operational Benchmark</h2>
+        </div>
+        <span class="text-[10px] font-mono text-indigo-400" x-text="researchData.sector_analytics.sector_category"></span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        <template x-for="sm in researchData.sector_analytics.metrics" :key="sm.label">
+          <div class="bg-[#080C14] border border-white/[0.06] rounded-xl p-3.5 space-y-1 font-mono">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] text-slate-400" x-text="sm.label"></span>
+              <span class="px-1.5 py-0.5 rounded text-[8px]"
+                    :class="sm.status === 'N/A' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'"
+                    x-text="sm.status"></span>
+            </div>
+            <div class="text-lg font-bold text-white" x-text="sm.value"></div>
+            <div class="text-[10px] text-slate-500 font-sans" x-text="'Benchmark: ' + sm.benchmark"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
 
   <!-- APPENDIX 3: GLOSSARY -->
   <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">

@@ -1,0 +1,19 @@
+{
+  "pages": [
+    {
+      "ticker": "ASII",
+      "status": 200,
+      "initial_screenshot": "/Users/hasbi/idx-quant-terminal/docs/audit/screenshots/ASII_initial.png"
+    },
+    {
+      "ticker": "BBCA",
+      "status": 200,
+      "initial_screenshot": "/Users/hasbi/idx-quant-terminal/docs/audit/screenshots/BBCA_initial.png"
+    }
+  ],
+  "console_errors": [
+    "[warning] cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation",
+    "[warning] cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation"
+  ],
+  "failed_tabs": []
+}

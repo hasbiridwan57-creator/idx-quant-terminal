@@ -15,6 +15,37 @@ from typing import Dict, List, Optional
 
 _CACHE: Optional[Dict[str, List[dict]]] = None
 _JSONL = "/Users/hasbi/laporan/bei_full/parsed/xbrl_audited_metrics.jsonl"
+_PROFILES_CACHE: Optional[Dict[str, dict]] = None
+_GOVERNANCE_CACHE: Optional[Dict[str, dict]] = None
+
+def get_governance(ticker: str) -> dict:
+    """Board of directors, shareholders, subsidiaries dari scrape BEI resmi."""
+    global _GOVERNANCE_CACHE
+    if _GOVERNANCE_CACHE is None:
+        g_path = "/Users/hasbi/idx-quant-terminal/data/idx_governance.json"
+        if os.path.exists(g_path):
+            try:
+                with open(g_path, "r", encoding="utf-8") as f:
+                    _GOVERNANCE_CACHE = json.load(f)
+            except Exception:
+                _GOVERNANCE_CACHE = {}
+        else:
+            _GOVERNANCE_CACHE = {}
+    return _GOVERNANCE_CACHE.get(ticker.upper().strip(), {})
+
+def get_issuer_profile(ticker: str) -> dict:
+    global _PROFILES_CACHE
+    if _PROFILES_CACHE is None:
+        p_path = "/Users/hasbi/idx-quant-terminal/data/idx_profiles.json"
+        if os.path.exists(p_path):
+            try:
+                with open(p_path, "r", encoding="utf-8") as f:
+                    _PROFILES_CACHE = json.load(f)
+            except Exception:
+                _PROFILES_CACHE = {}
+        else:
+            _PROFILES_CACHE = {}
+    return _PROFILES_CACHE.get(ticker.upper().strip(), {})
 
 
 def _load() -> Dict[str, List[dict]]:
@@ -83,25 +114,51 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
             "currency": cur,
             "is_bank": bool(r.get("is_bank")),
             "is_syariah": bool(r.get("is_syariah")),
-            "revenue_bn": _bn(r.get("revenue_sales"), cur, usdidr),
+            # Bank syariah: revenue_sales = Mudharib + ThirdPartyShare bisa NEGATIF
+            # (bagi hasil adalah distribusi). Fallback ke interest income hanya kasus itu.
+            # Bank konvensional: revenue_sales = InterestIncome + OtherOpIncome (benar).
+            "revenue_bn": (
+                _bn(r.get("interest_income_bank") or r.get("interest_income"), cur, usdidr)
+                if (_bn(r.get("revenue_sales"), cur, usdidr) is not None
+                    and _bn(r.get("revenue_sales"), cur, usdidr) < 0
+                    and _bn(r.get("interest_income_bank") or r.get("interest_income"), cur, usdidr) is not None)
+                else _bn(r.get("revenue_sales"), cur, usdidr)
+            ),
             "gross_profit_bn": _bn(r.get("gross_profit"), cur, usdidr),
             "operating_expense_bn": _bn(r.get("operating_expense"), cur, usdidr),
             "net_income_parent_bn": _bn(r.get("net_income_parent"), cur, usdidr),
             "net_income_total_bn": _bn(r.get("net_income_total"), cur, usdidr),
             "assets_bn": _bn(r.get("assets"), cur, usdidr),
-            "liabilities_bn": _bn(r.get("total_liab"), cur, usdidr),
+            "liabilities_bn": _bn(r.get("liabilities") or r.get("total_liab"), cur, usdidr),
             "equity_parent_bn": _bn(r.get("equity_parent"), cur, usdidr),
             "equity_total_bn": _bn(r.get("equity_total"), cur, usdidr),
             "cash_bn": _bn(r.get("cash"), cur, usdidr),
             "selling_expense_bn": _bn(r.get("selling_expense"), cur, usdidr),
             "ga_expense_bn": _bn(r.get("ga_expense"), cur, usdidr),
             "tax_provision_bn": _bn(r.get("tax_expense"), cur, usdidr),
+            # Field untuk banking engine, DCF, dan screener (sebelumnya tidak pernah di-expose)
+            "interest_income_bn": _bn(r.get("interest_income_bank") or r.get("interest_income"), cur, usdidr),
+            "interest_expense_bn": _bn(r.get("interest_expense"), cur, usdidr),
+            "operating_cash_flow_bn": _bn(r.get("operating_cash_flow"), cur, usdidr),
+            "shares_outstanding": r.get("shares_outstanding"),
             "profit_before_tax_bn": _bn(r.get("profit_before_tax"), cur, usdidr),
             "finance_costs_bn": _bn(r.get("finance_costs"), cur, usdidr),
             "finance_income_bn": _bn(r.get("finance_income"), cur, usdidr),
             "interest_expense_bn": _bn(r.get("interest_expense"), cur, usdidr),
             "ppop_bn": _bn(r.get("ppop"), cur, usdidr),
             "impairment_losses_bn": _bn(r.get("impairment_losses"), cur, usdidr),
+            # Bank-specific dari XBRL audited
+            "cost_of_sales_bn": _bn(r.get("cost_of_sales"), cur, usdidr),
+            "loans_gross_bn": _bn(r.get("loans_gross"), cur, usdidr),
+            "total_loans_bn": _bn(r.get("total_loans"), cur, usdidr),
+            "allowance_impairment_loans_bn": _bn(r.get("allowance_impairment_loans"), cur, usdidr),
+            "other_operating_expenses_bn": _bn(r.get("other_operating_expenses"), cur, usdidr),
+            "other_operating_income_bn": _bn(r.get("other_operating_income"), cur, usdidr),
+            # D&A & working capital (untuk EBITDA & Cash Conversion Cycle)
+            "depreciation_amortization_bn": _bn(r.get("depreciation_amortization"), cur, usdidr),
+            "inventories_bn": _bn(r.get("inventories"), cur, usdidr),
+            "trade_receivables_bn": _bn(r.get("trade_receivables"), cur, usdidr),
+            "trade_payables_bn": _bn(r.get("trade_payables"), cur, usdidr),
             "dividends_paid_bn": _bn(r.get("dividends_paid"), cur, usdidr),
             "capex_bn": _bn(r.get("capex"), cur, usdidr),
             "treasury_stock_bn": _bn(r.get("treasury_stock"), cur, usdidr),
@@ -110,6 +167,32 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
             "eps": r.get("eps"),
             "revenue_concept": (r.get("_concepts") or {}).get("revenue_sales"),
         })
+
+        # --- EBIT: bank = PPOP asli; non-bank = Top-Down (GP - S&M - G&A) ---
+        _gp = out[-1].get("gross_profit_bn")
+        _se = out[-1].get("selling_expense_bn")
+        _ga = out[-1].get("ga_expense_bn")
+        _ppop = out[-1].get("ppop_bn")
+        if out[-1].get("is_bank") and _ppop is not None:
+            out[-1]["ebit_bn"] = _ppop
+            out[-1]["ebit_method"] = "PPOP (ProfitFromOperation, reported)"
+        elif _gp is not None:
+            out[-1]["ebit_bn"] = _gp - (_se or 0.0) - (_ga or 0.0)
+            out[-1]["ebit_method"] = "Top-Down (Gross Profit - S&M - G&A)"
+        elif out[-1].get("profit_before_tax_bn") is not None and out[-1].get("finance_costs_bn") is not None:
+            out[-1]["ebit_bn"] = out[-1]["profit_before_tax_bn"] + out[-1]["finance_costs_bn"]
+            out[-1]["ebit_method"] = "Bottom-Up (PBT + Finance Costs)"
+        else:
+            out[-1]["ebit_bn"] = None
+            out[-1]["ebit_method"] = "N/A (insufficient XBRL components)"
+
+        # EBITDA hanya jika D&A tersedia (tidak dikarang)
+        _da = out[-1].get("depreciation_amortization_bn")
+        out[-1]["ebitda_bn"] = (
+            out[-1]["ebit_bn"] + _da
+            if (out[-1]["ebit_bn"] is not None and _da is not None)
+            else None
+        )
     return out
 
 
@@ -138,6 +221,19 @@ def derive_ratios(row: dict) -> Dict[str, Optional[float]]:
 
 def five_year_table(ticker: str, usdidr: float = 16000.0) -> List[dict]:
     rows = series(ticker, usdidr)
+    prof = get_issuer_profile(ticker)
     for r in rows:
         r["ratios"] = derive_ratios(r)
+        # Inject profil resmi BEI
+        if not r.get("company_name"):
+            r["company_name"] = prof.get("company_name", ticker)
+        r["sector"] = prof.get("sector") or r.get("sector") or "N/A"
+        r["sub_sector"] = prof.get("sub_sector") or r.get("sub_sector") or "N/A"
+        r["industry"] = prof.get("industry") or "N/A"
+        r["controlling_shareholder"] = prof.get("controlling_shareholder") or "N/A"
+        r["free_float_pct"] = prof.get("free_float_pct")
+        r["website"] = prof.get("website") or "N/A"
+        # CATATAN: bank_metrics CALK CSV dari scrape TIDAK dipakai karena terbukti
+        # rusak (NPL BBCA 9.3% vs 1.7% aktual, satuan campur, tahun duplikat).
+        # Semua metrik bank diambil dari XBRL audited saja (zero-fake policy).
     return rows
