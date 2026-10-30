@@ -157,6 +157,117 @@ def compute_wacc(session: Optional[Session], ticker: str, row: dict,
 # ─────────────────────────────────────────────────────────────────
 # EVA / Economic Profit
 # ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Altman Z'' — versi yang benar untuk emerging market & non-manufaktur
+# ─────────────────────────────────────────────────────────────────
+def compute_altman_z(row: dict) -> Dict[str, Any]:
+    """
+    Altman Z'' (double-prime) untuk perusahaan non-manufaktur & emerging market.
+
+        Z'' = 6.56·X1 + 3.26·X2 + 6.72·X3 + 1.05·X4
+
+        X1 = Working Capital / Total Assets
+        X2 = Retained Earnings / Total Assets
+        X3 = EBIT / Total Assets
+        X4 = Book Value of Equity / Total Liabilities
+
+    Zona: Z'' > 2.6 = SAFE | 1.1 - 2.6 = GREY | < 1.1 = DISTRESS
+
+    ZERO-FAKE: setiap variabel harus dari filing. Bila salah satu tidak ada,
+    hasil N/A — TIDAK memakai pengganti seperti assets*0.5 (versi lama).
+    Bank tidak dihitung: tidak punya klasifikasi lancar/tidak lancar.
+    """
+    if row.get("is_bank"):
+        return {
+            "available": False,
+            "reason": "Bank memakai unclassified balance sheet — working capital "
+                      "tidak bermakna, Altman Z'' tidak berlaku untuk lembaga keuangan.",
+        }
+
+    # Terima dua konvensi key: `assets_bn` (loader) dan `total_assets_bn`
+    # (historical_financials di research engine). Tanpa ini, Altman selalu N/A.
+    ta = row.get("assets_bn") or row.get("total_assets_bn")
+    ca = row.get("current_assets_bn")
+    cl = row.get("current_liabilities_bn")
+    re_bn = row.get("retained_earnings_bn")
+    ebit = row.get("ebit_bn")
+    tl = row.get("liabilities_bn") or row.get("total_liabilities_bn")
+    eq = (row.get("equity_parent_bn") or row.get("equity_total_bn")
+          or row.get("total_equity_bn"))
+
+    missing = []
+    if not ta or ta <= 0: missing.append("Total Assets")
+    if ca is None: missing.append("Current Assets")
+    if cl is None: missing.append("Current Liabilities")
+    if re_bn is None: missing.append("Retained Earnings")
+    if ebit is None: missing.append("EBIT")
+    if not tl or tl <= 0: missing.append("Total Liabilities")
+    if eq is None: missing.append("Book Equity")
+
+    if missing:
+        return {
+            "available": False,
+            "reason": "Komponen tidak tersedia di filing: " + ", ".join(missing),
+        }
+
+    wc = ca - cl
+    x1 = wc / ta
+    x2 = re_bn / ta
+    x3 = ebit / ta
+    x4 = eq / tl
+
+    z = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
+
+    if z > 2.6:
+        zone, label = "SAFE", "Aman"
+    elif z >= 1.1:
+        zone, label = "GREY", "Abu-abu"
+    else:
+        zone, label = "DISTRESS", "Distress"
+
+    # Catatan interpretasi: X4 (BVE/TL) bisa meledak pada emiten dengan liabilitas
+    # sangat kecil relatif ekuitas (mis. BUKA: TL Rp 717 B vs Equity Rp 25,3 T),
+    # menghasilkan Z puluhan meski RE/TA negatif. Model aslinya diturunkan untuk
+    # manufaktur dengan struktur modal normal. Zona tetap benar (SAFE), tapi
+    # angkanya tidak boleh dibaca sebagai "41x lebih aman".
+    notes = []
+    if x4 > 10:
+        notes.append(
+            f"X4 (BVE/TL) = {x4:.1f}x sangat tinggi karena liabilitas kecil "
+            "relatif ekuitas; skor Z jenuh. Zona tetap valid, besaran tidak "
+            "bisa dibandingkan langsung antar emiten."
+        )
+    if x2 < 0:
+        notes.append("RE/TA negatif: saldo laba terakumulasi defisit (rugi bertahun-tahun).")
+    if x1 < 0:
+        notes.append("WC/TA negatif: liabilitas jangka pendek melebihi aset jangka pendek.")
+
+    return {
+        "available": True,
+        "z_score": round(z, 2),
+        "zone": zone,
+        "zone_label": label,
+        "x1_wc_ta": round(x1, 4),
+        "x2_re_ta": round(x2, 4),
+        "x3_ebit_ta": round(x3, 4),
+        "x4_bve_tl": round(x4, 4),
+        "notes": notes,
+        "inputs": {
+            "working_capital_bn": round(wc, 1),
+            "retained_earnings_bn": round(re_bn, 1),
+            "ebit_bn": round(ebit, 1),
+            "total_assets_bn": round(ta, 1),
+            "total_liabilities_bn": round(tl, 1),
+            "book_equity_bn": round(eq, 1),
+        },
+        "provenance": "COMPUTED (Altman Z'' double-prime, 4 variabel dari filing audited)",
+        "thresholds": "SAFE > 2.60 | GREY 1.10-2.60 | DISTRESS < 1.10",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────
+# EVA / Economic Profit
+# ─────────────────────────────────────────────────────────────────
 def compute_eva(session: Optional[Session], ticker: str, row: dict,
                 wacc_result: Optional[Dict[str, Any]] = None,
                 rf_pct: float = DEFAULT_RF_PCT) -> Dict[str, Any]:
@@ -239,11 +350,26 @@ def compute_eva(session: Optional[Session], ticker: str, row: dict,
     if assets is None or assets <= 0:
         return {"available": False, "is_bank": False, "reason": "Total aset tidak tersedia"}
 
-    # Invested Capital = Total Assets - Non-interest-bearing current liabilities.
-    # Data current liabilities tidak selalu ada -> gunakan proxy konservatif:
-    # IC = Assets - Cash (kas bukan modal operasional). Dinyatakan sebagai PROXY.
+    # Invested Capital = Total Assets - Cash - Non-Interest-Bearing Current Liabilities.
+    # Definisi ini dapat DIVERIFIKASI dengan identitas neraca:
+    #   CA + NCA = Assets (selisih 0.00% terverifikasi di 8 emiten)
+    #   CL + NCL = Liabilities (selisih 0.00%)
+    # Current liabilities dikoreksi dengan utang jangka pendek berbunga karena
+    # utang berbunga adalah bagian dari pendanaan, bukan modal kerja operasional.
     cash = row.get("cash_bn") or 0.0
-    ic = assets - cash
+    _ca = row.get("current_assets_bn")
+    _cl = row.get("current_liabilities_bn")
+    _std = row.get("st_debt_bn")
+
+    if _ca is not None and _cl is not None:
+        nibcl = _cl - (_std or 0.0)
+        ic = assets - cash - nibcl
+        ic_prov = ("COMPUTED (Assets - Cash - NonInterestBearingCL; "
+                   "CL dikoreksi utang jangka pendek berbunga)")
+    else:
+        ic = assets - cash
+        ic_prov = "PROXY (Assets - Cash; current liabilities tidak tersedia di filing)"
+
     if ic <= 0:
         return {"available": False, "is_bank": False, "reason": "Invested capital tidak valid"}
 
@@ -269,7 +395,7 @@ def compute_eva(session: Optional[Session], ticker: str, row: dict,
         ),
         "provenance": {
             "nopat": f"COMPUTED (EBIT x (1 - ETR {etr*100:.2f}%))",
-            "invested_capital": "PROXY (Total Assets - Cash; current liabilities tidak tersedia di XBRL)",
+            "invested_capital": ic_prov,
             "wacc": wacc_result["provenance"]["beta"],
         },
     }

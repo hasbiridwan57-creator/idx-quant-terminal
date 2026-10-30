@@ -330,7 +330,7 @@ async def dashboard_home(
             credit=credit_payload if isinstance(credit_payload, dict) else {},
             risk=risk_payload if isinstance(risk_payload, dict) else {},
             technical=None,
-            current_price=float(current_price or prices_series[-1]),
+            current_price=float(current_price or (prices_series[-1] if prices_series else 0.0) or 0.0),
             shares_out=float(curr_stmt.shares_outstanding or 0.0),
         )
         research_payload = dataclasses.asdict(research_model)

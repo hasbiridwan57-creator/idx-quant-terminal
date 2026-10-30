@@ -133,6 +133,25 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
             "equity_parent_bn": _bn(r.get("equity_parent"), cur, usdidr),
             "equity_total_bn": _bn(r.get("equity_total"), cur, usdidr),
             "cash_bn": _bn(r.get("cash"), cur, usdidr),
+            # Neraca terklasifikasi — untuk Altman Z'' dan Invested Capital presisi.
+            # Hanya ada pada emiten non-bank (bank memakai unclassified balance sheet).
+            "current_assets_bn": _bn(r.get("current_assets"), cur, usdidr),
+            "current_liabilities_bn": _bn(r.get("current_liabilities"), cur, usdidr),
+            "non_current_assets_bn": _bn(r.get("non_current_assets"), cur, usdidr),
+            "non_current_liabilities_bn": _bn(r.get("non_current_liabilities"), cur, usdidr),
+            "retained_earnings_bn": (
+                (_bn(r.get("retained_earnings_unappropriated"), cur, usdidr) or 0.0)
+                + (_bn(r.get("retained_earnings_appropriated"), cur, usdidr) or 0.0)
+            ) if (r.get("retained_earnings_unappropriated") is not None
+                  or r.get("retained_earnings_appropriated") is not None) else None,
+            "st_debt_bn": (
+                (_bn(r.get("current_maturities_bank_loans"), cur, usdidr) or 0.0)
+                + (_bn(r.get("short_term_bank_loans"), cur, usdidr) or 0.0)
+                + (_bn(r.get("current_maturities_bonds"), cur, usdidr) or 0.0)
+                + (_bn(r.get("current_maturities_lease"), cur, usdidr) or 0.0)
+            ) if any(r.get(k) is not None for k in
+                     ("current_maturities_bank_loans", "short_term_bank_loans",
+                      "current_maturities_bonds", "current_maturities_lease")) else None,
             "selling_expense_bn": _bn(r.get("selling_expense"), cur, usdidr),
             "ga_expense_bn": _bn(r.get("ga_expense"), cur, usdidr),
             "tax_provision_bn": _bn(r.get("tax_expense"), cur, usdidr),

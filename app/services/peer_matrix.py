@@ -98,20 +98,13 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
         eva_abs = _eva_res.get("eva_bn") if _eva_res.get("available") else None
         eva_method = _eva_res.get("method")
 
-        # Altman Z'' — hanya komponen yang benar-benar tersedia.
-        # Versi lama memakai assets*0.5 dan ni*0.5 sebagai pengganti working capital
-        # dan retained earnings: itu angka karangan. Sekarang N/A bila tidak ada.
-        z_double_prime = None
-        _ta = r.get("assets_bn")
-        _tl = r.get("liabilities_bn")
-        _ca = r.get("cash_bn")
-        _re = r.get("retained_earnings_bn")
-        if _ta and _ta > 0 and _tl is not None and _re is not None and ni is not None and ebit is not None:
-            # WC = Current Assets - Current Liabilities; current assets tidak tersedia
-            # di XBRL -> gunakan pendekatan Altman Z'' yang hanya butuh total:
-            # Z'' = 6.56*(WC/TA) + 3.26*(RE/TA) + 6.72*(EBIT/TA) + 1.05*(BVE/TL)
-            _wc = (_ca or 0.0) - (_tl * 0.0)  # tidak dapat dihitung tanpa current liab
-            z_double_prime = None  # dinyatakan N/A secara jujur
+        # Altman Z'' — fungsi terverifikasi (butuh CA/CL/RE dari filing).
+        # Bila komponen tidak ada -> N/A jujur, bukan angka karangan.
+        from app.services.cost_of_capital import compute_altman_z
+        _al = compute_altman_z(r)
+        z_double_prime = _al.get("z_score") if _al.get("available") else None
+        altman_zone = _al.get("zone") if _al.get("available") else None
+        altman_note = None if _al.get("available") else _al.get("reason")
         
         # EBITDA & Working Capital (institutional capital efficiency)
         _da = r.get("depreciation_amortization_bn")
@@ -147,7 +140,9 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
             "liabilities_bn": r.get("liabilities_bn"),
             "cash_bn": r.get("cash_bn"),
             "wacc_pct": wacc_pct,
-            "altman_z_double_prime": z_double_prime,
+            "altman_z": z_double_prime,
+            "altman_zone": altman_zone,
+            "altman_note": altman_note,
             "ebitda_bn": _ebitda,
             "ebitda_margin_pct": _ebitda_m,
             "ccc_days": _ccc,
@@ -162,14 +157,20 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
     if not rows:
         return {"error": "Tidak ada data untuk peer comparison"}
 
-    # Compute sector medians
+    # Compute sector medians — MEDIAN sesungguhnya (bukan mean).
+    # Versi lama memakai sum/len padahal labelnya "median": satu emiten outlier
+    # (mis. ROIC 200%) bisa menyeret seluruh benchmark sektor.
     numeric_cols = ["revenue_bn","gp_margin_pct","ebit_margin_pct","net_margin_pct",
-                    "roe_pct","roic_pct","wacc_pct","altman_z_double_prime","revenue_yoy",
+                    "roe_pct","roic_pct","wacc_pct","altman_z","revenue_yoy",
                     "ebitda_margin_pct","ccc_days","eva_spread_pct"]
     medians = {}
     for col in numeric_cols:
-        vals = [r[col] for r in rows if r.get(col) is not None]
-        medians[col] = sum(vals) / len(vals) if vals else None
+        vals = sorted(r[col] for r in rows if r.get(col) is not None)
+        if not vals:
+            medians[col] = None
+        else:
+            n = len(vals)
+            medians[col] = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
     return {
         "primary_ticker": primary_ticker.upper(),

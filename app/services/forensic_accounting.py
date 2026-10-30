@@ -97,8 +97,35 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     if not current_stmt or not prior_stmt:
         return {"m_score": None, "verdict": "N/A", "provenance": "N/A", "components": {}}
 
-    c = current_stmt
-    p = prior_stmt
+    # ── NORMALISASI KEY ──────────────────────────────────────────────
+    # Sumber data punya dua konvensi penamaan:
+    #   loader idx_audited_financials : assets_bn, net_income_parent_bn, ...
+    #   historical_financials engine  : total_assets_bn, net_income_bn, ...
+    # Tanpa normalisasi, `c.get("assets_bn") or 1.0` jatuh ke 1.0 sehingga
+    # TATA = (NI - CFO)/1.0 meledak (ASII: M-Score -180.432).
+    def _norm(d: dict) -> dict:
+        if not d:
+            return {}
+        out = dict(d)
+        pairs = [
+            ("assets_bn", ("assets_bn", "total_assets_bn")),
+            ("liabilities_bn", ("liabilities_bn", "total_liabilities_bn")),
+            ("net_income_parent_bn", ("net_income_parent_bn", "net_income_bn")),
+            ("equity_parent_bn", ("equity_parent_bn", "total_equity_bn")),
+            ("cfo_bn", ("cfo_bn", "operating_cash_flow_bn")),
+            ("receivables_bn", ("receivables_bn", "trade_receivables_bn")),
+            ("gross_profit_bn", ("gross_profit_bn",)),
+            ("cost_of_sales_bn", ("cost_of_sales_bn",)),
+        ]
+        for target, keys in pairs:
+            for k in keys:
+                if out.get(k) is not None:
+                    out[target] = out[k]
+                    break
+        return out
+
+    c = _norm(current_stmt)
+    p = _norm(prior_stmt)
 
     # 1. DSRI (Days Sales in Receivables Index)
     # Butuh piutang usaha (receivables). Bila tidak terpisah di XBRL, beri nilai default 1.0 (netral)
@@ -124,8 +151,18 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
 
     # 3. AQI (Asset Quality Index): [1 - (Current Assets + PP&E + Securities)/Total Assets]_t / [...]_t-1
     # Proxy: Non-Current Assets selain Fixed Assets / Total Assets
-    ta_c = c.get("assets_bn") or 1.0
-    ta_p = p.get("assets_bn") or 1.0
+    # CATATAN: jangan pakai `or 1.0` — itu membuat pembagi TATA menjadi 1 rupiah
+    # dan skor meledak. Bila total aset tidak ada, fungsi berhenti dengan N/A.
+    ta_c = c.get("assets_bn")
+    ta_p = p.get("assets_bn")
+    if not ta_c or ta_c <= 0:
+        return {
+            "m_score": None,
+            "verdict": "N/A",
+            "label": "Total aset tidak tersedia — M-Score tidak dapat dihitung",
+            "provenance": "N/A",
+            "components": {},
+        }
     aqi = 1.0  # Netral bila sub-aset tidak lengkap
 
     # 4. SGI (Sales Growth Index): Rev_t / Rev_t-1
@@ -152,15 +189,31 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     lev_p = liab_p / ta_p if ta_p > 0 else 0.0
     lvgi = (lev_c / lev_p) if lev_p > 0 else 1.0
 
-    # 8. TATA (Total Accruals to Total Assets): (Net Income - CFO) / Total Assets
+    # 8. TATA (Total Accruals to Total Assets) = (Net Income - CFO) / Total Assets
+    #
+    # BUG LAMA: memakai (Net Income - ΔCash). Beneish (1999) mendefinisikan TATA
+    # dari OPERATING CASH FLOW, bukan perubahan kas. Memakai ΔCash membuat TATA
+    # meledak (ASII: -4.182) sehingga M-Score menjadi -16.884 — angka mustahil
+    # yang membuat model tidak berguna (threshold asli hanya -1,78).
     ni_c = c.get("net_income_parent_bn") or 0.0
-    cash_c = c.get("cash_bn") or 0.0
-    cash_p = p.get("cash_bn") or 0.0
-    delta_cash = cash_c - cash_p
-    accruals = ni_c - delta_cash
-    tata = accruals / ta_c if ta_c > 0 else 0.0
+    cfo_c = c.get("cfo_bn")
+    if cfo_c is None:
+        cfo_c = c.get("operating_cash_flow_bn")
+    if cfo_c is not None:
+        accruals = ni_c - cfo_c
+        tata = accruals / ta_c if ta_c > 0 else 0.0
+        tata_src = "COMPUTED (Net Income - CFO) / Total Assets"
+    else:
+        # CFO tidak tersedia -> TATA tidak dapat dihitung dengan benar.
+        # Pakai 0.0 (netral terhadap M-Score) dan tandai agar tidak menyesatkan.
+        tata = 0.0
+        tata_src = "N/A (CFO tidak tersedia — TATA diset netral 0.0)"
 
-    # Kalkulasi M-Score Beneish 8-Variabel
+    # Kalkulasi M-Score Beneish 8-Variabel (koefisien sesuai Beneish 1999):
+    #   M = -4.84 + 0.920·DSRI + 0.528·GMI + 0.404·AQI + 0.892·SGI
+    #       + 0.115·DEPI - 0.172·SGAI + 4.037·TATA - 0.327·LVGI
+    # CATATAN: LVGI koefisiennya NEGATIF 0.327. Versi lama memakai +0.0327
+    # (tanda salah DAN orde besaran salah 10x).
     m_score = (
         -4.84
         + 0.920 * dsri
@@ -170,7 +223,7 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
         + 0.115 * depi
         - 0.172 * sgai
         + 4.037 * tata
-        + 0.0327 * lvgi
+        - 0.327 * lvgi
     )
 
     is_manipulator = m_score > -1.78

@@ -173,7 +173,10 @@
 
             <!-- Altman Z'' -->
             <td class="text-right px-3 py-3">
-              <span class="font-semibold" :class="colorAltman(peer.altman_z_double_prime)" x-text="peer.altman_z_double_prime ? peer.altman_z_double_prime.toFixed(2) : 'N/A'"></span>
+              <span class="font-semibold" :class="colorAltman(peer.altman_z)" x-text="peer.altman_z !== null && peer.altman_z !== undefined ? peer.altman_z.toFixed(2) : 'N/A'"></span>
+              <div class="text-[9px] mt-0.5"
+                   :class="peer.altman_zone === 'SAFE' ? 'text-emerald-500' : (peer.altman_zone === 'GREY' ? 'text-amber-500' : 'text-rose-500')"
+                   x-text="peer.altman_zone || ''"></div>
             </td>
 
             <!-- Equity -->
@@ -205,7 +208,7 @@
           <td class="text-right px-3 py-3 text-[11px]"
               :class="peerMatrix.sector_median?.eva_spread_pct > 0 ? 'text-emerald-400' : 'text-rose-400'"
               x-text="peerMatrix.sector_median?.eva_spread_pct === null || peerMatrix.sector_median?.eva_spread_pct === undefined ? '—' : (peerMatrix.sector_median.eva_spread_pct > 0 ? '+' : '') + peerMatrix.sector_median.eva_spread_pct.toFixed(2) + '%'"></td>
-          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="peerMatrix.sector_median?.altman_z_double_prime ? peerMatrix.sector_median.altman_z_double_prime.toFixed(2) : '—'"></td>
+          <td class="text-right px-3 py-3 text-slate-400 text-[11px]" x-text="peerMatrix.sector_median?.altman_z !== null && peerMatrix.sector_median?.altman_z !== undefined ? peerMatrix.sector_median.altman_z.toFixed(2) : '—'"></td>
           <td></td><td></td>
         </tr>
       </tfoot>

@@ -230,7 +230,7 @@
               <span class="px-1.5 py-0.5 rounded text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20">COMPUTED</span>
             </div>
             
-            <div class="grid grid-cols-2 gap-3 text-xs">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
               <!-- Beneish M-Score -->
               <div class="bg-slate-800/30 border border-white/[0.04] p-3 rounded-lg space-y-1">
                 <span class="text-[10px] text-slate-400 block uppercase">Beneish M-Score (1999)</span>
@@ -252,6 +252,27 @@
                 </div>
                 <div class="text-[11px] font-sans pt-1 font-semibold text-sky-400"
                      x-text="researchData.forensic_sloan ? researchData.forensic_sloan.label : ''"></div>
+              </div>
+
+              <!-- Altman Z'' (distress prediction) -->
+              <div class="bg-slate-800/30 border border-white/[0.04] p-3 rounded-lg space-y-1">
+                <span class="text-[10px] text-slate-400 block uppercase">Altman Z&Prime; (Distress)</span>
+                <template x-if="researchData.altman && researchData.altman.available">
+                  <div>
+                    <div class="flex items-baseline gap-2">
+                      <span class="text-lg font-bold text-white" x-text="researchData.altman.z_score"></span>
+                      <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold border"
+                            :class="researchData.altman.zone === 'SAFE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : (researchData.altman.zone === 'GREY' ? 'bg-amber-500/10 text-amber-400 border-amber-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')"
+                            x-text="researchData.altman.zone"></span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 font-sans pt-1"
+                         x-text="'WC/TA ' + nf(researchData.altman.x1_wc_ta,3) + ' · RE/TA ' + nf(researchData.altman.x2_re_ta,3) + ' · EBIT/TA ' + nf(researchData.altman.x3_ebit_ta,3) + ' · BVE/TL ' + nf(researchData.altman.x4_bve_tl,3)"></div>
+                  </div>
+                </template>
+                <template x-if="!researchData.altman || !researchData.altman.available">
+                  <div class="text-[10px] text-slate-500 font-sans leading-snug"
+                       x-text="researchData.altman ? researchData.altman.reason : 'Altman Z\u2033 tidak tersedia'"></div>
+                </template>
               </div>
             </div>
           </div>

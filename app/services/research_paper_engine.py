@@ -127,6 +127,7 @@ class EquityResearchModel:
     peer_comps_extended: List[Dict[str, Any]] = field(default_factory=list)
     forensic_sloan: Dict[str, Any] = field(default_factory=dict)
     forensic_beneish: Dict[str, Any] = field(default_factory=dict)
+    altman: Dict[str, Any] = field(default_factory=dict)
     sector_analytics: Dict[str, Any] = field(default_factory=dict)
     working_capital: Dict[str, Any] = field(default_factory=dict)
     ebitda_analysis: Dict[str, Any] = field(default_factory=dict)
@@ -736,6 +737,13 @@ def build_research_model_from_context(
                     "depreciation_amortization_bn": None if _r.get("depreciation_amortization_bn") is None else round(_r["depreciation_amortization_bn"], 1),
                     "cfo_bn": None if _r.get("operating_cash_flow_bn") is None else round(_r["operating_cash_flow_bn"], 1),
                     "capex_bn": None if _r.get("capex_bn") is None else round(_r["capex_bn"], 1),
+                    # --- Neraca terklasifikasi (Altman Z'' & Invested Capital presisi) ---
+                    "current_assets_bn": None if _r.get("current_assets_bn") is None else round(_r["current_assets_bn"], 1),
+                    "current_liabilities_bn": None if _r.get("current_liabilities_bn") is None else round(_r["current_liabilities_bn"], 1),
+                    "non_current_assets_bn": None if _r.get("non_current_assets_bn") is None else round(_r["non_current_assets_bn"], 1),
+                    "non_current_liabilities_bn": None if _r.get("non_current_liabilities_bn") is None else round(_r["non_current_liabilities_bn"], 1),
+                    "retained_earnings_bn": None if _r.get("retained_earnings_bn") is None else round(_r["retained_earnings_bn"], 1),
+                    "st_debt_bn": None if _r.get("st_debt_bn") is None else round(_r["st_debt_bn"], 1),
                     "eps": _r.get("eps"),
                     "audited": True,
                     "is_bank": _r.get("is_bank", False),
@@ -1027,6 +1035,9 @@ def build_research_model_from_context(
     from app.services.forensic_accounting import compute_sloan_accruals, compute_beneish_m_score
     _sloan = compute_sloan_accruals(_last_fy, _prev_fy)
     _beneish = compute_beneish_m_score(_last_fy, _prev_fy)
+    # Altman Z'' — distress prediction dari filing audited (N/A bila komponen tidak ada)
+    from app.services.cost_of_capital import compute_altman_z
+    _altman = compute_altman_z(_last_fy)
 
     # ---- Sector-Specific Analytics ----
     from app.services.sector_analytics import compute_sector_metrics
@@ -1035,7 +1046,7 @@ def build_research_model_from_context(
     # ---- Working Capital (CCC) & EBITDA quality ----
     from app.services.working_capital import compute_working_capital, interpret_ccc, compute_ebitda
     _wc = compute_working_capital(_last_fy, bank=is_bank)
-    _wc["interpretation"] = interpret_ccc(_wc.get("ccc_days"))
+    _wc["interpretation"] = interpret_ccc(_wc.get("ccc_days"), _wc.get("dpo_days"))
     _ebitda = compute_ebitda(_last_fy)
 
     return EquityResearchModel(
@@ -1113,6 +1124,7 @@ def build_research_model_from_context(
         dupont_5way=_dupont,
         forensic_sloan=_sloan,
         forensic_beneish=_beneish,
+        altman=_altman,
         sector_analytics=_sector_metrics,
         working_capital=_wc,
         ebitda_analysis=_ebitda,

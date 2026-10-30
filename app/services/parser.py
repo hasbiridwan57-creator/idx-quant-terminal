@@ -325,6 +325,8 @@ def sync_audited_to_statement_cache(session: Session) -> int:
                 total_equity_consolidated=_f("equity_total_bn"),
                 sector=fy.get("sector"),
                 cash_and_equivalents=_f("cash_bn"),
+                current_assets=_f("current_assets_bn"),
+                current_liabilities=_f("current_liabilities_bn"),
                 depreciation=_f("depreciation_amortization_bn"),
                 capex=_f("capex_bn"),
                 operating_cash_flow=_f("operating_cash_flow_bn"),

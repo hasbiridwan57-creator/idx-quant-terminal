@@ -50,6 +50,18 @@ CONCEPTS = {
     "equity_total": ["Equity"],
     "equity_parent": ["EquityAttributableToEquityOwnersOfParentEntity"],
     "cash": ["CashAndCashEquivalents"],
+    # Neraca terklasifikasi (non-bank) — untuk Altman Z'' dan Invested Capital presisi
+    "current_assets": ["CurrentAssets"],
+    "current_liabilities": ["CurrentLiabilities"],
+    "non_current_assets": ["NonCurrentAssets"],
+    "non_current_liabilities": ["NonCurrentLiabilities"],
+    "retained_earnings_unappropriated": ["UnappropriatedRetainedEarnings"],
+    "retained_earnings_appropriated": ["AppropriatedRetainedEarnings"],
+    # Utang jangka pendek berbunga (untuk memisahkan interest-bearing dari CL)
+    "current_maturities_bank_loans": ["CurrentMaturitiesOfBankLoans"],
+    "short_term_bank_loans": ["ShortTermBankLoans"],
+    "current_maturities_bonds": ["CurrentMaturitiesOfBondsPayable"],
+    "current_maturities_lease": ["CurrentMaturitiesOfFinanceLeaseLiabilities"],
     "loans_gross": ["TotalLoansGross"],
     "selling_expense": ["SellingExpenses"],
     "ga_expense": ["GeneralAndAdministrativeExpenses"],

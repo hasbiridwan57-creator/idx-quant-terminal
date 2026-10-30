@@ -83,16 +83,34 @@ def compute_working_capital(fy: dict, bank: bool = False) -> Dict[str, Any]:
     return out
 
 
-def interpret_ccc(ccc: Optional[float]) -> Dict[str, str]:
-    """Interpretasi institusional CCC -> label + warna + implikasi."""
+def interpret_ccc(ccc: Optional[float], dpo: Optional[float] = None) -> Dict[str, str]:
+    """
+    Interpretasi institusional CCC -> label + warna + implikasi.
+
+    PENTING: CCC negatif TIDAK otomatis berarti efisien. DPO ekstrem (>120 hari)
+    pada emiten dengan ekuitas negatif atau rugi adalah tanda DISTRESS — perusahaan
+    menunggak pemasok karena tidak punya kas, bukan karena punya daya tawar.
+    Membedakan keduanya mencegah salah baca yang fatal.
+    """
     if ccc is None:
         return {"label": "N/A", "tone": "neutral", "note": "Data tidak lengkap di XBRL audited"}
 
     if ccc < 0:
+        # DPO sangat panjang bisa berarti daya tawar (retail) ATAU tunggakan (distress).
+        if dpo is not None and dpo > 120:
+            return {
+                "label": "NEGATIF (Perlu Waspada)",
+                "tone": "warn",
+                "note": (
+                    f"DPO {dpo:.0f} hari — pemasok menanggung operasi dalam waktu lama. "
+                    "Bisa daya tawar kuat (retail modern), tapi bila disertai ekuitas "
+                    "negatif/rugi ini indikasi tunggakan akibat tekanan likuiditas."
+                ),
+            }
         return {
-            "label": "NEGATIF (Excellent)",
+            "label": "NEGATIF (Efisien)",
             "tone": "good",
-            "note": "Pemasok membiayai operasi — model bisnis paling efisien (contoh: retail modern, marketplace)",
+            "note": "Pemasok membiayai operasi — model bisnis ringan modal kerja (contoh: retail modern, marketplace)",
         }
     if ccc <= 30:
         return {
