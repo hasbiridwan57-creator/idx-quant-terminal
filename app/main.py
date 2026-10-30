@@ -1032,6 +1032,22 @@ async def api_get_performance(
                                    risk_free_pct=risk_free, start=start, end=end)
 
 
+@app.get("/api/performance/rolling/{ticker}")
+async def api_get_rolling(
+    ticker: str,
+    window: int = 252,
+    risk_free: float = 6.0,
+):
+    """Rolling Sharpe/Sortino untuk melihat konsistensi antar periode."""
+    from sqlmodel import Session as _Session
+    from app.db.database import engine as _engine
+    from app.services.performance_engine import compute_rolling_stats
+
+    w = max(60, min(756, int(window)))
+    with _Session(_engine) as sess:
+        return compute_rolling_stats(sess, ticker, window_days=w, risk_free_pct=risk_free)
+
+
 @app.get("/api/performance/compare/{tickers}")
 async def api_compare_performance(
     tickers: str,

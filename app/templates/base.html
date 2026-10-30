@@ -496,7 +496,25 @@
         perfData: null,
         perfBenchmark: 'IHSG',
         perfRiskFree: 6.0,
+        perfWindow: 252,
+        rollingData: null,
+        rollingAbsMax: 1,
         maxGrowth: 1,
+        async loadRolling() {
+          try {
+            const url = '/api/performance/rolling/' + this.ticker
+              + '?window=' + this.perfWindow
+              + '&risk_free=' + this.perfRiskFree;
+            let res = await fetch(url);
+            if (res.ok) {
+              const d = await res.json();
+              this.rollingData = d;
+              const s = d.series || [];
+              this.rollingAbsMax = s.length
+                ? Math.max(...s.map(p => Math.abs(p.sharpe || 0)), 0.1) : 1;
+            }
+          } catch(e) { console.error('Rolling error:', e); }
+        },
         async loadPerformance() {
           try {
             const url = '/api/performance/' + this.ticker
@@ -509,6 +527,7 @@
               const eq = d.equity_curve || [];
               this.maxGrowth = eq.length ? Math.max(...eq.map(p => p.growth), 1) : 1;
             }
+            await this.loadRolling();
           } catch(e) { console.error('Performance error:', e); }
         },
         peerTickers: ['ASII'],

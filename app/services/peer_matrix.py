@@ -26,12 +26,24 @@ def _multi(v, decimals=2):
     if v is None: return "N/A"
     return f"{v:.{decimals}f}x"
 
-def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None) -> dict:
+def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
+                      session=None) -> dict:
     """
     Returns comprehensive peer comparison across multiple tickers.
     primary_ticker: fokus utama
     peer_tickers: list ticker pembanding (default: auto-detect sector peers)
+    session: SQLModel Session opsional — dipakai untuk beta riil & WACC institusional.
+             Tanpa session, WACC memakai fallback beta sektor (ditandai PROXY).
     """
+    if session is None:
+        try:
+            from app.db.database import engine as _eng
+            from sqlmodel import Session as _S
+            with _S(_eng) as _s:
+                return build_peer_matrix(primary_ticker, peer_tickers, session=_s)
+        except Exception:
+            session = None
+
     all_data = _load()
 
     # Default peers jika tidak ditentukan
@@ -76,26 +88,31 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None) -> di
         eq = r.get("equity_parent_bn") or r.get("equity_total_bn")
         roe = (ni / eq * 100) if ni and eq else None
 
-        # ROIC (NOPAT / Invested Capital)
-        nopat = ebit * (1 - 0.22) if ebit else None  # assume 22% ETR
-        ic = (r.get("assets_bn") - r.get("liabilities_bn") if r.get("liabilities_bn") else r.get("assets_bn") * 0.35)
-        roic = (nopat / ic * 100) if nopat and ic else None
+        # ── ROIC / WACC / EVA: pakai engine institusional (bukan hardcode) ──
+        from app.services.cost_of_capital import compute_wacc, compute_eva
+        _wacc_res = compute_wacc(session, tk, r)
+        wacc_pct = _wacc_res.get("wacc_pct") if _wacc_res.get("available") else None
+        _eva_res = compute_eva(session, tk, r, _wacc_res)
+        roic = _eva_res.get("roic_pct") if _eva_res.get("available") else None
+        eva_spread = _eva_res.get("spread_pct") if _eva_res.get("available") else None
+        eva_abs = _eva_res.get("eva_bn") if _eva_res.get("available") else None
+        eva_method = _eva_res.get("method")
 
-        # Altman Z''
-        wc = (r.get("assets_bn") * 0.5 - r.get("liabilities_bn") * 0.6 if r.get("liabilities_bn") else r.get("assets_bn") * 0.5 - r.get("assets_bn") * 0.3)
-        z_double_prime = (wc / r.get("assets_bn") * 6.56 + (ni or 0) / r.get("assets_bn") * 3.26 + ((r.get("retained_earnings_bn") or (ni or 0) * 0.5)) / r.get("assets_bn") * 6.72 + 1.0) if r.get("assets_bn") else None
-
-        # Valuation proxies (price-based: require market cap — use equity as proxy)
-        bvps = (eq / 1) if eq else None  # simplified
-        price_estimate = r.get("revenue_bn") * 0.8  # rough EV proxy from revenue
-
-        # WACC
-        try:
-            wacc = compute_wacc_components(r)
-            wacc_pct = wacc.get("wacc_pct") if wacc else None
-        except:
-            wacc_pct = None
-
+        # Altman Z'' — hanya komponen yang benar-benar tersedia.
+        # Versi lama memakai assets*0.5 dan ni*0.5 sebagai pengganti working capital
+        # dan retained earnings: itu angka karangan. Sekarang N/A bila tidak ada.
+        z_double_prime = None
+        _ta = r.get("assets_bn")
+        _tl = r.get("liabilities_bn")
+        _ca = r.get("cash_bn")
+        _re = r.get("retained_earnings_bn")
+        if _ta and _ta > 0 and _tl is not None and _re is not None and ni is not None and ebit is not None:
+            # WC = Current Assets - Current Liabilities; current assets tidak tersedia
+            # di XBRL -> gunakan pendekatan Altman Z'' yang hanya butuh total:
+            # Z'' = 6.56*(WC/TA) + 3.26*(RE/TA) + 6.72*(EBIT/TA) + 1.05*(BVE/TL)
+            _wc = (_ca or 0.0) - (_tl * 0.0)  # tidak dapat dihitung tanpa current liab
+            z_double_prime = None  # dinyatakan N/A secara jujur
+        
         # EBITDA & Working Capital (institutional capital efficiency)
         _da = r.get("depreciation_amortization_bn")
         _ebitda = (ebit + _da) if (ebit is not None and _da is not None) else None
@@ -106,17 +123,8 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None) -> di
         _dpo = (r.get("trade_payables_bn") / _cogs * 365) if (r.get("trade_payables_bn") is not None and _cogs and _cogs > 0) else None
         _ccc = (_dio + _dso - _dpo) if (_dio is not None and _dso is not None and _dpo is not None) else None
 
-        # EVA Spread = ROIC - WACC. Positif = menciptakan nilai di atas biaya modal.
-        _eva_spread = (round(roic - wacc_pct, 2) if (roic is not None and wacc_pct is not None) else None)
-        # EVA absolut = (ROIC - WACC) x Invested Capital (IC = Total Assets - Cash)
-        _ic = (r.get("assets_bn") - (r.get("cash_bn") or 0.0)) if r.get("assets_bn") is not None else None
-        _nopat = None
-        if ebit is not None:
-            _etr = 0.22
-            if r.get("profit_before_tax_bn") and r.get("tax_provision_bn") is not None and r["profit_before_tax_bn"] > 0:
-                _etr = max(0.0, min(0.6, r["tax_provision_bn"] / r["profit_before_tax_bn"]))
-            _nopat = ebit * (1.0 - _etr)
-        _eva_bn = ((roic - wacc_pct) / 100.0 * _ic) if (_eva_spread is not None and _ic and _ic > 0) else None
+        # EVA dihitung oleh cost_of_capital.compute_eva() di atas (sudah termasuk
+        # Excess Return Model untuk bank). Tidak ada perhitungan duplikat di sini.
 
         rows.append({
             "ticker": tk,
@@ -146,8 +154,9 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None) -> di
             "dio_days": _dio,
             "dso_days": _dso,
             "dpo_days": _dpo,
-            "eva_spread_pct": _eva_spread,
-            "eva_bn": _eva_bn,
+            "eva_spread_pct": eva_spread,
+            "eva_bn": eva_abs,
+            "eva_method": eva_method,
         })
 
     if not rows:

@@ -433,6 +433,94 @@ def compute_performance(session: Session, ticker: str,
     return result
 
 
+def compute_rolling_stats(session: Session, ticker: str,
+                          window_days: int = 252,
+                          risk_free_pct: float = 6.0,
+                          benchmark: str = "IHSG") -> Dict[str, Any]:
+    """
+    Rolling Sharpe & Sortino sepanjang periode (window default 252 hari = 1 tahun).
+
+    Kenapa penting: Sharpe agregat menyembunyikan inkonsistensi. Emiten bisa punya
+    Sharpe 0.5 secara total tapi sebenarnya 3 tahun bagus lalu 2 tahun hancur.
+    Rolling window memperlihatkan stabilitas, bukan cuma rata-rata.
+    """
+    rows = load_prices(session, ticker)
+    if len(rows) < window_days + 30:
+        return {
+            "available": False,
+            "reason": f"Butuh minimal {window_days + 30} observasi, tersedia {len(rows)}",
+        }
+
+    dates = [r[0] for r in rows]
+    prices = [r[1] for r in rows]
+    rets = _daily_returns(prices)
+    if len(rets) < window_days:
+        return {"available": False, "reason": "Return harian tidak cukup"}
+
+    rf_daily = (risk_free_pct / 100.0) / TRADING_DAYS
+    ann_rf = risk_free_pct / 100.0
+
+    out: List[Dict[str, Any]] = []
+    # rets[i] sesuai dengan dates[i+1]
+    for end in range(window_days, len(rets) + 1):
+        win = rets[end - window_days:end]
+        m = _mean(win)
+        sd = _stdev(win)
+        if m is None or sd is None or sd == 0:
+            continue
+        ann_r = m * TRADING_DAYS
+        ann_vol = sd * math.sqrt(TRADING_DAYS)
+        sharpe = (ann_r - ann_rf) / ann_vol if ann_vol > 0 else None
+
+        downside = [r - rf_daily for r in win if r < rf_daily]
+        sortino = None
+        if downside:
+            dd = math.sqrt(sum(d * d for d in downside) / len(downside)) * math.sqrt(TRADING_DAYS)
+            if dd > 0:
+                sortino = (ann_r - ann_rf) / dd
+
+        # max drawdown dalam window
+        w_prices = prices[end - window_days:end + 1]
+        peak = w_prices[0]
+        mdd = 0.0
+        for p in w_prices:
+            peak = max(peak, p)
+            mdd = min(mdd, p / peak - 1.0)
+
+        out.append({
+            "date": dates[min(end, len(dates) - 1)],
+            "sharpe": round(sharpe, 2) if sharpe is not None else None,
+            "sortino": round(sortino, 2) if sortino is not None else None,
+            "volatility_pct": round(ann_vol * 100.0, 2),
+            "return_pct": round(ann_r * 100.0, 2),
+            "max_dd_pct": round(mdd * 100.0, 2),
+        })
+
+    if not out:
+        return {"available": False, "reason": "Tidak ada window valid"}
+
+    sharpes = [o["sharpe"] for o in out if o["sharpe"] is not None]
+    pos = sum(1 for s in sharpes if s > 0)
+
+    return {
+        "available": True,
+        "window_days": window_days,
+        "observations": len(out),
+        "series": out,
+        "sharpe_min": round(min(sharpes), 2) if sharpes else None,
+        "sharpe_max": round(max(sharpes), 2) if sharpes else None,
+        "sharpe_median": round(_percentile(sharpes, 0.5), 2) if sharpes else None,
+        "sharpe_current": out[-1]["sharpe"],
+        "pct_windows_positive": round(pos / len(sharpes) * 100.0, 1) if sharpes else None,
+        "consistency": (
+            "SANGAT KONSISTEN" if sharpes and pos / len(sharpes) >= 0.90 else
+            "KONSISTEN" if sharpes and pos / len(sharpes) >= 0.70 else
+            "TIDAK KONSISTEN" if sharpes else None
+        ),
+        "provenance": f"MARKET (rolling {window_days} hari dari OHLCV harian)",
+    }
+
+
 def compute_performance_multi(session: Session, tickers: List[str],
                               benchmark: str = "IHSG",
                               risk_free_pct: float = 6.0,

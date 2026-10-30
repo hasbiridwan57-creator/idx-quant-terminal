@@ -154,6 +154,7 @@
             <!-- ROIC -->
             <td class="text-right px-3 py-3">
               <span :class="colorMetric(peer.roic_pct, peerMatrix.sector_median?.roic_pct, 'higher')" x-text="fmtPct(peer.roic_pct)"></span>
+              <div class="text-[9px] text-slate-600" x-show="peer.eva_method && peer.eva_method.indexOf('EXCESS') === 0">bank</div>
             </td>
 
             <!-- WACC -->
