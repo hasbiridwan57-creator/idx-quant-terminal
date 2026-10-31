@@ -382,7 +382,9 @@ async def dashboard_home(
         risk = calculate_risk_metrics(prices_series, benchmark_prices=ihsg_series,
                                       risk_free_rate=RISK_FREE_PCT / 100.0)
         ref_price_mc = float(current_price or prices_series[-1])
-        beta_val = getattr(risk, "beta", 1.0) or 1.0
+        # Beta bukan default 1.0: bila regresi tidak tersedia, biarkan None
+        # supaya halaman menulis N/A, bukan "beta 1.0" yang tampak terukur.
+        beta_val = getattr(risk, "beta", None)
         # Drift & volatilitas HARUS sama dengan /api/monte-carlo, kalau tidak
         # dua tempat menampilkan simulasi berbeda untuk emiten yang sama.
         # Versi lama memakai CAPM drift (rf + beta*ERP) di sini dan drift
@@ -410,7 +412,10 @@ async def dashboard_home(
             # Data terlalu pendek -> jangan mengarang; pakai CAPM sebagai
             # asumsi eksplisit yang akan dilabeli di payload.
             _ann_vol = realized_vol
-            _raw_drift = (RISK_FREE_PCT / 100.0) + float(beta_val) * 0.065
+            # beta_val bisa None (lebih dari 30 titik harga tapi regresi
+            # gagal). Jangan asumsikan 1.0 diam-diam: catat di assumptions.
+            _beta_capm = float(beta_val) if beta_val is not None else 1.0
+            _raw_drift = (RISK_FREE_PCT / 100.0) + _beta_capm * 0.065
             _ann_drift = _raw_drift
         monte_carlo = run_monte_carlo_gbm(
             current_price=ref_price_mc,
@@ -968,11 +973,16 @@ async def generate_ai_research_thesis(ticker: str, session: Session = Depends(ge
     prompt = (
         f"Kamu adalah Senior CFA Charterholder & Head of Equity Research di Investment Bank terkemuka. "
         f"Tuliskan tesis investasi mendalam berstandar CFA Research Challenge untuk emiten {ticker_upper} berdasarkan data finansial riil berikut:\n"
-        f"- Return on Equity (ROE): {(c.roe or 0.14)*100:.1f}%\n"
-        f"- EBIT Operating Margin: {(c.ebit_margin or 0.12)*100:.1f}%\n"
-        f"- Asset Turnover: {c.asset_turnover or 0.85:.2f}x\n"
-        f"- Financial Leverage (Equity Multiplier): {c.equity_multiplier or 1.6:.2f}x\n"
-        f"- Tax Burden: {(c.tax_burden or 0.78)*100:.1f}%, Interest Burden: {(c.interest_burden or 0.95)*100:.1f}%\n"
+        # Angka yang tidak dapat dihitung dikirim sebagai "N/A", BUKAN diganti
+        # default 14%/12%/0.85x/1.6x/0.78/0.95. Model bahasa akan menulis
+        # tesis meyakinkan berdasarkan angka yang tidak ada hubungannya
+        # dengan emiten, lalu hasilnya tampil sebagai analisis riil.
+        f"- Return on Equity (ROE): {f'{c.roe*100:.1f}%' if c.roe is not None else 'N/A (tidak dapat dihitung)'}\n"
+        f"- EBIT Operating Margin: {f'{c.ebit_margin*100:.1f}%' if c.ebit_margin is not None else 'N/A'}\n"
+        f"- Asset Turnover: {f'{c.asset_turnover:.2f}x' if c.asset_turnover is not None else 'N/A'}\n"
+        f"- Financial Leverage (Equity Multiplier): {f'{c.equity_multiplier:.2f}x' if c.equity_multiplier is not None else 'N/A'}\n"
+        f"- Tax Burden: {f'{c.tax_burden*100:.1f}%' if c.tax_burden is not None else 'N/A'}, "
+        f"Interest Burden: {f'{c.interest_burden*100:.1f}%' if c.interest_burden is not None else 'N/A'}\n"
         f"{news_context}"
         f"Susun dalam format HTML sederhana (gunakan tag <p>, <strong>, dan <ul><li>): "
         f"1. Evaluasi Kualitas Laba & Dekomposisi DuPont (apakah organik atau debt-driven).\n"
