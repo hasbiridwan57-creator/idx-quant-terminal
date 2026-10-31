@@ -647,6 +647,24 @@ def build_research_model_from_context(
         valuation_basis = _dcf_invalid_note or "N/A — komponen valuasi tidak tersedia"
         _weights_used = {}
     
+    # Target yang didominasi kas bersih bukan sinyal operasional: nilai wajar
+    # = EBITDA x multiple + kas bersih. Bila kas bersih > 50% dari nilai
+    # ekuitas hasil model (mis. BUKA: kas Rp16,2 T vs market cap Rp8,9 T),
+    # upside tinggi hanya berarti pasar menghargai di bawah kas. Pembaca
+    # harus diberi tahu agar tidak membacanya sebagai undervalued operasional.
+    try:
+        if (target_price and shares_m and cash_bn is not None and not is_bank):
+            _net_cash = float(cash_bn) - float(debt_bn or 0)
+            _eq_bn = float(target_price) * float(shares_m) / 1e3
+            if _eq_bn > 0 and _net_cash / _eq_bn > 0.5:
+                valuation_basis = (valuation_basis or "") + (
+                    f" — CATATAN: kas bersih Rp{_net_cash:,.0f} B = "
+                    f"{_net_cash / _eq_bn * 100:.0f}% dari nilai ekuitas model; "
+                    "upside mencerminkan harga di bawah kas, bukan kinerja operasional"
+                )
+    except Exception:
+        pass
+
     if upside_pct is None:
         recommendation = "N/A"     # tanpa upside, tidak ada rekomendasi (jangan karang)
     elif upside_pct >= 15.0:
