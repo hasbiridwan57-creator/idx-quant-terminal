@@ -346,19 +346,30 @@ def build_research_model_from_context(
                 with _S3(_eng3) as _s3b:
                     # Hanya emiten yang PUNYA harga (bisa dihitung multiple).
                     # Prioritaskan yang punya EPS & shares agar PE/PBV/EV valid.
-                    _cand = [
-                        r_.ticker for r_ in _s3b.exec(
-                            _sel3(_FSC).where(_FSC.sector == _sect)
-                            .where(_FSC.ticker != ticker.upper())
-                        ).all()
-                    ]
-                    _uniq = []
-                    for _t in _cand:
-                        if _t in _uniq:
+                    # PEER HARUS SEBANDING SKALA. Tanpa filter ini, ANTM
+                    # (revenue Rp84.642 B) dibandingkan dengan ALKA (Rp171 B)
+                    # dan PACK (EV/EBITDA 8.511x) -> median tidak bermakna.
+                    # Syarat: revenue 0,2x - 5x emiten acuan.
+                    _rev0 = (audited_fy or _bfy or {}).get("revenue_bn")
+                    # Skala revenue 0,05x-20x: cukup lebar untuk menangkap
+                    # peer sebanding (TLKM vs ISAT/EXCL yang revenue-nya lebih
+                    # kecil) tetapi tetap menyingkirkan emiten mikro.
+                    _cand = {}
+                    for _r in _s3b.exec(
+                        _sel3(_FSC).where(_FSC.sector == _sect)
+                        .where(_FSC.ticker != ticker.upper())
+                    ).all():
+                        if _r.ticker in _cand:
                             continue
-                        if _s3b.get(_QL, _t):
-                            _uniq.append(_t)
-                    _peer_tks = _uniq[:8]
+                        if not _s3b.get(_QL, _r.ticker):
+                            continue
+                        if _rev0 and _r.revenue:
+                            _ratio_rev = _r.revenue / _rev0
+                            if not (0.05 <= _ratio_rev <= 20.0):
+                                continue
+                        _cand[_r.ticker] = abs((_r.revenue or 0) - (_rev0 or 0))
+                    # paling dekat skalanya lebih dulu
+                    _peer_tks = sorted(_cand, key=lambda t: _cand[t])[:8]
         if _peer_tks:
             _pes, _pbvs = [], []
             with _S3(_eng3) as _s3:
@@ -405,7 +416,7 @@ def build_research_model_from_context(
                 if _pmcap + _pnet > 0:
                     _evs.append((_pmcap + _pnet) / _pebitda)
             _sector_pe, _sector_pbv = _med(_pes, 2.0, 60.0), _med(_pbvs, 0.2, 15.0)
-            _sector_ev_ebitda = _med(_evs, 1.0, 40.0)
+            _sector_ev_ebitda = _med(_evs, 2.0, 20.0)
             _peer_n = max(len(_pes), len(_pbvs), len(_evs))
     except Exception:
         _sector_pe = _sector_pbv = _sector_ev_ebitda = None
@@ -490,6 +501,19 @@ def build_research_model_from_context(
     upside_pct = None
     _avail = [(w, v) for w, v in _parts if v is not None and v > 0]
 
+    # ── EMITEN SIKLIKAL: DCF BERBASIS EBIT HISTORIS TIDAK BERLAKU ────────────
+    # Untuk komoditas (batu bara, nikel, CPO), harga saham bergerak dengan
+    # siklus harga komoditas, bukan dengan rata-rata laba 3 tahun terakhir.
+    # Membandingkan keduanya menghasilkan sinyal palsu: ITMG +195%, ANTM +149%.
+    # Standar praktik: EV/EBITDA (multiple pasar sudah mencerminkan posisi
+    # siklus) + relative PBV. DCF dibuang, bukan disetel bobotnya.
+    _SECT_CYCLICAL = {"Energi", "Barang Baku"}
+    _SUBSECT_CYCLICAL = {"Minyak, Gas & Batu Bara", "Pertambangan",
+                         "Logam & Mineral", "Kimia", "Kehutanan & Pertanian"}
+    _sector_now = (audited_fy or _bfy or {}).get("sector")
+    _subsector_now = (audited_fy or _bfy or {}).get("sub_sector")
+    is_cyclical = (_sector_now in _SECT_CYCLICAL) or (_subsector_now in _SUBSECT_CYCLICAL)
+
     if is_bank and dcf_fv and dcf_fv > 0 and curr_p:
         # STANDAR CFA/FIG UNTUK BANK: Justified PBV adalah satu-satunya metode
         # yang menangkap kualitas neraca + ROE vs cost of equity. Mencampurnya
@@ -498,6 +522,21 @@ def build_research_model_from_context(
         target_price = dcf_fv
         upside_pct = ((target_price - curr_p) / curr_p) * 100.0
         valuation_basis = "Justified PBV (ROE-g)/(Ke-g) x BVPS — metodologi bank"
+    elif is_cyclical and curr_p and (_ev_ok or _rel_ok):
+        # Siklus: EV/EBITDA 60%, Relative PBV 40%. DCF & exit PE tidak dipakai
+        # karena keduanya berpijak pada laba historis.
+        _cyc_parts = [(0.60, ev_ebitda_fv if _ev_ok else None),
+                      (0.40, rel_fv if _rel_ok else None)]
+        _cyc_avail = [(w, v) for w, v in _cyc_parts if v is not None and v > 0]
+        _wsum = sum(w for w, _ in _cyc_avail)
+        target_price = sum(w * v for w, v in _cyc_avail) / _wsum
+        upside_pct = ((target_price - curr_p) / curr_p) * 100.0
+        _basis = ("Siklus komoditas: EV/EBITDA + PBV relatif "
+                  f"({len(_cyc_avail)} dari 2 metode; DCF & exit PE dikecualikan "
+                  "karena berbasis laba historis)")
+        if abs(upside_pct) > 75.0:
+            _basis += " — SINYAL EKSTREM: verifikasi asumsi siklus"
+        valuation_basis = _basis
     elif _avail and curr_p:
         _wsum = sum(w for w, _ in _avail)
         target_price = sum(w * v for w, v in _avail) / _wsum
