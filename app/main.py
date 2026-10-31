@@ -1223,9 +1223,12 @@ async def get_bond_calc_json(
     if face_value > 1e15:
         raise HTTPException(status_code=422,
                             detail="face_value terlalu besar (maks 1e15).")
-    if not (-5.0 <= coupon_pct <= 100.0):
+    # Kupon obligasi korporat Indonesia realistis 0-25%. Batas lama 100%
+    # meloloskan kupon 60% -> harga Rp4,8 juta untuk nominal Rp1 juta,
+    # angka yang tidak mungkin ada di pasar.
+    if not (0.0 <= coupon_pct <= 30.0):
         raise HTTPException(status_code=422,
-                            detail=f"coupon_pct={coupon_pct}% di luar rentang wajar (-5 s/d 100).")
+                            detail=f"coupon_pct={coupon_pct}% di luar rentang wajar (0 s/d 30).")
     if not (0.0 < ytm_pct <= 100.0):
         raise HTTPException(status_code=422,
                             detail=f"ytm_pct={ytm_pct}% harus > 0 dan <= 100.")

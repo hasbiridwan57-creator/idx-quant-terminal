@@ -941,6 +941,15 @@
               .map(r => (r && (r.ticker || r.symbol)) || '')
               .filter(t => t && String(t).toUpperCase() !== String(this.ticker).toUpperCase());
             const picks = [...new Set(cand.map(t => String(t).toUpperCase()))].slice(0, 3);
+            // Bila peer kurang dari 3, isi sisanya dengan emiten likuid lain
+            // (bukan mengulang IHSG 3x seperti sebelumnya: tiga panel identik
+            // "IDX:COMPOSITE" tidak memberi informasi apa pun).
+            const LIQUID_FALLBACK = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'BMRI', 'ANTM'];
+            for (const alt of LIQUID_FALLBACK) {
+              if (picks.length >= 3) break;
+              const u = alt.toUpperCase();
+              if (u !== String(this.ticker).toUpperCase() && !picks.includes(u)) picks.push(u);
+            }
             if (picks[0]) this.chartSlot2 = 'IDX:' + picks[0];
             if (picks[1]) this.chartSlot3 = 'IDX:' + picks[1];
             if (picks[2]) this.chartSlot4 = 'IDX:' + picks[2];
