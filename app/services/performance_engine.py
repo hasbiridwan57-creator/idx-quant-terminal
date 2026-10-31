@@ -430,6 +430,16 @@ def compute_performance(session: Session, ticker: str,
         "drawdown_curve": dd_curve,
         **dd,
     })
+    # Penjelasan bahasa awam — dibangun dari angka yang SUDAH dihitung,
+    # tidak menambah metrik baru atau mengarang nilai.
+    try:
+        from app.services.performance_insight import build_interpretation
+        result["interpretation"] = build_interpretation(result)
+    except Exception as exc:      # jangan sampai penjelasan merusak endpoint
+        result["interpretation"] = {
+            "available": False,
+            "reason": f"Penjelasan tidak dapat dibangun: {exc}",
+        }
     return result
 
 

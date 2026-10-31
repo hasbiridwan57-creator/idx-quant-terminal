@@ -66,6 +66,56 @@
         <span x-text="'Benchmark ' + perfData.benchmark"></span>
       </div>
 
+      <!-- INTERPRETASI: penjelasan bahasa awam dari angka di bawah -->
+      <template x-if="perfData.interpretation && perfData.interpretation.available">
+        <div class="bg-[#0E1525] border border-indigo-500/20 rounded-2xl p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              </div>
+              <div>
+                <h3 class="text-sm font-semibold text-white">Artinya Apa?</h3>
+                <p class="text-[10px] text-slate-500 mt-0.5">Penjelasan angka di bawah dalam bahasa sehari-hari</p>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold border"
+                  :class="perfData.interpretation.overall_tone === 'good'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                    : (perfData.interpretation.overall_tone === 'bad'
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/25'
+                      : 'bg-amber-500/10 text-amber-400 border-amber-500/25')"
+                  x-text="perfData.interpretation.overall"></span>
+          </div>
+
+          <p class="text-xs text-slate-300 leading-relaxed bg-[#090D16] border border-white/[0.05] rounded-lg p-3.5 font-sans"
+             x-text="perfData.interpretation.summary"></p>
+
+          <div class="mt-3 space-y-2">
+            <template x-for="it in perfData.interpretation.items" :key="it.key">
+              <div class="border border-white/[0.05] rounded-lg p-3"
+                   :class="it.tone === 'good' ? 'bg-emerald-500/[0.04]'
+                     : (it.tone === 'bad' ? 'bg-rose-500/[0.04]'
+                       : (it.tone === 'warn' ? 'bg-amber-500/[0.04]' : 'bg-[#090D16]'))">
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="text-xs font-semibold text-slate-200" x-text="it.label"></span>
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-mono border"
+                        :class="it.tone === 'good' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+                          : (it.tone === 'bad' ? 'text-rose-400 border-rose-500/30 bg-rose-500/10'
+                            : (it.tone === 'warn' ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                              : 'text-slate-400 border-white/10 bg-white/[0.03]'))"
+                        x-text="it.verdict"></span>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed font-sans" x-text="it.text"></p>
+              </div>
+            </template>
+          </div>
+
+          <p class="text-[10px] text-slate-600 mt-3 leading-relaxed font-sans"
+             x-text="perfData.interpretation.note"></p>
+        </div>
+      </template>
+
       <!-- RETURN & RISK CARDS -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div class="bg-[#0E1525] border border-white/[0.06] rounded-xl p-4">
