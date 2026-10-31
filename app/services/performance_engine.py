@@ -75,7 +75,89 @@ def load_prices(session: Session, ticker: str,
         params["e"] = end
     q += " ORDER BY date ASC"
     rows = session.execute(text(q), params).fetchall()
+    series = [(r[0], float(r[1])) for r in rows if r[1] is not None]
+    return _splice_split_artifacts(series)
+
+
+def load_prices_raw(session: Session, ticker: str,
+                    start: Optional[str] = None,
+                    end: Optional[str] = None) -> List[Tuple[str, float]]:
+    """Sama seperti load_prices tanpa pembersihan artefak split.
+
+    Dipakai hanya untuk menjelaskan ke pengguna berapa titik yang dibuang,
+    supaya 'data tidak cukup' tidak terlihat seperti kegagalan sistem.
+    """
+    start, end = _valid_date_str(start), _valid_date_str(end)
+    if start and end and start > end:
+        start = end = None
+    q = "SELECT date, close FROM quotehistorydaily WHERE ticker = :t AND close > 0"
+    params: Dict[str, Any] = {"t": ticker.upper()}
+    if start:
+        q += " AND date >= :s"
+        params["s"] = start
+    if end:
+        q += " AND date <= :e"
+        params["e"] = end
+    q += " ORDER BY date ASC"
+    rows = session.execute(text(q), params).fetchall()
     return [(r[0], float(r[1])) for r in rows if r[1] is not None]
+
+
+# Batas IDX: auto-rejection atas/bawah membuat pergerakan satu hari di
+# papan reguler tidak mungkin melebihi +-35%. Papan pemantauan khusus
+# memberi kelonggaran, tetapi lompatan >60% dalam satu hari pada seri
+# yang sama hampir selalu berarti aksi korporasi (reverse/forward split)
+# yang tidak disesuaikan pada data vendor -- bukan pergerakan pasar.
+_IMPOSSIBLE_MOVE = 0.60
+
+
+def _median(xs: List[float]) -> Optional[float]:
+    if not xs:
+        return None
+    s = sorted(xs)
+    m = len(s) // 2
+    return s[m] if len(s) % 2 else (s[m - 1] + s[m]) / 2.0
+
+
+def _splice_split_artifacts(series: List[Tuple[str, float]]) -> List[Tuple[str, float]]:
+    """
+    Buang titik yang merupakan artefak aksi korporasi tak disesuaikan.
+
+    Kenapa perlu: pada data harga yang bercampur pra-split dan pasca-split,
+    reverse split terbaca sebagai penurunan/peningkatan ekstrem dalam satu
+    hari. Dampaknya bukan kecil. Contoh terukur pada basis data ini:
+      - BNBR: 3.800 -> 71 (-98,1%) -> max drawdown -99,47%, seolah emiten
+        nyaris musnah, padahal pergerakan sebenarnya jauh lebih kecil.
+      - TAXI: 14 lompatan -> volatilitas tahunan 202,55% (tidak mungkin
+        untuk saham yang diperdagangkan normal), Sharpe & VaR ikut salah.
+      - MKNT: harga Rp1 berbulan-bulan lalu 2, 3, 4 ... 11 -- pola yang
+        tidak mungkin berasal dari lelang pasar; itu artefak split pada
+        emiten yang harganya menempel batas bawah.
+
+    Dua kriteria, keduanya harus berarti "bukan pergerakan pasar":
+      1. lompatan > 60% dalam satu hari (di atas batas auto-rejection);
+      2. harga menempel batas bawah (<= Rp5) dan berubah >= 2x, karena
+         tick size di level itu Rp1 sehingga kenaikan 1 -> 2 secara
+         mekanis terbaca +100%.
+
+    Penanganan: potong seri pada titik diskontinuitas dan pertahankan
+    segmen TERAKHIR (harga terkini yang relevan untuk analisis). Segmen
+    sebelumnya berbeda basis harga, sehingga menyambungnya dengan faktor
+    penyesuaian tanpa data aksi korporasi resmi berarti mengarang.
+    """
+    if len(series) < 2:
+        return series
+    cut = 0
+    for i in range(1, len(series)):
+        prev, cur = series[i - 1][1], series[i][1]
+        if prev <= 0 or cur <= 0:
+            continue
+        ratio = cur / prev
+        impossible = abs(ratio - 1.0) > _IMPOSSIBLE_MOVE
+        penny_artifact = min(prev, cur) <= 5.0 and (ratio >= 2.0 or ratio <= 0.5)
+        if impossible or penny_artifact:
+            cut = i
+    return series[cut:] if cut else series
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -254,14 +336,44 @@ def compute_performance(session: Session, ticker: str,
     }
 
     if len(prices_rows) < MIN_OBS:
-        result["reason"] = (
-            f"Data harga tidak cukup ({len(prices_rows)} baris, minimum {MIN_OBS}). "
-            "Emiten mungkin tersuspensi/delisting — lihat /api/trading-status."
-        )
+        # Bedakan dua sebab yang sangat berbeda artinya bagi pembaca:
+        # (a) emiten memang tidak diperdagangkan, (b) data bercampur basis
+        # harga pra/pasca aksi korporasi sehingga segmen terakhirnya pendek.
+        # Dulu keduanya muncul sebagai "emiten mungkin tersuspensi", yang
+        # menyesatkan untuk kasus (b).
+        _raw = load_prices_raw(session, ticker.upper(), start=start, end=end)
+        _n_raw, _n_ok = len(_raw), len(prices_rows)
+        if _n_raw > _n_ok:
+            result["reason"] = (
+                f"Riwayat harga tidak dapat dipakai: {_n_raw} baris tersedia, "
+                f"tetapi hanya {_n_ok} baris terakhir yang berada pada basis "
+                f"harga yang konsisten (minimum {MIN_OBS}). Data sebelumnya "
+                f"bercampur dengan aksi korporasi (reverse/forward split) yang "
+                f"tidak disesuaikan sumbernya, sehingga return harian di titik "
+                f"itu tidak nyata. Metrik performa tidak dihitung agar tidak "
+                f"menghasilkan angka menyesatkan."
+            )
+            result["split_artifact_dropped"] = _n_raw - _n_ok
+        else:
+            result["reason"] = (
+                f"Data harga tidak cukup ({_n_ok} baris, minimum {MIN_OBS}). "
+                "Emiten mungkin tersuspensi/delisting — lihat /api/trading-status."
+            )
         return result
 
     dates = [r[0] for r in prices_rows]
     prices = [r[1] for r in prices_rows]
+
+    # Seri yang harganya tidak pernah bergerak (mis. tertahan di batas bawah
+    # Rp1) menghasilkan volatilitas 0% dan drawdown 0%. Itu bukan hasil
+    # analisis, melainkan tidak adanya perdagangan yang bisa diukur.
+    if len(set(prices)) <= 2:
+        result["reason"] = (
+            f"Harga tidak bergerak selama {len(prices)} hari "
+            f"(hanya {len(set(prices))} nilai harga unik). Return, volatilitas, "
+            "dan drawdown tidak dapat diukur dari data ini."
+        )
+        return result
     rets = _daily_returns(prices)
 
     if len(rets) < 2:
