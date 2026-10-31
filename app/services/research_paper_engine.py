@@ -329,6 +329,17 @@ def build_research_model_from_context(
     # `dcf["pe_reference"]` yang tidak pernah dikirim -> keduanya SELALU None,
     # sehingga blended target = 100% DCF (tidak ada pembanding, dampening mati).
     # Sekarang: median PE/PBV dari peer riil di DB (emiten satu sektor).
+    # Profil resmi IDX (964 emiten) untuk klasifikasi industri presisi.
+    _PROF = {}
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        _pf = _Path(__file__).resolve().parents[2] / "data" / "idx_profiles.json"
+        if _pf.exists():
+            _PROF = _json.loads(_pf.read_text(encoding="utf-8"))
+    except Exception:
+        _PROF = {}
+
     _sector_pe = _sector_pbv = _sector_ev_ebitda = None
     _peer_n = 0
     try:
@@ -351,14 +362,30 @@ def build_research_model_from_context(
                     # dan PACK (EV/EBITDA 8.511x) -> median tidak bermakna.
                     # Syarat: revenue 0,2x - 5x emiten acuan.
                     _rev0 = (audited_fy or _bfy or {}).get("revenue_bn")
-                    # Skala revenue 0,05x-20x: cukup lebar untuk menangkap
-                    # peer sebanding (TLKM vs ISAT/EXCL yang revenue-nya lebih
-                    # kecil) tetapi tetap menyingkirkan emiten mikro.
+                    # PEER DARI KLASIFIKASI IDX-IDX-IC, bukan `sector` kasar.
+                    # `sector` menggabungkan 100+ industri berbeda (Energi
+                    # mencakup batu bara & minyak; Barang Baku mencakup nikel,
+                    # semen, kimia). Profil resmi menyimpan `industry` dan
+                    # `sub_industry` per emiten -> peer benar-benar sebanding.
+                    _prof_self = _PROF.get(ticker.upper(), {}) or {}
+                    _ind_self = _prof_self.get("industry")
+                    _sub_self = _prof_self.get("sub_industry")
+                    _peer_ids = set()
+                    if _sub_self:
+                        _peer_ids = {t for t, v in _PROF.items()
+                                     if v.get("sub_industry") == _sub_self}
+                    if len(_peer_ids) < 5 and _ind_self:
+                        _peer_ids = {t for t, v in _PROF.items()
+                                     if v.get("industry") == _ind_self}
                     _cand = {}
-                    for _r in _s3b.exec(
-                        _sel3(_FSC).where(_FSC.sector == _sect)
-                        .where(_FSC.ticker != ticker.upper())
-                    ).all():
+                    _q_all = _s3b.exec(_sel3(_FSC)).all()
+                    for _r in _q_all:
+                        if _r.ticker == ticker.upper():
+                            continue
+                        if _peer_ids and _r.ticker not in _peer_ids:
+                            continue
+                        if not _peer_ids and _r.sector != _sect:
+                            continue
                         if _r.ticker in _cand:
                             continue
                         if not _s3b.get(_QL, _r.ticker):
