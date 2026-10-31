@@ -97,6 +97,14 @@ app = FastAPI(
 BASE_DIR = Path(__file__).resolve().parent
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
+# ===============================================================
+# SATU nilai risk-free untuk SELURUH aplikasi.
+# Dulu 6,85% dipakai di DCF, 6,0% di /api/risk, dan label template
+# menulis angka lain lagi -> tiga angka berbeda untuk asumsi yang sama.
+# DCF tetap pakai angka ini; horizon & benchmark tidak berubah.
+# ===============================================================
+RISK_FREE_PCT = 6.0
+
 app.mount("/app/static", StaticFiles(directory=str(static_dir)), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -170,14 +178,21 @@ async def dashboard_home(
     ta_bn = to_bn(curr_stmt, curr_stmt.total_assets) or 0.0
     tl_bn = to_bn(curr_stmt, curr_stmt.total_liabilities) or 0.0
     te_bn = to_bn(curr_stmt, curr_stmt.total_equity_parent) or 0.0
-    debt_bn = to_bn(curr_stmt, curr_stmt.interest_bearing_debt) if curr_stmt.interest_bearing_debt else (tl_bn * 0.45)
-    ca_bn = to_bn(curr_stmt, curr_stmt.current_assets) if curr_stmt.current_assets else (ta_bn * 0.4)
-    cl_bn = to_bn(curr_stmt, curr_stmt.current_liabilities) if curr_stmt.current_liabilities else (tl_bn * 0.5)
-    cash_bn = to_bn(curr_stmt, curr_stmt.cash_and_equivalents) if curr_stmt.cash_and_equivalents else (ta_bn * 0.12)
-    int_exp_bn = to_bn(curr_stmt, curr_stmt.interest_expense) if curr_stmt.interest_expense else (debt_bn * 0.07)
-    ocf_bn = to_bn(curr_stmt, curr_stmt.operating_cash_flow) if curr_stmt.operating_cash_flow else (ebit_bn * 1.0)
-    dep_bn = to_bn(curr_stmt, curr_stmt.depreciation) if curr_stmt.depreciation else (ebit_bn * 0.2)
-    capex_bn = to_bn(curr_stmt, curr_stmt.capex) if curr_stmt.capex else (ebit_bn * 0.35)
+    # ZERO-FAKE: tidak ada pengganti rasio tetap. Dulu nilai kosong diisi
+    # debt = TL x 0,45, CA = TA x 0,4, CL = TL x 0,5, kas = TA x 0,12,
+    # beban bunga = utang x 7%, OCF = EBIT, depresiasi = EBIT x 0,2,
+    # capex = EBIT x 0,35. Semua itu angka karangan yang tampil seolah
+    # hasil laporan. Sekarang: None -> ditampilkan N/A.
+    # Cakupan data yang sebenarnya: utang berbunga kosong 735/4.175 (17,6%),
+    # beban bunga 3.933/4.175 (94,2%), depresiasi 2.666/4.175 (63,9%).
+    debt_bn = to_bn(curr_stmt, curr_stmt.interest_bearing_debt) if curr_stmt.interest_bearing_debt else None
+    ca_bn = to_bn(curr_stmt, curr_stmt.current_assets) if curr_stmt.current_assets else None
+    cl_bn = to_bn(curr_stmt, curr_stmt.current_liabilities) if curr_stmt.current_liabilities else None
+    cash_bn = to_bn(curr_stmt, curr_stmt.cash_and_equivalents) if curr_stmt.cash_and_equivalents else None
+    int_exp_bn = to_bn(curr_stmt, curr_stmt.interest_expense) if curr_stmt.interest_expense else None
+    ocf_bn = to_bn(curr_stmt, curr_stmt.operating_cash_flow) if curr_stmt.operating_cash_flow else None
+    dep_bn = to_bn(curr_stmt, curr_stmt.depreciation) if curr_stmt.depreciation else None
+    capex_bn = to_bn(curr_stmt, curr_stmt.capex) if curr_stmt.capex else None
 
     # Nilai penuh IDR untuk metrik perbankan via units.py
     eq_full = to_idr(curr_stmt, curr_stmt.total_equity_parent) or 0.0
@@ -304,7 +319,7 @@ async def dashboard_home(
             dcf_result = quick_dcf_valuation(
                 ticker=curr_stmt.ticker,
                 current_market_price=current_price,
-                risk_free_rate=6.85,
+                risk_free_rate=RISK_FREE_PCT,
                 market_risk_premium=6.5,
                 levered_beta=_beta,
                 cost_of_debt_pre_tax=_kd * 100.0,
@@ -360,9 +375,7 @@ async def dashboard_home(
     except Exception as exc:
         print(f"Market history fetch error: {exc}")
 
-    # Satu nilai risk-free untuk seluruh aplikasi (dulu 6,85% di sini,
-    # 6,0% di /api/risk, dan label template menulis angka ketiga).
-    RISK_FREE_PCT = 6.0
+    # (lihat RISK_FREE_PCT modul-level di atas)
 
     if len(prices_series) >= 30:
         realized_vol = calculate_realized_volatility(prices_series) or 0.25
@@ -1121,7 +1134,7 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
         dcf_res = quick_dcf_valuation(
             ticker=ticker_upper,
             current_market_price=current_price,
-            risk_free_rate=6.85,
+            risk_free_rate=RISK_FREE_PCT,
             market_risk_premium=6.5,
             levered_beta=_beta_used,
             cost_of_debt_pre_tax=_kd_used * 100.0,

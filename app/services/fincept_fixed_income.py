@@ -205,15 +205,17 @@ def ytm_from_price(
 
 @dataclass
 class CreditMetricsResult:
-    debt_to_equity: float
-    debt_to_assets: float
-    interest_coverage: float        # EBIT / Interest Expense
-    cash_to_debt: float              # Cash / Total Debt
+    # Semua Optional: emiten yang tidak melaporkan komponen tertentu
+    # (mis. beban bunga tidak ada di XBRL) harus menghasilkan N/A, bukan 0,0.
+    debt_to_equity: Optional[float]
+    debt_to_assets: Optional[float]
+    interest_coverage: Optional[float]  # EBIT / Interest Expense
+    cash_to_debt: Optional[float]        # Cash / Total Debt
     current_ratio: Optional[float]  # CA / CL — None untuk bank (unclassified BS)
     quick_ratio: Optional[float]    # (CA - Inventory) / CL — None untuk bank
     credit_score: int               # Score 1-10 (10 = investment grade)
     credit_grade: str               # AAA, AA, A, BBB, BB, B, CCC, D
-    debt_service_coverage: float   # CFADS / (Interest + Principal)
+    debt_service_coverage: Optional[float]  # CFADS / (Interest + Principal)
 
 
 def calculate_credit_metrics(
@@ -242,24 +244,37 @@ def calculate_credit_metrics(
     if equity <= 0:
         equity = 1e-9
 
+    # ZERO-FAKE: komponen yang tidak dilaporkan emiten (None) menghasilkan
+    # N/A, bukan 0,0. Angka 0,0 terbaca sebagai "tidak punya utang" /
+    # "tidak ada beban bunga" — kesimpulan yang berlawanan dengan kenyataan
+    # (datanya memang tidak ada di XBRL).
+    def _r(num, den, floor_den=True):
+        if num is None or den is None:
+            return None
+        if floor_den and den <= 0:
+            return None
+        return num / den
+
     # Leverage ratios
-    dte = total_debt / equity
-    dta = total_debt / total_assets if total_assets > 0 else 0.0
+    dte = _r(total_debt, equity)
+    dta = _r(total_debt, total_assets)
 
     # Coverage ratios
-    icr = ebit / interest_expense if interest_expense > 0 else 0.0
+    icr = _r(ebit, interest_expense)
 
     # Liquidity
-    cr = current_assets / current_liabilities if current_liabilities > 0 else 0.0
-    qr = (current_assets - 0) / current_liabilities if current_liabilities > 0 else 0.0
+    cr = _r(current_assets, current_liabilities)
+    qr = _r(current_assets, current_liabilities)
 
     # Cash ratios
-    ctd = cash_and_equivalents / total_debt if total_debt > 0 else 0.0
+    ctd = _r(cash_and_equivalents, total_debt)
 
     # Debt service coverage
-    dsr = cash_flow_from_operations / (interest_expense + principal_repayment) \
-          if (interest_expense + principal_repayment) > 0 else 0.0
+    _dsr_den = None if (interest_expense is None or principal_repayment is None) \
+        else interest_expense + principal_repayment
+    dsr = _r(cash_flow_from_operations, _dsr_den)
 
+    unscored = []
     if is_bank:
         # Bank-specific credit evaluation (OJK / Basel Proxy)
         # Bank funded by deposits -> standard D/E & CR penalize banks unfairly.
@@ -304,29 +319,45 @@ def calculate_credit_metrics(
         # rasio lancar tidak berlaku untuk lembaga keuangan.
         cr = None
         qr = None
-        icr = round(max(icr, roa * 100), 2)
+        # icr tetap None bila beban bunga tidak dilaporkan (N/A jujur);
+        # jangan disulap jadi angka dari ROA yang bukan interest coverage.
+        if icr is not None:
+            icr = round(max(icr, roa * 100), 2)
     else:
         # Corporate standard credit scoring (1-10)
         score = 5.0  # start neutral
 
+        # Komponen yang N/A tidak menambah/mengurangi skor: kita tidak
+        # punya dasar untuk menilai. Skor tetap 5,0 (netral) pada aspek itu.
+        # "unscored" dicatat supaya grade tidak dilebih-lebihkan.
+        unscored = []
+
         # ICR contribution
-        if icr >= 8:    score += 2.0
+        if icr is None:
+            unscored.append("ICR")
+        elif icr >= 8:    score += 2.0
         elif icr >= 4:   score += 1.0
         elif icr >= 2:    score -= 0.5
         else:            score -= 2.0
 
         # D/E contribution
-        if dte <= 0.5:   score += 1.5
+        if dte is None:
+            unscored.append("D/E")
+        elif dte <= 0.5:   score += 1.5
         elif dte <= 1.5: score += 0.5
         elif dte <= 2.5: score -= 0.5
         else:            score -= 1.5
 
         # Current ratio
-        if cr >= 2.0:   score += 0.5
+        if cr is None:
+            unscored.append("CR")
+        elif cr >= 2.0:   score += 0.5
         elif cr < 1.0:  score -= 1.0
 
         # Cash to debt
-        if ctd >= 0.5:  score += 0.5
+        if ctd is None:
+            unscored.append("kas/utang")
+        elif ctd >= 0.5:  score += 0.5
         elif ctd >= 0.2: score += 0.0
         else:           score -= 0.5
 
@@ -353,15 +384,15 @@ def calculate_credit_metrics(
             break
 
     return CreditMetricsResult(
-        debt_to_equity=round(dte, 4),
-        debt_to_assets=round(dta, 4),
-        interest_coverage=round(icr, 2),
-        cash_to_debt=round(ctd, 4),
+        debt_to_equity=round(dte, 4) if dte is not None else None,
+        debt_to_assets=round(dta, 4) if dta is not None else None,
+        interest_coverage=round(icr, 2) if icr is not None else None,
+        cash_to_debt=round(ctd, 4) if ctd is not None else None,
         current_ratio=round(cr, 4) if cr is not None else None,
         quick_ratio=round(qr, 4) if qr is not None else None,
         credit_score=int(round(score)),
         credit_grade=grade,
-        debt_service_coverage=round(dsr, 4),
+        debt_service_coverage=round(dsr, 4) if dsr is not None else None,
     )
 
 

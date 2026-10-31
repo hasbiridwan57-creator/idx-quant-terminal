@@ -252,7 +252,10 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             try:
                 dcf_res = quick_dcf_valuation(
                     ticker=curr_in.ticker,
-                    risk_free_rate=6.85,
+                    # Diselaraskan dengan RISK_FREE_PCT aplikasi (6,0%).
+                    # Dulu 6,85% -> WACC lebih tinggi -> nilai wajar lebih
+                    # rendah daripada halaman utama untuk emiten yang sama.
+                    risk_free_rate=6.0,
                     market_risk_premium=6.5,
                     levered_beta=1.0,
                     cost_of_debt_pre_tax=7.5,
