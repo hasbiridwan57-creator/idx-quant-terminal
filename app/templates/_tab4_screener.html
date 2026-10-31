@@ -53,6 +53,7 @@
             <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('equity_multiplier')">EM</th>
             <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('ocf_to_ni')">OCF/NI</th>
             <th class="py-3 px-2 text-center cursor-pointer hover:text-white" @click="sortBy('credit_score')">Credit</th>
+            <th class="py-3 px-2 text-center cursor-pointer hover:text-white" @click="sortBy('quality_verdict')">Catatan</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('price')">Harga</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('fair_value')">Fair Value</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('upside_pct')">Upside</th>
@@ -79,6 +80,18 @@
               <td class="py-3 px-2 text-center">
                 <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 border border-white/[0.06] text-slate-200"
                       x-text="r.credit_grade + ' (' + r.credit_score + ')'"></span>
+              </td>
+              {# Catatan kualitas: ROE >100% hampir selalu ekuitas tipis akibat
+                 buyback/dividen, bukan bisnis luar biasa. Tanpa ini angka ROE
+                 LPPF 266% terbaca seperti kesalahan data. #}
+              <td class="py-3 px-2 text-center">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium border"
+                      :class="r.quality_verdict === 'High Quality'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : (r.quality_verdict === 'Accrual Alert'
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400')"
+                      x-text="r.quality_verdict === 'High Quality' ? 'OK' : (r.quality_verdict || '—')"></span>
               </td>
               <td class="py-3 px-3 text-right font-mono text-slate-300 tabular-nums"
                   x-text="r.price ? 'Rp ' + r.price.toLocaleString() : '—'"></td>

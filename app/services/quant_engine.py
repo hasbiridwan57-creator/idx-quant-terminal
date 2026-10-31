@@ -382,6 +382,12 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             verdict = "Accrual Alert"
         elif roe_val < 0.08:
             verdict = "Low Return"
+        # ROE > 100% bukan "kualitas tinggi": hampir selalu berarti ekuitas
+        # terkikis buyback/dividen (LPPF ekuitas Rp273 B vs laba Rp725 B ->
+        # ROE 266%; UNVR 171%). Tanpa keterangan, angka itu terbaca sebagai
+        # kesalahan data atau bisnis luar biasa.
+        elif roe_val > 1.00:
+            verdict = "ROE tinggi — ekuitas tipis"
 
         # Harga pasar: tanpa ini "fair_value" tidak bisa ditafsirkan (mahal
         # atau murah?). Diambil dari QuoteLatest yang sudah dipakai halaman.
