@@ -497,6 +497,69 @@
         perfBenchmark: 'IHSG',
         perfRiskFree: 6.0,
         perfWindow: 252,
+        perfStart: '',
+        perfEnd: '',
+        cmpA: '{{ bundle.current.ticker }}',
+        cmpB: 'BBCA',
+        cmpData: null,
+        cmpError: null,
+        cmpMetrics: [
+          { key: 'cagr_pct', label: 'CAGR', dec: 2, suffix: '%' },
+          { key: 'total_return_pct', label: 'Total Return', dec: 1, suffix: '%' },
+          { key: 'annual_volatility_pct', label: 'Volatilitas', dec: 2, suffix: '%' },
+          { key: 'sharpe', label: 'Sharpe', dec: 2, suffix: '' },
+          { key: 'sortino', label: 'Sortino', dec: 2, suffix: '' },
+          { key: 'calmar', label: 'Calmar', dec: 2, suffix: '' },
+          { key: 'max_drawdown_pct', label: 'Max Drawdown', dec: 2, suffix: '%' },
+          { key: 'beta', label: 'Beta vs Benchmark', dec: 2, suffix: '' },
+          { key: 'alpha_pct', label: 'Jensen Alpha', dec: 2, suffix: '%' },
+          { key: 'information_ratio', label: 'Information Ratio', dec: 2, suffix: '' },
+          { key: 'var_95_daily_pct', label: 'VaR 95% (harian)', dec: 2, suffix: '%' },
+          { key: 'observations', label: 'Observasi', dec: 0, suffix: '' },
+        ],
+        fmtCmp(v, dec, suffix) {
+          if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+          return Number(v).toFixed(dec) + (suffix || '');
+        },
+        async loadCompare() {
+          const a = (this.cmpA || '').trim().toUpperCase();
+          const b = (this.cmpB || '').trim().toUpperCase();
+          this.cmpError = null;
+          if (!a || !b) {
+            this.cmpError = 'Isi dua kode emiten untuk dibandingkan.';
+            this.cmpData = null;
+            return;
+          }
+          try {
+            let url = '/api/performance/compare/' + a + ',' + b
+              + '?risk_free=' + this.perfRiskFree;
+            if (this.perfStart) url += '&start=' + this.perfStart;
+            if (this.perfEnd) url += '&end=' + this.perfEnd;
+            let res = await fetch(url);
+            if (res.ok) {
+              const d = await res.json();
+              // Ticker yang tidak punya data tetap boleh tampil, tetapi
+              // harus diberi tahu mana yang kosong - jangan diam.
+              // Endpoint mengembalikan `results`, bukan `rows`. Tanpa
+              // pemetaan ini tabel selalu kosong meski HTTP 200.
+              const rows = d.results || d.rows || [];
+              const missing = rows.filter(r => !r.available).map(r => r.ticker);
+              this.cmpData = Object.assign({}, d, { rows: rows });
+              this.cmpError = missing.length
+                ? ('Tidak ada data untuk: ' + missing.join(', ')
+                   + ' — metriknya ditampilkan N/A, bukan nol.')
+                : null;
+            } else {
+              const body = await res.text();
+              this.cmpData = null;
+              this.cmpError = 'Perbandingan gagal (HTTP ' + res.status + '). '
+                + (body || '').slice(0, 160);
+            }
+          } catch (e) {
+            this.cmpData = null;
+            this.cmpError = 'Perbandingan gagal dimuat: ' + e.message;
+          }
+        },
         rollingData: null,
         rollingAbsMax: 1,
         maxGrowth: 1,
@@ -534,9 +597,11 @@
         },
         async loadPerformance() {
           try {
-            const url = '/api/performance/' + this.ticker
+            let url = '/api/performance/' + this.ticker
               + '?benchmark=' + this.perfBenchmark
               + '&risk_free=' + this.perfRiskFree;
+            if (this.perfStart) url += '&start=' + this.perfStart;
+            if (this.perfEnd) url += '&end=' + this.perfEnd;
             let res = await fetch(url);
             if (res.ok) {
               const d = await res.json();
