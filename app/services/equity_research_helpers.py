@@ -14,8 +14,25 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
     erp = 0.065  # Damodaran ERP + country risk
     latest = financials[-1] if financials else {}
 
-    # Beta
-    beta = beta_raw if beta_raw is not None else 1.0
+    # Beta: regresi return harian vs IHSG (5 tahun) bila tersedia, lalu beta
+    # sektor Damodaran, baru terakhir 1,0. Versi lama SELALU 1,0 -> Ke identik
+    # untuk semua emiten (13,3%), mengabaikan risiko masing-masing.
+    beta = beta_raw
+    beta_src = None
+    if beta is None:
+        try:
+            from sqlmodel import Session as _S
+            from app.db.database import engine as _eng
+            from app.services.cost_of_capital import _get_beta as _gb
+            _sector = (latest.get("sector") or None)
+            with _S(_eng) as _sess:
+                beta, beta_src = _gb(_sess, ticker, _sector)
+        except Exception:
+            beta, beta_src = None, None
+    if beta is None:
+        beta, beta_src = 1.0, "PROXY (beta pasar default 1.0 — data tidak tersedia)"
+    elif beta_src is None:
+        beta_src = "COMPUTED (beta dari pemanggil)"
     ke = rf + beta * erp  # Cost of Equity
 
     # Market cap & debt (dalam miliar Rp)
@@ -128,7 +145,7 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
         "provenance": {
             "rf": "ASSUMPTION (SBN 10Y Indonesia)",
             "erp": "ASSUMPTION (Damodaran Indonesia)",
-            "beta": "COMPUTED (covariance vs IHSG)" if beta_raw is not None else "ASSUMPTION (beta=1.0, histori harga kurang)",
+            "beta": beta_src,
             "ke": "COMPUTED (CAPM)",
             "wacc": "COMPUTED",
             "justified_pbv": "COMPUTED" if justified_pbv is not None else "N/A",

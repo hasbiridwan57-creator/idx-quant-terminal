@@ -325,15 +325,73 @@ def build_research_model_from_context(
             wacc = None
         tg = None
 
-    # Exit-multiple: P/E wajar x EPS forward. Butuh PE sektor; tanpa itu N/A.
+    # Exit-multiple & Relative: butuh PE/PBV SEKTOR. Versi lama hanya membaca
+    # `dcf["pe_reference"]` yang tidak pernah dikirim -> keduanya SELALU None,
+    # sehingga blended target = 100% DCF (tidak ada pembanding, dampening mati).
+    # Sekarang: median PE/PBV dari peer riil di DB (emiten satu sektor).
+    _sector_pe = _sector_pbv = None
+    _peer_n = 0
+    try:
+        from sqlmodel import Session as _S3, select as _sel3
+        from app.db.database import engine as _eng3
+        from app.db.models import FinancialStatementCache as _FSC, QuoteLatest as _QL
+        from app.services.real_data_registry import get_peers as _gp
+        _peer_tks = [t for t in _gp(ticker.upper())[:6] if t.upper() != ticker.upper()]
+        if not _peer_tks:
+            # Emiten kecil/sector langka tidak punya daftar peer terkurasi.
+            # Fallback: emiten LAIN di sektor yang sama dari DB (riil, bukan
+            # daftar karangan) — maksimal 6.
+            _sect = (audited_fy or {}).get("sector")
+            if _sect:
+                with _S3(_eng3) as _s3b:
+                    _peer_tks = [
+                        r_.ticker for r_ in _s3b.exec(
+                            _sel3(_FSC).where(_FSC.sector == _sect)
+                            .where(_FSC.ticker != ticker.upper())
+                        ).all()
+                    ][:6]
+        if _peer_tks:
+            _pes, _pbvs = [], []
+            with _S3(_eng3) as _s3:
+                for _pt in _peer_tks:
+                    _row = _s3.exec(_sel3(_FSC).where(_FSC.ticker == _pt)
+                                    .order_by(_FSC.year.desc())).first()
+                    _q = _s3.get(_QL, _pt)
+                    if not (_row and _q and _q.price and _q.price > 0):
+                        continue
+                    if _row.eps and _row.eps > 0:
+                        _pes.append(_q.price / _row.eps)
+                    if _row.total_equity_parent and _row.total_assets:
+                        # BVPS dari ekuitas / jumlah saham (bila tersedia)
+                        _sh = _row.shares_outstanding
+                        if _sh and _sh > 0:
+                            _bvps = (_row.total_equity_parent * 1e9) / _sh
+                            if _bvps > 0:
+                                _pbvs.append(_q.price / _bvps)
+            def _med(v):
+                v = sorted(x for x in v if x and 0 < x < 500)
+                if not v:
+                    return None
+                n = len(v)
+                return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0
+            _sector_pe, _sector_pbv = _med(_pes), _med(_pbvs)
+            _peer_n = max(len(_pes), len(_pbvs))
+    except Exception:
+        _sector_pe = _sector_pbv = None
+
+    # Exit-multiple: EPS x median PE sektor (bila tersedia dari peer riil)
     exit_fv = None
     _pe_ref = dcf.get("pe_reference") if dcf else None
-    if eps and eps > 0 and isinstance(_pe_ref, (int, float)) and _pe_ref > 0:
+    if not (isinstance(_pe_ref, (int, float)) and _pe_ref > 0):
+        _pe_ref = _sector_pe
+    if eps and eps > 0 and isinstance(_pe_ref, (int, float)) and 0 < _pe_ref < 100:
         exit_fv = eps * float(_pe_ref)
 
     # Relative: harga x (PBV wajar / PBV aktual) bila keduanya ada.
     rel_fv = None
     _pbv_just = dcf.get("justified_pbv") if dcf else None
+    if not (isinstance(_pbv_just, (int, float)) and _pbv_just > 0):
+        _pbv_just = _sector_pbv      # median PBV peer riil
     if pbv and pbv > 0 and isinstance(_pbv_just, (int, float)) and _pbv_just > 0 and curr_p:
         rel_fv = curr_p * (float(_pbv_just) / pbv)
 
@@ -369,8 +427,19 @@ def build_research_model_from_context(
     _parts = [(0.40, dcf_fv if _dcf_ok else None),
               (0.35, exit_fv if _exit_ok else None),
               (0.25, rel_fv if _rel_ok else None)]
+    target_price = None
+    upside_pct = None
     _avail = [(w, v) for w, v in _parts if v is not None and v > 0]
-    if _avail and curr_p:
+
+    if is_bank and dcf_fv and dcf_fv > 0 and curr_p:
+        # STANDAR CFA/FIG UNTUK BANK: Justified PBV adalah satu-satunya metode
+        # yang menangkap kualitas neraca + ROE vs cost of equity. Mencampurnya
+        # dengan PE multiple (yang untuk bank hanya ~7x) menyeret nilai wajar
+        # bank premium seperti BBCA turun 24% — salah metodologi.
+        target_price = dcf_fv
+        upside_pct = ((target_price - curr_p) / curr_p) * 100.0
+        valuation_basis = "Justified PBV (ROE-g)/(Ke-g) x BVPS — metodologi bank"
+    elif _avail and curr_p:
         _wsum = sum(w for w, _ in _avail)
         target_price = sum(w * v for w, v in _avail) / _wsum
         upside_pct = ((target_price - curr_p) / curr_p) * 100.0
@@ -383,8 +452,6 @@ def build_research_model_from_context(
                        "asumsi historis model; verifikasi asumsi sebelum dipakai")
         valuation_basis = _basis
     else:
-        target_price = None
-        upside_pct = None
         valuation_basis = _dcf_invalid_note or "N/A — komponen valuasi tidak tersedia"
     
     if upside_pct is None:
