@@ -354,16 +354,18 @@ def quick_dcf_valuation(
     # ditaruh di sini agar tidak ada jalur yang lolos:
     #   * EBIT <= 0  -> FCF negatif, DCF tidak bermakna (EXCL: EBIT -1.345).
     #   * FCF awal <= 0 -> arus kas tidak menopang nilai (ADRO: -2.131).
-    #   * g >= WACC  -> terminal value tak terdefinisi (UNTR: 12% vs 11,74%).
-    # Mengembalikan None membuat pemanggil menampilkan N/A, bukan angka palsu.
+    # CATATAN METODOLOGI: g (pertumbuhan FCF 5 tahun) BOLEH melebihi WACC.
+    # Terminal value memakai terminal_growth_rate (2,5%), bukan g; yang
+    # membuat penyebut nol adalah terminal_growth_rate >= WACC, dan itu
+    # sudah ditangani calculate_terminal_value (mengembalikan 0 -> ditolak
+    # guard TV <= 0). Guard `g >= WACC` sebelumnya salah dan membunuh DCF
+    # emiten sehat seperti UNTR (g 12%) dan DSNG.
     _fcf_base = model.calculate_free_cash_flow(
         ebit or 0.0, tax_rate, depreciation or 0.0,
         capex or 0.0, wc_change or 0.0)
-    _wacc_eff = (wacc_override / 100.0) if wacc_override else None
     if (ebit is None or ebit <= 0
             or _fcf_base is None or _fcf_base <= 0
-            or not shares_outstanding_m or shares_outstanding_m <= 0
-            or (_wacc_eff is not None and fcf_growth_rate >= _wacc_eff)):
+            or not shares_outstanding_m or shares_outstanding_m <= 0):
         return None
 
     result = model.comprehensive_dcf(

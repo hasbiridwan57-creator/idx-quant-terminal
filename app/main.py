@@ -286,17 +286,21 @@ async def dashboard_home(
                 _ebit_norm_bn = _ebit_last
             else:
                 _avg3 = (sum(_ebits) / len(_ebits)) if _ebits else ebit_bn
-                # Normalisasi hanya bila tahun terakhir TIDAK jauh di bawah
-                # rata-rata. ANTM: EBIT 2025 8.395 B vs rata-rata 3 tahun
-                # 4.670 B (turun 44%) -> memakai rata-rata membuat DCF
-                # menolak emiten yang justru sedang membaik. Bila tahun
-                # terakhir lebih tinggi, pakai tahun terakhir (konservatif:
-                # tidak mengkredit lonjakan sebagai permanen, tapi juga tidak
-                # menghukum perbaikan).
-                if _ebit_last is not None and _avg3 and _ebit_last >= _avg3:
-                    _ebit_norm_bn = _ebit_last
+                # ATURAN NORMALISASI (jangan diubah tanpa alasan):
+                # rata-rata 3 tahun hanya dipakai bila tahun terakhir
+                # adalah OUTLIER NEGATIF (turun >25% dari rata-rata).
+                # Selain itu pakai tahun terakhir, karena:
+                #  - UNTR: avg3 26.323 > last 22.065 (EBIT menurun 3 tahun
+                #    berturut). Memakai avg3 MENAIKKAN laba yang sedang
+                #    turun -> DCF Rp100.806 (4,2x harga) vs Rp64.697 bila
+                #    memakai tahun terakhir.
+                #  - ANTM: avg3 4.670 < last 8.395 (sedang membaik). Memakai
+                #    avg3 menghukum perbaikan dan membuat DCF ditolak.
+                if (_ebit_last is not None and _avg3 and _avg3 > 0
+                        and _ebit_last < _avg3 * 0.75):
+                    _ebit_norm_bn = _avg3      # tahun terakhir outlier negatif
                 else:
-                    _ebit_norm_bn = _avg3
+                    _ebit_norm_bn = _ebit_last if _ebit_last is not None else _avg3
 
             # D&A: tag langsung, atau EBITDA - EBIT (identitas), atau 0 (konservatif)
             dep_bn = _last.get("depreciation_amortization_bn")
@@ -348,8 +352,26 @@ async def dashboard_home(
             if len(_tbl) >= 2:
                 _prev = _tbl[-2]
                 if all(x.get(k) for x in (_last, _prev) for k in ("current_assets_bn", "current_liabilities_bn")):
-                    _dwc = ((_last["current_assets_bn"] - _last["current_liabilities_bn"])
-                            - (_prev["current_assets_bn"] - _prev["current_liabilities_bn"]))
+                    _dwc_raw = ((_last["current_assets_bn"] - _last["current_liabilities_bn"])
+                                - (_prev["current_assets_bn"] - _prev["current_liabilities_bn"]))
+                    # ΔWC SATU TAHUN tidak boleh langsung dipakai: lonjakan
+                    # modal kerja bersifat siklus dan bisa memakan hampir
+                    # seluruh FCF. MYOR: ΔWC Rp2.748 B = 7,8% revenue ->
+                    # FCF 1.931 B menjadi -817 B -> DCF Rp335 (padahal
+                    # Rp1.841 tanpa ΔWC). Batasi ke 5% revenue sebagai beban
+                    # modal kerja berkelanjutan.
+                    _rev_last_wc = (_last.get("revenue_bn") or 0.0)
+                    if _rev_last_wc > 0:
+                        _cap_wc = 0.05 * _rev_last_wc
+                        if abs(_dwc_raw) > _cap_wc:
+                            print(f"[DCF] {curr_stmt.ticker}: ΔWC {_dwc_raw:,.0f} B "
+                                  f"dibatasi {_cap_wc:,.0f} B (5% revenue) — "
+                                  f"lonjakan modal kerja satu tahun tidak berkelanjutan")
+                            _dwc = _cap_wc if _dwc_raw > 0 else -_cap_wc
+                        else:
+                            _dwc = _dwc_raw
+                    else:
+                        _dwc = _dwc_raw
 
             # Growth: CAGR revenue riil, dibatasi -10%..12%
             _g = 0.05
@@ -358,6 +380,16 @@ async def dashboard_home(
             if len(_revs) >= 2:
                 _n = len(_revs) - 1
                 _g = max(-0.10, min(0.12, (_revs[-1] / _revs[0]) ** (1.0 / _n) - 1.0))
+            # CAP PERTUMBUHAN 5 TAHUN: g historis CAGR revenue tidak boleh
+            # dipakai apa adanya. UNTR: g 12% x 5 tahun menggelembungkan FCF
+            # 14.873 -> 26.207 B, lalu terminal value melipatgandanya menjadi
+            # DCF Rp117.328 (+384%). Pertumbuhan capex-berat tidak pernah
+            # berkelanjutan 5 tahun; batasi ke 8% (di bawah WACC tipikal dan
+            # di bawah pertumbuhan nominal PDB + inflasi).
+            if _g > 0.08:
+                print(f"[DCF] {curr_stmt.ticker}: g historis {_g:.2%} dibatasi 8.00% "
+                      f"(pertumbuhan 5 tahun harus berkelanjutan)")
+                _g = 0.08
 
             # Parameter WACC riil per emiten
             _wb = _bwc(financials=_tbl, beta_raw=None, current_price=current_price,
@@ -366,6 +398,29 @@ async def dashboard_home(
             _kd = ((_wb.get("cod_pre_tax_pct") or 7.5)) / 100.0
             _etr = (_wb.get("etr_pct") or 22.0) / 100.0
             _wd = (_wb.get("wd_pct") or 30.0) / 100.0
+            # ── KONSISTENSI g DENGAN REINVESTASI (Damodaran) ────────────────
+            # Bila D&A diproksi = capex, FCF = EBIT(1-t) yang berarti NOL
+            # reinvestasi bersih. Menumbuhkan arus kas itu 7-8%/tahun tanpa
+            # reinvestasi adalah mustahil: JPFA FCF 4.910 B -> DCF Rp10.084
+            # (5,8x harga). g = ROIC x reinvestment rate menutup celah ini.
+            try:
+                from app.services.cost_of_capital import compute_eva as _ceva_g
+                _row_g = _last
+                _eva_g = _ceva_g(session, curr_stmt.ticker, _row_g)
+                _roic_g = (_eva_g.get("roic_pct") / 100.0
+                           if _eva_g.get("available") else None)
+            except Exception:
+                _roic_g = None
+            if _roic_g and _roic_g > 0 and _g > 0:
+                _reinves_g = max(0.0, (capex_bn - (dep_bn or 0.0))) / max(
+                    (_ebit_norm_bn or 0.0) * (1.0 - _etr), 1e-9)
+                _reinves_g = min(max(_reinves_g, 0.0), 1.0)
+                _g_implied = _roic_g * _reinves_g
+                if _g_implied < _g:
+                    print(f"[DCF] {curr_stmt.ticker}: g {_g:.2%} -> {_g_implied:.2%} "
+                          f"(ROIC {_roic_g:.1%} x reinvestasi {_reinves_g:.0%}; "
+                          f"tanpa reinvestasi, pertumbuhan tidak terbiayai)")
+                    _g = _g_implied
 
             # Utang: interest-bearing bila ada, else PROXY konservatif
             # min(total liabilitas, ekuitas) — upper bound yang dapat
@@ -389,17 +444,6 @@ async def dashboard_home(
             # (GOTO, BUKA) menghasilkan FCF & terminal value negatif ->
             # "upside -100%" yang tidak dapat dipertanggungjawabkan.
             # Lebih baik DCF = None (N/A) daripada angka tak bermakna.
-            # Pertumbuhan FCF >= WACC membuat terminal value tak terdefinisi
-            # (penyebut negatif/nol) -> harga meledak. UNTR: g 12% vs WACC
-            # 11,74% menghasilkan DCF Rp117.328 (+384,8%) padahal target
-            # gabungan Rp31.122. Model ditolak, bukan disajikan.
-            if _wacc_override_main and (_g is not None) and (_g >= _wacc_override_main / 100.0):
-                print(f"[DCF] {curr_stmt.ticker}: g {_g:.2%} >= WACC "
-                      f"{_wacc_override_main:.2f}% -> DCF dilewati (model tidak stabil)")
-                dcf_reason = (f"Pertumbuhan FCF ({_g:.1%}) melebihi biaya modal "
-                              f"({_wacc_override_main:.2f}%) sehingga terminal value "
-                              f"tidak terdefinisi. DCF tidak disajikan.")
-                raise ValueError("g >= WACC")
             if (_ebit_norm_bn or 0) <= 0:
                 dcf_reason = (f"EBIT {_ebit_norm_bn:,.0f} B tidak positif. DCF "
                               f"membutuhkan laba operasi positif; emiten rugi "
@@ -435,15 +479,28 @@ async def dashboard_home(
                 # Fungsi menolak model (EBIT/FCF non-positif, g >= WACC,
                 # atau saham tak tersedia). Jelaskan komponen mana yang gagal
                 # agar pengguna tahu ini keterbatasan data, bukan error.
+                # Narasi WAJIB menampilkan komponen yang benar-benar dipakai
+                # fungsi valuasi. Sebelumnya teks menyebut EBIT setelah
+                # normalisasi tanpa menyebut D&A proksi, sehingga pembaca
+                # menemukan aritmetika yang tidak nyambung: "EBIT 4.036 B x
+                # (1-22%) - capex 54 B = -3.421 B" (padahal 3.147 B).
                 _dep_eff = dep_bn if dep_bn is not None else 0.0
                 _fcf_chk = ((_ebit_norm_bn or 0.0) * (1.0 - _etr)
                             + _dep_eff - (capex_bn or 0.0) - (_dwc or 0.0))
                 if _fcf_chk <= 0:
+                    _dep_note = ("" if _dep_eff > 0 else
+                                 " (D&A tidak dilaporkan di XBRL dan capex "
+                                 "terlalu kecil untuk dipakai sebagai proksi)")
+                    _wc_note = (f" - Δkas kerja {_dwc:,.0f} B"
+                                if (_dwc or 0) != 0 else "")
                     dcf_reason = (
-                        f"Arus kas bebas tidak positif: EBIT {_ebit_norm_bn:,.0f} B "
-                        f"x (1 - pajak {_etr:.1%}) + D&amp;A {_dep_eff:,.0f} B "
-                        f"- capex {capex_bn:,.0f} B = {_fcf_chk:,.0f} B. DCF "
-                        f"membutuhkan arus kas positif untuk menopang nilai.")
+                        f"Arus kas bebas operasi tidak positif. Perhitungan: "
+                        f"EBIT {_ebit_norm_bn:,.0f} B x (1 - pajak {_etr:.1%}) = "
+                        f"{(_ebit_norm_bn or 0.0)*(1.0-_etr):,.0f} B; "
+                        f"+ D&amp;A {_dep_eff:,.0f} B{_dep_note}; "
+                        f"- capex {capex_bn:,.0f} B{_wc_note} = "
+                        f"{_fcf_chk:,.0f} B. DCF memerlukan arus kas positif "
+                        f"untuk menopang nilai, jadi DCF tidak disajikan.")
                 else:
                     dcf_reason = (
                         f"Model DCF tidak stabil untuk emiten ini (EBIT "
