@@ -19,11 +19,17 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
     ke = rf + beta * erp  # Cost of Equity
 
     # Market cap & debt (dalam miliar Rp)
-    # shares_m = juta lembar, curr_p = Rp/saham -> market_cap = Rp miliar
-    market_cap = current_price * shares_bn  # Rp miliar
+    # UNIT: shares_bn = JUTA lembar, curr_p = Rp/saham.
+    #   juta lembar × Rp/saham = Rp JUTA  -> bagi 1.000 = Rp MILIAR
+    # (versi lama lupa membagi 1.000 sehingga market cap 1.000x terlalu besar
+    #  dan bobot ekuitas WACC jadi 99,89% — mustahil.)
+    # NULL-SAFE: emiten tersuspensi/delisting (WSKT, SRIL) tidak punya harga,
+    # jadi market_cap = None. Bobot WACC lalu N/A — TIDAK dikarang.
+    market_cap = ((current_price * shares_bn) / 1000.0) if (current_price and shares_bn) else None
     liabilities = latest.get("liabilities_bn") or 0.0
     equity_bn = latest.get("equity_parent_bn") or 0.0
 
+    cod_source = "N/A (bank)"
     if is_bank:
         # Bank: tidak ada "total debt" korporat. Seluruh liabilities adalah
         # dana pihak ketiga (costed). WACC bank tidak dihitung dari bobot
@@ -32,6 +38,8 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
         total_cap = market_cap
         we = 1.0
         wd = 0.0
+        if market_cap is None:      # bank tanpa harga -> WACC = Ke saja (tetap valid)
+            total_cap = None
         cod_pre_tax = None
         kd_post_tax = None
     else:
@@ -39,22 +47,46 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
         # Gunakan Total Liabilities sebagai PROXY konservatif (upper bound WACC),
         # dan tandai secara eksplisit agar tidak dibaca sebagai angka pasti.
         total_debt = liabilities
-        total_cap = market_cap + total_debt
-        we = market_cap / total_cap if total_cap > 0 else 0.5
-        wd = total_debt / total_cap if total_cap > 0 else 0.5
+        if market_cap is None:
+            total_cap = None
+            we = wd = None
+        else:
+            total_cap = market_cap + total_debt
+            we = market_cap / total_cap if total_cap > 0 else None
+            wd = total_debt / total_cap if total_cap > 0 else None
+        # Kd (cost of debt) = beban keuangan / rata-rata pinjaman berbunga.
+        # MASALAH: XBRL BEI tidak punya tag pinjaman berbunga untuk non-bank
+        # (st_debt coverage 0), sehingga pembagi yang tersedia hanyalah TOTAL
+        # LIABILITAS yang didominasi utang usaha -> Kd 1,72% (mustahil untuk
+        # emiten Indonesia, SBN saja 6,8%).
+        # Solusi: Kd = Rf + spread kredit korporasi (2,5%) sebagai ESTIMASI
+        # STRUKTURAL yang diberi label eksplisit. Rumus lama menghasilkan WACC
+        # 7,0% dan klaim "UNDERVALUED +241%" yang tidak dapat dipertanggungjawabkan.
         fc = latest.get("finance_costs_bn") or 0.0
         cod_pre_tax = fc / total_debt if total_debt > 0 else None
+        if cod_pre_tax is None or not (0.06 <= cod_pre_tax <= 0.20):
+            cod_pre_tax = rf + 0.025          # Rf + spread korporasi AA
+            cod_source = "ESTIMASI (Rf + spread kredit 2,5%)"
+        else:
+            cod_source = "COMPUTED (beban keuangan / liabilitas)"
 
     # Effective Tax Rate — pakai pretax_bn sesuai key di historical_financials
-    pbt = latest.get("pretax_bn") or 0.0
+    # ETR: KUNCI TOLERAN. Pipeline mengirim `profit_before_tax_bn`, bukan
+    # `pretax_bn` — versi lama hanya membaca nama yang salah sehingga ETR
+    # selalu 0,0% dan Kd after-tax = Kd pre-tax (WACC terlalu rendah).
+    # XBRL BEI mencatat beban pajak NEGATIF -> pakai nilai absolut.
+    pbt = latest.get("pretax_bn", latest.get("profit_before_tax_bn")) or 0.0
     tax = abs(latest.get("tax_provision_bn") or 0.0)
-    etr = tax / pbt if pbt > 0 else 0.0
+    etr = min(max(tax / pbt, 0.0), 0.50) if pbt > 0 else 0.0
     kd_post_tax = (cod_pre_tax * (1.0 - etr)) if cod_pre_tax is not None else None
 
     if is_bank:
         wacc = ke
-    else:
+    elif we is not None and wd is not None:
         wacc = we * ke + wd * (kd_post_tax or 0.0)
+    else:
+        # Tanpa harga pasar, bobot struktur modal tidak dapat dihitung.
+        wacc = None
 
     # Justified PBV (bank valuation standar CFA / FIG):
     # PBV = (ROE - g) / (Ke - g). Hanya valid bila Ke > g dan ROE > 0.
@@ -81,16 +113,18 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
         "cod_pre_tax_pct": round(cod_pre_tax * 100, 2) if cod_pre_tax else None,
         "kd_post_tax_pct": round(kd_post_tax * 100, 2) if kd_post_tax else None,
         "etr_pct": round(etr * 100, 2),
-        "we_pct": round(we * 100, 2),
-        "wd_pct": round(wd * 100, 2),
-        "wacc_pct": round(wacc * 100, 2),
-        "market_cap_bn": round(market_cap, 1),
-        "total_debt_bn": round(total_debt, 1),
-        "total_cap_bn": round(total_cap, 1),
+        # NULL-SAFE: None tetap None (N/A di UI/PDF), bukan crash.
+        "we_pct": round(we * 100, 2) if we is not None else None,
+        "wd_pct": round(wd * 100, 2) if wd is not None else None,
+        "wacc_pct": round(wacc * 100, 2) if wacc is not None else None,
+        "market_cap_bn": round(market_cap, 1) if market_cap is not None else None,
+        "total_debt_bn": round(total_debt, 1) if total_debt is not None else None,
+        "total_cap_bn": round(total_cap, 1) if total_cap is not None else None,
         "justified_pbv": justified_pbv,
         "justified_pbv_note": justified_pbv_note,
         "method": "BANK_JUSTIFIED_PBV" if is_bank else "STANDARD_CAPM",
         "debt_provenance": "N/A (bank)" if is_bank else "PROXY: total liabilities",
+        "cod_source": cod_source if not is_bank else "N/A (bank)",
         "provenance": {
             "rf": "ASSUMPTION (SBN 10Y Indonesia)",
             "erp": "ASSUMPTION (Damodaran Indonesia)",

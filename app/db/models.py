@@ -42,6 +42,7 @@ class FinancialStatementCache(SQLModel, table=True):
     capex: Optional[float] = Field(default=None)
     depreciation: Optional[float] = Field(default=None)
     minority_interest: Optional[float] = Field(default=None)
+    eps: Optional[float] = Field(default=None)
 
     # ── Extended metadata ──────────────────────────────────────────────
     pe_trailing: Optional[float] = Field(default=None)

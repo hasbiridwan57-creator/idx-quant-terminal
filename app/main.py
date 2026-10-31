@@ -206,7 +206,24 @@ async def dashboard_home(
         "pretax_income": pretax_full,
         "shares_outstanding": curr_stmt.shares_outstanding or 0.0,
         "period": curr_stmt.year,
+        "eps": getattr(curr_stmt, "eps", None),
     }
+    # Ke riil (beta regresi) + sustainable growth -> Justified PBV institusional,
+    # bukan konstanta Ke 10.5% / g 5.0% untuk semua bank.
+    try:
+        from app.services.cost_of_capital import compute_wacc, compute_sustainable_growth
+        from app.services import idx_audited_financials as _AFb
+        if _AFb.available() and _AFb.has_ticker(curr_stmt.ticker):
+            _hist_b = _AFb.five_year_table(curr_stmt.ticker)
+            _fy_b = _hist_b[-1] if _hist_b else {}
+            _w_b = compute_wacc(session, curr_stmt.ticker, _fy_b)
+            if _w_b.get("available") and _w_b.get("cost_equity_pct"):
+                banking_data["cost_of_equity_pct"] = _w_b["cost_equity_pct"]
+            _g_b, _ = compute_sustainable_growth(_hist_b)
+            if _g_b is not None:
+                banking_data["sustainable_growth_pct"] = _g_b
+    except Exception:
+        pass
     banking_ratios = calculate_banking_ratios(banking_data)
     is_bank = banking_ratios is not None
 
@@ -223,34 +240,91 @@ async def dashboard_home(
     dcf_result = None
     if not is_bank:
         try:
-            shares_out = curr_stmt.shares_outstanding or 0.0
-            if shares_out > 0:
-                shares_m = shares_out / 1e6
-            else:
-                shares_m = max(100.0, te_bn * 1e9 / 5000 / 1e6)
+            # ZERO-FAKE: tidak ada fallback harga/saham karangan.
+            shares_m = (_shares_from_stmt(curr_stmt) / 1e6) or None
+            if shares_m is None:
+                print(f"[DCF] {curr_stmt.ticker}: jumlah saham tidak dapat "
+                      f"diturunkan (shares & EPS kosong) -> DCF dilewati")
+                raise ValueError("shares unavailable")
+
+            # ── Input DCF dari filing audited (bukan konstanta) ──────────────
+            from app.services.idx_audited_financials import five_year_table as _fyt
+            from app.services.equity_research_helpers import build_wacc_components as _bwc
+            _tbl = []
+            try:
+                _tbl = _fyt(curr_stmt.ticker) or []
+            except Exception:
+                _tbl = []
+            _last = _tbl[-1] if _tbl else {}
+
+            # EBIT ternormalisasi: rata-rata 3 tahun (satu tahun bisa outlier)
+            _ebits = [x.get("ebit_bn") for x in _tbl[-3:] if x.get("ebit_bn") is not None]
+            _ebit_norm_bn = (sum(_ebits) / len(_ebits)) if _ebits else ebit_bn
+
+            # D&A: tag langsung, atau EBITDA - EBIT (identitas), atau 0 (konservatif)
+            dep_bn = _last.get("depreciation_amortization_bn")
+            if dep_bn is None:
+                _ebitda_r, _ebit_r = _last.get("ebitda_bn"), _last.get("ebit_bn")
+                dep_bn = (_ebitda_r - _ebit_r) if (_ebitda_r is not None and _ebit_r is not None) else 0.0
+
+            # Capex: PPE + intangible (sudah dijumlahkan di parser)
+            capex_bn = abs(_last.get("capex_bn") or 0.0)
+
+            # ΔWC dari neraca (CA-CL antar tahun); 0 bila tidak tersedia
+            _dwc = 0.0
+            if len(_tbl) >= 2:
+                _prev = _tbl[-2]
+                if all(x.get(k) for x in (_last, _prev) for k in ("current_assets_bn", "current_liabilities_bn")):
+                    _dwc = ((_last["current_assets_bn"] - _last["current_liabilities_bn"])
+                            - (_prev["current_assets_bn"] - _prev["current_liabilities_bn"]))
+
+            # Growth: CAGR revenue riil, dibatasi -10%..12%
+            _g = 0.05
+            _revs = [x.get("revenue_bn") for x in _tbl if x.get("revenue_bn")]
+            _revs = [v for v in _revs if v > 0]
+            if len(_revs) >= 2:
+                _n = len(_revs) - 1
+                _g = max(-0.10, min(0.12, (_revs[-1] / _revs[0]) ** (1.0 / _n) - 1.0))
+
+            # Parameter WACC riil per emiten
+            _wb = _bwc(financials=_tbl, beta_raw=None, current_price=current_price,
+                       shares_bn=shares_m, is_bank=False, ticker=curr_stmt.ticker)
+            _beta = _wb.get("beta") or 1.0
+            _kd = ((_wb.get("cod_pre_tax_pct") or 7.5)) / 100.0
+            _etr = (_wb.get("etr_pct") or 22.0) / 100.0
+            _wd = (_wb.get("wd_pct") or 30.0) / 100.0
+
+            # Utang: interest-bearing bila ada, else PROXY konservatif
+            # min(total liabilitas, ekuitas) — upper bound yang dapat
+            # dipertanggungjawabkan, bukan default 45% liabilitas.
+            _debt = debt_bn
+            if _debt is None:
+                _debt = min(tl_bn, te_bn) if (tl_bn and te_bn) else tl_bn
 
             dcf_result = quick_dcf_valuation(
                 ticker=curr_stmt.ticker,
                 current_market_price=current_price,
                 risk_free_rate=6.85,
                 market_risk_premium=6.5,
-                levered_beta=1.0,
-                cost_of_debt_pre_tax=7.5,
-                tax_rate=0.22,
-                target_debt_ratio=0.30,
-                ebit=ebit_bn,
+                levered_beta=_beta,
+                cost_of_debt_pre_tax=_kd * 100.0,
+                tax_rate=_etr,
+                target_debt_ratio=_wd,
+                ebit=_ebit_norm_bn,
                 depreciation=dep_bn,
                 capex=capex_bn,
-                wc_change=ebit_bn * 0.05,
-                fcf_growth_rate=0.05,
+                wc_change=_dwc,
+                fcf_growth_rate=_g,
                 terminal_growth_rate=0.025,
                 total_assets=ta_bn,
-                total_debt=debt_bn,       # BUG FIX v5.0: pakai interest_bearing_debt
-                cash=cash_bn,
+                total_debt=_debt,
+                cash=(cash_bn or 0.0),
                 shares_outstanding_m=shares_m,
             )
+            if isinstance(dcf_result, dict):
+                dcf_result.setdefault("terminal_growth_rate", 0.025)
         except Exception as exc:
-            print(f"DCF Error: {exc}")
+            print(f"DCF Error [{curr_stmt.ticker}]: {type(exc).__name__}: {exc}")
             dcf_result = None
 
     # Multi-Year Trend Metrics
@@ -331,7 +405,7 @@ async def dashboard_home(
             risk=risk_payload if isinstance(risk_payload, dict) else {},
             technical=None,
             current_price=float(current_price or (prices_series[-1] if prices_series else 0.0) or 0.0),
-            shares_out=float(curr_stmt.shares_outstanding or 0.0),
+            shares_out=_shares_from_stmt(curr_stmt),
         )
         research_payload = dataclasses.asdict(research_model)
     except Exception as exc:
@@ -726,11 +800,16 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
     ta_bn = curr_stmt.total_assets * factor_to_bn
     tl_bn = curr_stmt.total_liabilities * factor_to_bn
     te_bn = curr_stmt.total_equity_parent * factor_to_bn
-    debt_bn = (curr_stmt.interest_bearing_debt * factor_to_bn) if curr_stmt.interest_bearing_debt else (tl_bn * 0.45)
-    cash_bn = (curr_stmt.cash_and_equivalents * factor_to_bn) if curr_stmt.cash_and_equivalents else (ta_bn * 0.12)
-    shares_m = (curr_stmt.shares_outstanding / 1e6) if curr_stmt.shares_outstanding else max(100.0, te_bn * 1e9 / 5000 / 1e6)
-    
-    current_price = 5000.0
+    # ZERO-FAKE: jangan mengarang utang (45% liabilitas), kas (12% aset),
+    # jumlah saham (ekuitas/5000), atau harga (5000). Bila tidak ada, N/A.
+    debt_bn = (curr_stmt.interest_bearing_debt * factor_to_bn) if curr_stmt.interest_bearing_debt else None
+    cash_bn = (curr_stmt.cash_and_equivalents * factor_to_bn) if curr_stmt.cash_and_equivalents else None
+    # Jumlah saham (juta lembar) — satu sumber kebenaran: helper _shares_from_stmt
+    # (turunan identitas NI/EPS bila XBRL tidak melaporkan jumlah lembar).
+    _sh_raw = _shares_from_stmt(curr_stmt)
+    shares_m = (_sh_raw / 1e6) if _sh_raw > 0 else None
+
+    current_price = None
     try:
         ql = session.get(QuoteLatest, ticker_upper)
         if ql and ql.price and ql.price > 0:
@@ -740,28 +819,113 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
         
     dcf_res = None
     try:
+        # PARAMETER RIIL, bukan default: beta dari regresi vs IHSG (fallback 1,0
+        # hanya bila histori harga kurang, dan itu ditandai), D/E dari neraca
+        # audited, Kd dari beban bunga/pinjaman, tax dari ETR aktual.
+        from app.services.equity_research_helpers import build_wacc_components as _bwc
+        _tbl_dcf = []
+        try:
+            from app.services import idx_audited_financials as _AFD
+            if _AFD.available() and _AFD.has_ticker(ticker_upper):
+                _tbl_dcf = _AFD.five_year_table(ticker_upper) or []
+        except Exception:
+            _tbl_dcf = []
+        _last = _tbl_dcf[-1] if _tbl_dcf else {}
+        _wb = _bwc(financials=_tbl_dcf, beta_raw=None, current_price=current_price,
+                   shares_bn=(shares_m or 0.0), is_bank=False, ticker=ticker_upper)
+        _beta_used = _wb.get("beta") or 1.0
+        _etr_used = (_wb.get("etr_pct") or 22.0) / 100.0
+        _kd_used = _wb.get("cod_pre_tax_pct")
+        _kd_used = (_kd_used / 100.0) if _kd_used else 0.075
+        _wd_used = (_wb.get("wd_pct") or 30.0) / 100.0
+
+        # FCF components dari filing audited (bukan rasio karangan)
+        _da_bn = _last.get("depreciation_amortization_bn")
+        if _da_bn is None:
+            # D&A tidak dilaporkan (xsi:nil) -> turunkan dari EBITDA - EBIT
+            # bila keduanya ada (identitas), kalau tidak -> 0 (KONSERVATIF).
+            _ebitda_r = _last.get("ebitda_bn")
+            _ebit_r = _last.get("ebit_bn")
+            _da_bn = (_ebitda_r - _ebit_r) if (_ebitda_r is not None and _ebit_r is not None) else 0.0
+        _capex_bn = _last.get("capex_bn")
+        _capex_bn = abs(_capex_bn) if _capex_bn is not None else 0.0   # XBRL kadang negatif
+        # Perubahan modal kerja: pakai CFO riil bila tersedia untuk kalibrasi?
+        # Tidak — biarkan 0 dan tandai, agar FCFF tidak dikarang.
+        # Perubahan modal kerja (ΔWC) = selisih modal kerja bersih CA-CL antar
+        # tahun. Identitas neraca, bukan karangan. ΔWC=0 membuat FCFF overstate
+        # (TLKM +409%). Bank unclassified BS -> tidak ada CA/CL -> 0.
+        _dwc_bn = _last.get("working_capital_change_bn")
+        if _dwc_bn is None and len(_tbl_dcf) >= 2:
+            _prev_d = _tbl_dcf[-2]
+            _wc_now = (_last.get("current_assets_bn") or 0) - (_last.get("current_liabilities_bn") or 0)
+            _wc_prev = (_prev_d.get("current_assets_bn") or 0) - (_prev_d.get("current_liabilities_bn") or 0)
+            if _last.get("current_assets_bn") and _last.get("current_liabilities_bn") \
+               and _prev_d.get("current_assets_bn") and _prev_d.get("current_liabilities_bn"):
+                _dwc_bn = _wc_now - _wc_prev
+        if _dwc_bn is None:
+            _dwc_bn = 0.0
+
+        # PROXY utang: min(total liabilitas, ekuitas) — keduanya batas atas/
+        # bawah yang dapat dipertanggungjawabkan dari neraca audited.
+        _debt_proxy_bn = (debt_bn if debt_bn is not None
+                          else (min(tl_bn, te_bn) if (tl_bn and te_bn) else tl_bn))
+
+        # EBIT ternormalisasi: rata-rata 3 tahun terakhir yang tersedia
+        _ebits = [x.get("ebit_bn") for x in _tbl_dcf[-3:] if x.get("ebit_bn") is not None]
+        _ebit_norm_bn = (sum(_ebits) / len(_ebits)) if _ebits else ebit_bn
+
+        # Growth FCF: CAGR revenue riil, DIBATASI -10%..12%. Batas atas 12%
+        # karena growth abadi di atas itu tidak dapat dipertahankan (dan CAGR
+        # 5 tahun emiten komoditas mencerminkan siklus harga, bukan trend).
+        _g_rev_dcf = 0.05
+        try:
+            _revs = [x.get("revenue_bn") for x in _tbl_dcf if x.get("revenue_bn")]
+            _revs = [v for v in _revs if v > 0]
+            if len(_revs) >= 2:
+                _n = len(_revs) - 1
+                _cagr = (_revs[-1] / _revs[0]) ** (1.0 / _n) - 1.0
+                _g_rev_dcf = max(-0.10, min(0.12, _cagr))
+        except Exception:
+            _g_rev_dcf = 0.05
+
         dcf_res = quick_dcf_valuation(
             ticker=ticker_upper,
             current_market_price=current_price,
             risk_free_rate=6.85,
             market_risk_premium=6.5,
-            levered_beta=1.0,
-            cost_of_debt_pre_tax=7.5,
-            tax_rate=0.22,
-            target_debt_ratio=0.30,
+            levered_beta=_beta_used,
+            cost_of_debt_pre_tax=_kd_used * 100.0,
+            tax_rate=_etr_used,
+            target_debt_ratio=_wd_used,
             ebit=ebit_bn,
-            depreciation=ebit_bn * 0.2,
-            capex=ebit_bn * 0.35,
-            wc_change=ebit_bn * 0.05,
+            # ZERO-FAKE: dulu D&A = EBITx20%, capex = EBITx35%, dWC = EBITx5%
+            # (semua karangan) -> target harga meledak +108%. Sekarang dari XBRL:
+            # D&A & capex & CFO riil. Bila xsi:nil -> 0 dengan provenance jelas
+            # (valuasi jadi konservatif, bukan optimistis palsu).
+            depreciation=_da_bn,
+            capex=_capex_bn,
+            wc_change=_dwc_bn,
             fcf_growth_rate=0.05,
             terminal_growth_rate=0.025,
             total_assets=ta_bn,
-            total_debt=debt_bn,
-            cash=cash_bn,
+            # XBRL tidak punya tag interest-bearing debt tunggal (st_debt
+            # coverage 0). Total liabilitas = UPPER BOUND: untuk ASII (bank-
+            # like, banyak utang usaha) ia melebih-lebihkan net debt sehingga
+            # equity value DCF meledak. Ambil nilai LEBIH KONSERVATIF antara
+            # total liabilitas dan ekuitas (batas bawah struktur modal wajar).
+            # Keduanya diberi label PROXY di output.
+            total_debt=_debt_proxy_bn,
+            cash=(cash_bn if cash_bn is not None else 0.0),
             shares_outstanding_m=shares_m,
         )
-    except Exception:
-        pass
+        # quick_dcf_valuation tidak mengembalikan terminal growth padahal itu
+        # input yang dipakai (2,5%). Teruskan eksplisit supaya label WACC/g di
+        # PDF/UI menampilkan asumsi yang BENAR-BENAR dipakai, bukan N/A.
+        if isinstance(dcf_res, dict):
+            dcf_res.setdefault("terminal_growth_rate", 0.025)
+    except Exception as _dcf_exc:
+        import sys as _sys
+        print(f"[DCF SKIP] {ticker_upper}: {type(_dcf_exc).__name__}: {_dcf_exc}", file=_sys.stderr)
 
     model = build_research_model_from_context(
         ticker=ticker_upper,
@@ -772,7 +936,7 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
         risk={},
         technical=None,
         current_price=current_price,
-        shares_out=curr_stmt.shares_outstanding or 0.0,
+        shares_out=_shares_from_stmt(curr_stmt),
     )
     
     pdf_bytes = generate_equity_research_pdf_bytes(model)
@@ -1120,23 +1284,51 @@ async def api_post_peer_matrix(ticker: str, req: dict = None):
         return {"error": str(e)}
 
 
+def _shares_from_stmt(stmt) -> float:
+    """Jumlah saham dalam LEMBAR MENTAH (bukan juta).
+
+    XBRL BEI hanya melaporkan nilai nominal `CommonStocks`, bukan jumlah lembar,
+    jadi bila `shares_outstanding` kosong -> turunkan dari identitas akuntansi
+    `shares = Laba Bersih (rupiah) / EPS (rupiah per saham)`. Identitas, bukan
+    angka karangan. Return 0.0 bila keduanya tidak tersedia (pemanggil wajib
+    memperlakukan 0.0 sebagai N/A, BUKAN memakai default).
+    """
+    so = getattr(stmt, "shares_outstanding", None)
+    try:
+        so = float(so or 0.0)
+    except (TypeError, ValueError):
+        so = 0.0
+    if so > 0:
+        # DB menyimpan jumlah lembar mentah
+        return so
+
+    eps = getattr(stmt, "eps", None)                  # Rp per saham
+    ni = getattr(stmt, "net_income_parent", None)     # MILIAR rupiah di DB
+    if eps and ni:
+        try:
+            eps_f, ni_f = float(eps), float(ni)
+            if eps_f != 0 and ni_f != 0:
+                # NI (miliar) -> rupiah penuh: x1e9
+                lembar = abs(ni_f) * 1e9 / abs(eps_f)
+                if lembar > 0:
+                    return lembar                      # lembar mentah
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
 @app.get("/api/research/{ticker}/pdf")
 async def api_research_pdf(ticker: str, session: Session = Depends(get_session)):
     """
     One-Click Institutional Equity Research Tear-Sheet Export (PDF).
-    Menggunakan ReportLab NumberedCanvas.
+
+    Versi lama memanggil `generate_equity_research_report` yang TIDAK PERNAH ADA
+    di research_paper_engine -> endpoint selalu 500. Sekarang mendelegasikan ke
+    handler /export-pdf yang sudah terbukti menghasilkan PDF.
     """
     from fastapi.responses import Response
-    from app.services.research_paper_engine import generate_equity_research_report
     clean_tk = ticker.upper().strip()
-    try:
-        pdf_bytes = generate_equity_research_report(clean_tk)
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename=IDX_Research_{clean_tk}.pdf"
-            },
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Gagal generate PDF: {exc}")
+    resp = await export_research_paper_pdf(ticker=clean_tk, session=session)
+    if isinstance(resp, Response):
+        resp.headers["Content-Disposition"] = f"attachment; filename=IDX_Research_{clean_tk}.pdf"
+    return resp

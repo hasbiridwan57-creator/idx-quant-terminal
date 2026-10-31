@@ -27,57 +27,58 @@ from reportlab.pdfgen import canvas
 
 @dataclass
 class EquityResearchModel:
-    ticker: str
-    company_name: str
-    sector: str
-    report_date: str
-    current_price: float
-    target_price: float
-    recommendation: str  # BUY / HOLD / SELL
-    upside_pct: float
-    market_cap_bn: float
-    shares_outstanding_m: float
-    pe_ratio: float
-    pbv_ratio: float
-    roe_pct: float
-    wacc_pct: float
-    terminal_growth_pct: float
-    dcf_fair_value: float
-    exit_multiple_fair_value: float
-    relative_fair_value: float
+    ticker: str = ""
+    company_name: str = ""
+    sector: str = ""
+    report_date: str = ""
+    current_price: Optional[float] = None
+    target_price: Optional[float] = None
+    recommendation: str = ""  # BUY / HOLD / SELL / N/A
+    upside_pct: Optional[float] = None
+    market_cap_bn: Optional[float] = None
+    shares_outstanding_m: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    pbv_ratio: Optional[float] = None
+    roe_pct: Optional[float] = None
+    wacc_pct: Optional[float] = None
+    terminal_growth_pct: Optional[float] = None
+    dcf_fair_value: Optional[float] = None
+    exit_multiple_fair_value: Optional[float] = None
+    relative_fair_value: Optional[float] = None
     
     # 3 Investment Pillars
-    investment_thesis: List[str]
-    bull_catalysts: List[str]
-    bear_risks: List[str]
+    investment_thesis: List[str] = field(default_factory=list)
+    bull_catalysts: List[str] = field(default_factory=list)
+    bear_risks: List[str] = field(default_factory=list)
     
     # DuPont Metrics
-    tax_burden: float
-    interest_burden: float
-    ebit_margin: float
-    asset_turnover: float
-    equity_multiplier: float
+    tax_burden: Optional[float] = None
+    interest_burden: Optional[float] = None
+    ebit_margin: Optional[float] = None
+    asset_turnover: Optional[float] = None
+    equity_multiplier: Optional[float] = None
     
     # Financial summary
-    revenue_bn: float
-    ebit_bn: float
-    net_income_bn: float
-    total_assets_bn: float
-    total_equity_bn: float
-    total_debt_bn: float
-    cash_bn: float
-    net_cash_bn: float
+    revenue_bn: Optional[float] = None
+    ebit_bn: Optional[float] = None
+    net_income_bn: Optional[float] = None
+    total_assets_bn: Optional[float] = None
+    total_equity_bn: Optional[float] = None
+    current_ratio: Optional[float] = None
+    total_debt_bn: Optional[float] = None
+    cash_bn: Optional[float] = None
+    net_cash_bn: Optional[float] = None
     
     # 5-Pillar Technical
-    technical_signal: str
-    technical_confidence: float
-    hurst_exponent: float
+    technical_signal: str = ""
+    technical_confidence: Optional[float] = None
+    hurst_exponent: Optional[float] = None
     
     # Risk Heatmap (5 Risks)
-    risk_factors: List[Dict[str, Any]]
+    risk_factors: List[Dict[str, Any]] = field(default_factory=list)
     
     # Sensitivity Matrix
-    sensitivity_grid: Dict[str, Any]
+    sensitivity_grid: Dict[str, Any] = field(default_factory=dict)
 
     # 5-Year Financial Forecast Model (2026F - 2030F)
     forecast_5yr: List[Dict[str, Any]] = field(default_factory=list)
@@ -218,38 +219,177 @@ def build_research_model_from_context(
     except Exception:
         audited_fy = None
 
-    debt_bn = to_bn(s, s.interest_bearing_debt) if getattr(s, "interest_bearing_debt", None) else (ta_bn * 0.25)
-    cash_bn = to_bn(s, s.cash_and_equivalents) if getattr(s, "cash_and_equivalents", None) else (ta_bn * 0.10)
-    net_cash_bn = cash_bn - debt_bn
+    # ZERO-FAKE: jangan mengarang utang (25% aset), kas (10% aset), harga
+    # (Rp5.000), atau saham (ekuitas/5.000). Bila tidak ada -> None.
+    debt_bn = to_bn(s, s.interest_bearing_debt) if getattr(s, "interest_bearing_debt", None) else None
+    cash_bn = to_bn(s, s.cash_and_equivalents) if getattr(s, "cash_and_equivalents", None) else None
+    net_cash_bn = (cash_bn - debt_bn) if (cash_bn is not None and debt_bn is not None) else None
+
+    # Current Ratio dari XBRL (CA/CL). Bank = unclassified BS -> N/A.
+    _ca_bn = to_bn(s, getattr(s, "current_assets", None)) if getattr(s, "current_assets", None) else None
+    _cl_bn = to_bn(s, getattr(s, "current_liabilities", None)) if getattr(s, "current_liabilities", None) else None
+    current_ratio = (_ca_bn / _cl_bn) if (_ca_bn and _cl_bn) else None
+
+    shares_m = (shares_out / 1e6) if shares_out > 0 else None
+    if shares_m is None:
+        # Turunkan dari EPS: shares = |NI| / |EPS| (identitas, terverifikasi)
+        _eps_r = getattr(s, "eps", None)
+        if _eps_r and ni_bn and _eps_r != 0:
+            _sh = abs(ni_bn * 1e9) / abs(float(_eps_r))
+            if _sh > 0:
+                shares_m = _sh / 1e6
+    curr_p = float(current_price) if (current_price and current_price > 0) else None
+    mcap_bn = ((curr_p * shares_m * 1e6) / 1e9) if (curr_p and shares_m) else None
+
+    # Multiples — hanya bila input tersedia
+    if shares_m and ni_bn is not None:
+        eps = (ni_bn * 1e9) / (shares_m * 1e6)
+    else:
+        eps = getattr(s, "eps", None)      # EPS reported (lebih andal bila ada)
+    bvps = (te_bn * 1e9) / (shares_m * 1e6) if (shares_m and te_bn) else None
+    pe = (curr_p / eps) if (curr_p and eps and eps > 0) else None
+    pbv = (curr_p / bvps) if (curr_p and bvps and bvps > 0) else None
+    roe_val = (c.roe * 100.0) if (c.roe is not None) else None
+
+    # ── Valuation synthesis ────────────────────────────────────────
+    # METODOLOGI BANK: FCFF/DCF TIDAK BERLAKU. Bank tidak punya "free cash flow
+    # to firm" (kredit = aset operasional, deposito = bahan baku). Menjalankan
+    # DCF pada bank menghasilkan target ngawur (BBCA -78,5%). Bank dinilai
+    # dengan Justified PBV = (ROE - g) / (Ke - g), BVPS x Justified PBV.
+    # Audited FY terbaru untuk perhitungan bank (audited_fy bisa None).
+    _bfy = audited_fy or {}
+    _bank_valuation = {}
+    if is_bank:
+        try:
+            from app.services.banking_engine import calculate_banking_ratios
+            _bk = calculate_banking_ratios({
+                "ticker": ticker.upper(),
+                "sector": (_bfy.get("sector") or "Financials"),
+                "period": _bfy.get("year"),
+                "net_income": (ni_bn * 1e9) if ni_bn is not None else None,
+                "total_equity": (te_bn * 1e9) if te_bn is not None else None,
+                "total_assets": (ta_bn * 1e9) if ta_bn is not None else None,
+                "total_debt": 0.0,
+                "pretax": (_bfy.get("profit_before_tax_bn") or 0) * 1e9,
+                "tax": (_bfy.get("tax_provision_bn") or 0) * 1e9,
+                "interest_income": (_bfy.get("interest_income_bn") or 0) * 1e9,
+                "interest_expense": (_bfy.get("interest_expense_bn") or 0) * 1e9,
+                "eps": _bfy.get("eps"),
+                "shares_outstanding": (shares_m * 1e6) if shares_m else None,
+            })
+            _bank_valuation = {
+                "justified_pbv": getattr(_bk, "justified_pbv", None),
+                "bvps": getattr(_bk, "bvps", None),
+                "fair_value_per_share": getattr(_bk, "fair_value_per_share", None),
+            }
+        except Exception as _bk_exc:
+            import sys as _s2
+            print(f"[BANK VAL] {ticker}: {type(_bk_exc).__name__}: {_bk_exc}", file=_s2.stderr)
+            _bank_valuation = {}
+
+    dcf_fv = None
+    wacc = None
+    tg = None
+    # KEY TOLERAN: quick_dcf_valuation mengembalikan `price_per_share` dan
+    # `wacc_pct`, bukan `fair_value_per_share`/`wacc`. Versi lama hanya membaca
+    # nama yang salah -> DCF selalu kosong -> SELURUH valuasi jadi N/A.
+    if dcf:
+        _fv = dcf.get("fair_value_per_share", dcf.get("price_per_share"))
+        if _fv:
+            dcf_fv = float(_fv)
+        _wc = dcf.get("wacc", dcf.get("wacc_pct"))
+        if _wc:
+            wacc = float(_wc)
+        _tg = dcf.get("terminal_growth_rate", dcf.get("terminal_growth_rate_pct"))
+        if _tg:
+            # `terminal_growth_rate` = desimal (0.025); `_pct` = sudah persen
+            tg = float(_tg) * 100.0 if float(_tg) < 1.0 else float(_tg)
+
+    if is_bank:
+        # Override: DCF tidak dipakai. Nilai wajar bank = BVPS x Justified PBV.
+        dcf_fv = _bank_valuation.get("fair_value_per_share")
+        # Bank: "biaya modal" = Cost of Equity (tidak ada utang korporat).
+        try:
+            from app.services.equity_research_helpers import build_wacc_components as _bwc2
+            # Catatan: `historical_financials` & `beta_vs_ihsg` BELUM ada di
+            # titik ini (didefinisikan setelah blok valuasi). Pakai `_bfy`
+            # (audited FY terbaru) agar Ke benar-benar terhitung, bukan N/A.
+            _wb_bank = _bwc2(
+                financials=[_bfy] if _bfy else [],
+                beta_raw=None,
+                current_price=curr_p, shares_bn=shares_m or 0.0,
+                is_bank=True, ticker=ticker.upper(),
+            )
+            wacc = _wb_bank.get("ke_pct")
+        except Exception:
+            wacc = None
+        tg = None
+
+    # Exit-multiple: P/E wajar x EPS forward. Butuh PE sektor; tanpa itu N/A.
+    exit_fv = None
+    _pe_ref = dcf.get("pe_reference") if dcf else None
+    if eps and eps > 0 and isinstance(_pe_ref, (int, float)) and _pe_ref > 0:
+        exit_fv = eps * float(_pe_ref)
+
+    # Relative: harga x (PBV wajar / PBV aktual) bila keduanya ada.
+    rel_fv = None
+    _pbv_just = dcf.get("justified_pbv") if dcf else None
+    if pbv and pbv > 0 and isinstance(_pbv_just, (int, float)) and _pbv_just > 0 and curr_p:
+        rel_fv = curr_p * (float(_pbv_just) / pbv)
+
+    # Blended Target Price — bobot dinormalisasi dari komponen yang TERSEDIA.
+    # Jangan pernah menghasilkan target dari komponen yang tidak ada.
+    # SANITY GATE: komponen valuasi di luar 0,25x..4x harga pasar dibuang.
+    # DCF yang menghasilkan 3-4x harga hampir selalu berarti asumsi rusak
+    # (mis. ΔWC nol, EBIT outlier), bukan "undervalued". Membiarkannya masuk
+    # blended target = menyajikan angka yang tidak dapat dipertanggungjawabkan.
+    def _plausible(v):
+        if v is None or v <= 0 or not curr_p:
+            return False
+        return 0.25 <= (v / curr_p) <= 4.0
+
+    # DCF yang menghasilkan equity value NEGATIF berarti net debt > EV:
+    # asumsi utang/net debt tidak valid untuk emiten ini. Tandai, jangan
+    # diam-diam jatuh ke metode lain tanpa keterangan.
+    _dcf_invalid_note = None
+    if dcf_fv is not None and dcf_fv <= 0:
+        _dcf_invalid_note = ("DCF tidak dapat dipakai: net debt melebihi "
+                             "enterprise value (equity value negatif)")
+
+    _dcf_ok, _exit_ok, _rel_ok = _plausible(dcf_fv), _plausible(exit_fv), _plausible(rel_fv)
+
+    # Bila DCF menyimpang >40% dari median metode lain, ia kemungkinan besar
+    # artefak asumsi (ΔWC nol, D&A tidak dilaporkan). Turunkan bobotnya alih-alih
+    # membuangnya, agar blended target tidak ditarik ke satu ekstrem.
+    _others = [v for v, ok in ((exit_fv, _exit_ok), (rel_fv, _rel_ok)) if ok]
+    if _dcf_ok and _others:
+        _med = sorted(_others)[len(_others) // 2]
+        if _med > 0 and abs(dcf_fv - _med) / _med > 0.40:
+            dcf_fv = (dcf_fv + _med) / 2.0
+    _parts = [(0.40, dcf_fv if _dcf_ok else None),
+              (0.35, exit_fv if _exit_ok else None),
+              (0.25, rel_fv if _rel_ok else None)]
+    _avail = [(w, v) for w, v in _parts if v is not None and v > 0]
+    if _avail and curr_p:
+        _wsum = sum(w for w, _ in _avail)
+        target_price = sum(w * v for w, v in _avail) / _wsum
+        upside_pct = ((target_price - curr_p) / curr_p) * 100.0
+        _basis = f"{len(_avail)} dari 3 metode tersedia"
+        # Upside ekstrem (>75%) hampir selalu karena harga pasar sudah turun
+        # jauh dari rata-rata historis yang dipakai model, bukan karena
+        # emiten benar-benar 2x undervalued. Nyatakan apa adanya.
+        if abs(upside_pct) > 75.0:
+            _basis += (" — SINYAL EKSTREM: harga pasar menyimpang jauh dari "
+                       "asumsi historis model; verifikasi asumsi sebelum dipakai")
+        valuation_basis = _basis
+    else:
+        target_price = None
+        upside_pct = None
+        valuation_basis = _dcf_invalid_note or "N/A — komponen valuasi tidak tersedia"
     
-    shares_m = (shares_out / 1e6) if shares_out > 0 else (te_bn * 1e9 / 5000 / 1e6)
-    curr_p = max(50.0, float(current_price or 5000.0))
-    mcap_bn = (curr_p * shares_m * 1e6) / 1e9
-    
-    # Multiples
-    eps = (ni_bn * 1e9) / (shares_m * 1e6) if shares_m > 0 else 1.0
-    bvps = (te_bn * 1e9) / (shares_m * 1e6) if shares_m > 0 else 1.0
-    pe = curr_p / eps if eps > 0 else 15.0
-    pbv = curr_p / bvps if bvps > 0 else 1.5
-    roe_val = (c.roe or 0.15) * 100.0
-    
-    # Valuation synthesis
-    dcf_fv = curr_p * 1.12
-    wacc = 11.5
-    tg = 2.5
-    if dcf and "fair_value_per_share" in dcf:
-        dcf_fv = float(dcf["fair_value_per_share"])
-        wacc = float(dcf.get("wacc", 11.5))
-        tg = float(dcf.get("terminal_growth_rate", 0.025)) * 100.0
-        
-    exit_fv = curr_p * (1.0 + (c.roe or 0.12) * 0.8)
-    rel_fv = curr_p * (1.0 + (0.15 - (pe / 100.0)) * 0.5)
-    
-    # Blended Target Price (40% DCF, 35% Exit Multiple, 25% Relative)
-    target_price = (0.40 * dcf_fv) + (0.35 * exit_fv) + (0.25 * rel_fv)
-    upside_pct = ((target_price - curr_p) / curr_p) * 100.0
-    
-    if upside_pct >= 15.0:
+    if upside_pct is None:
+        recommendation = "N/A"     # tanpa upside, tidak ada rekomendasi (jangan karang)
+    elif upside_pct >= 15.0:
         recommendation = "BUY"
     elif upside_pct <= -10.0:
         recommendation = "SELL"
@@ -265,11 +405,21 @@ def build_research_model_from_context(
         tech_conf = float(technical.get("confidence", 72.0))
         hurst = float(technical.get("statistical", {}).get("hurst_exponent", 0.58))
         
-    # 3 Investment Pillars
+    # 3 Investment Pillars — angka None ditampilkan N/A, tidak dikarang
+    def _f(v, dec=1, suffix=""):
+        return f"{v:.{dec}f}{suffix}" if isinstance(v, (int, float)) else "N/A"
+
     thesis = [
-        f"Kualitas Laba & Efisiensi Operasional: Emiten membukukan ROE {roe_val:.1f}% dengan EBIT Margin {(c.ebit_margin or 0.12)*100:.1f}%, ditopang disiplin biaya.",
-        f"Struktur Modal & Likuiditas: Posisi kas tercatat Rp{cash_bn:,.1f} Miliar dengan net cash Rp{net_cash_bn:,.1f} Miliar memberikan bantalan defensif kuat.",
-        f"Katalis Valuasi & Siklus: Target harga Rp{target_price:,.0f} menawarkan potensi upside {upside_pct:+.1f}% didukung konvergensi DCF dan multi-faktor institusional."
+        f"Kualitas Laba & Efisiensi Operasional: Emiten membukukan ROE {_f(roe_val)}% dengan "
+        f"EBIT Margin {_f((c.ebit_margin*100) if c.ebit_margin is not None else None)}%, "
+        f"ditopang disiplin biaya.",
+        f"Struktur Modal & Likuiditas: Posisi kas {('Rp' + _f(cash_bn, 1) + ' Miliar') if cash_bn is not None else 'N/A'} "
+        f"dengan net cash {('Rp' + _f(net_cash_bn, 1) + ' Miliar') if net_cash_bn is not None else 'N/A'} — "
+        f"{'memberikan bantalan defensif' if (net_cash_bn is not None and net_cash_bn > 0) else 'perlu dicermati'}.",
+        (f"Katalis Valuasi & Siklus: Target harga Rp{target_price:,.0f} menawarkan potensi upside "
+         f"{upside_pct:+.1f}% ({valuation_basis}).") if target_price is not None else
+        "Katalis Valuasi & Siklus: target harga tidak dapat dihitung karena komponen "
+        "valuasi (DCF/multiple) tidak tersedia — tidak dikarang."
     ]
     
     bull_catalysts = [
@@ -293,16 +443,20 @@ def build_research_model_from_context(
         {"code": "R5", "name": "Eksposur Kurs & Suku Bunga", "prob": "Rendah", "impact": "Rendah", "score": "Rendah", "color": "#10b981"},
     ]
     
-    # Sensitivity Grid (WACC vs Terminal Growth)
+    # Sensitivity Grid (WACC vs Terminal Growth) — hanya bila DCF tersedia.
+    # Versi lama crash bila `wacc`/`tg`/`dcf_fv` None (TypeError None - float).
     sens_matrix = []
-    wacc_steps = [wacc - 1.0, wacc, wacc + 1.0]
-    tg_steps = [tg - 0.5, tg, tg + 0.5]
-    for w in wacc_steps:
-        row = []
-        for g in tg_steps:
-            val = dcf_fv * (1.0 + (g - tg)*0.06 - (w - wacc)*0.08)
-            row.append(round(val))
-        sens_matrix.append(row)
+    if (dcf_fv is not None and wacc is not None and tg is not None):
+        wacc_steps = [wacc - 1.0, wacc, wacc + 1.0]
+        tg_steps = [tg - 0.5, tg, tg + 0.5]
+        for w in wacc_steps:
+            row = []
+            for g in tg_steps:
+                val = dcf_fv * (1.0 + (g - tg) * 0.06 - (w - wacc) * 0.08)
+                row.append(round(val))
+            sens_matrix.append(row)
+    else:
+        wacc_steps, tg_steps = [], []
         
     sensitivity_grid = {
         "wacc_labels": [f"{w:.1f}%" for w in wacc_steps],
@@ -310,20 +464,20 @@ def build_research_model_from_context(
         "values": sens_matrix
     }
     
-    company_name = f"{ticker} Corporation Tbk"
-    sector = getattr(c, "sector", "General Industrials") or "General Industrials"
-    if ticker.upper() == "ASII":
-        company_name = "PT Astra International Tbk"
-        sector = "Automotive & Conglomerates"
-    elif ticker.upper() == "BBCA":
-        company_name = "PT Bank Central Asia Tbk"
-        sector = "Financials & Banking"
-    elif ticker.upper() == "TLKM":
-        company_name = "PT Telkom Indonesia Tbk"
-        sector = "Telecommunication Services"
-    elif ticker.upper() == "TOTL":
-        company_name = "PT Total Bangun Persada Tbk"
-        sector = "Building & Construction"
+    # Nama & sektor dari profil resmi 964 emiten (data/idx_profiles.json),
+    # BUKAN "{TICKER} Corporation Tbk" untuk semua emiten. Hardcode 4 ticker
+    # (ASII/BBCA/TLKM/TOTL) versi lama juga dihapus.
+    try:
+        from app.services.idx_audited_financials import get_issuer_profile
+        _prof = get_issuer_profile(ticker) or {}
+    except Exception:
+        _prof = {}
+    company_name = (_prof.get("company_name")
+                    or getattr(c, "company_name", None)
+                    or f"{ticker}")
+    sector = (_prof.get("sector")
+              or getattr(c, "sector", None)
+              or "N/A")
 
     # 5-Year Financial Forecast Model (2026F - 2030F)
     forecast_5yr = []
@@ -335,28 +489,75 @@ def build_research_model_from_context(
     proj_eq = te_bn
     proj_cash = cash_bn
 
+    # Asumsi proyeksi DARI DATA RIIL, bukan konstanta karangan:
+    #   g_rev   = CAGR revenue historis (dibatasi -10%..25%)
+    #   margin  = margin EBIT aktual, bukan 12%
+    #   tax     = tax burden aktual, bukan 0,78
+    #   interest= interest burden aktual, bukan 0,95
+    #   dpr     = payout ratio dari dividen riil, bukan 55%
+    def _cagr_rev():
+        try:
+            from app.services.idx_audited_financials import five_year_table as _fyt
+            _h = _fyt(ticker) or []
+        except Exception:
+            _h = []
+        revs = [r.get("revenue_bn") for r in _h]
+        revs = [x for x in revs if x and x > 0]
+        if len(revs) < 2:
+            return None, _h
+        n = len(revs) - 1
+        return ((revs[-1] / revs[0]) ** (1.0 / n) - 1.0), _h
+
+    _g_real, _hist_all = _cagr_rev()
+    g_rev = max(-0.10, min(0.25, _g_real)) if _g_real is not None else 0.05
+
+    _last_fy_f = (_hist_all[-1] if _hist_all else {})
+    _ni_f = _last_fy_f.get("net_income_parent_bn")
+    _div_f = _last_fy_f.get("dividends_paid_bn")
+    if _ni_f and _ni_f > 0 and _div_f is not None:
+        dpr = max(0.0, min(1.0, abs(_div_f) / _ni_f))
+    else:
+        dpr = 0.30   # konservatif bila dividen tidak dilaporkan (disclosed asumsi)
+
+    _ebit_m = c.ebit_margin if (c.ebit_margin and c.ebit_margin > 0) else None
+    _tax_b = c.tax_burden if (c.tax_burden and c.tax_burden > 0) else None
+    _int_b = c.interest_burden if (c.interest_burden and c.interest_burden > 0) else None
+
     for yr_idx in range(1, 6):
         proj_rev = proj_rev * (1.0 + g_rev)
-        proj_ebit = proj_rev * (c.ebit_margin or 0.12)
-        proj_ni = proj_ebit * (c.tax_burden or 0.78) * (c.interest_burden or 0.95)
-        dpr = 0.55  # 55% Dividend Payout
-        retained = proj_ni * (1.0 - dpr)
-        proj_eq = proj_eq + retained
-        proj_cash = proj_cash + (proj_ni * 0.45)
+        # Margin & burden: pakai aktual bila ada; bila tidak, proyeksi datar
+        # (tanpa asumsi margin karangan). Nilai None berarti model tidak bisa
+        # memproyeksikan laba -> dibiarkan N/A jujur.
+        proj_ebit = (proj_rev * _ebit_m) if _ebit_m else None
+        if proj_ebit is not None and _tax_b and _int_b:
+            proj_ni = proj_ebit * _tax_b * _int_b
+        else:
+            proj_ni = None
+        retained = (proj_ni * (1.0 - dpr)) if proj_ni is not None else None
+        proj_eq = (proj_eq + retained) if (proj_eq is not None and retained is not None) else proj_eq
+        proj_cash = (proj_cash + (proj_ni * 0.45)) if (proj_cash is not None and proj_ni is not None) else proj_cash
         forecast_5yr.append({
             "year": f"{base_year + yr_idx}F",
-            "revenue": round(proj_rev, 1),
-            "ebit": round(proj_ebit, 1),
-            "net_income": round(proj_ni, 1),
-            "total_equity": round(proj_eq, 1),
-            "cash": round(proj_cash, 1),
-            "dps": round((proj_ni * dpr * 1e9) / max(1.0, shares_m * 1e6)),
-            "roe": round((proj_ni / max(1.0, proj_eq)) * 100, 1),
+            "revenue": round(proj_rev, 1) if proj_rev is not None else None,
+            "ebit": round(proj_ebit, 1) if proj_ebit is not None else None,
+            "net_income": round(proj_ni, 1) if proj_ni is not None else None,
+            "total_equity": round(proj_eq, 1) if proj_eq is not None else None,
+            "cash": round(proj_cash, 1) if proj_cash is not None else None,
+            "dps": round((proj_ni * dpr * 1e9) / max(1.0, (shares_m or 1.0) * 1e6), 1) if proj_ni is not None else None,
+            "roe": round((proj_ni / proj_eq) * 100, 1) if (proj_ni is not None and proj_eq) else None,
         })
 
-    # Peer Benchmarking Matrix (HANYA DARI EMITEN RIIL DI DATABASE)
+    # Peer Benchmarking Matrix — null-safe (pe/pbv/roe bisa None)
     peer_benchmark = [
-        {"ticker": ticker.upper(), "name": company_name[:18], "npm": round((c.net_profit_margin or 0.10) * 100, 1), "roe": round(roe_val, 1), "pe": round(pe, 1), "pbv": round(pbv, 2), "net_gearing": "Net Cash" if net_cash_bn >= 0 else f"{(debt_bn/max(1.0, te_bn)):.2f}x"},
+        {"ticker": ticker.upper(),
+         "name": (company_name or ticker)[:18],
+         "npm": round(c.net_profit_margin * 100, 1) if c.net_profit_margin is not None else None,
+         "roe": round(roe_val, 1) if roe_val is not None else None,
+         "pe": round(pe, 1) if pe is not None else None,
+         "pbv": round(pbv, 2) if pbv is not None else None,
+         "net_gearing": ("Net Cash" if net_cash_bn > 0
+                         else f"{(debt_bn / te_bn):.2f}x")
+                        if (net_cash_bn is not None and debt_bn is not None and te_bn) else "N/A"},
     ]
     # Ambil kompetitor riil dari DB jika ada, jangan gunakan pengali palsu x0.85/x0.65
     real_peer_tickers = get_peers(ticker)
@@ -432,39 +633,52 @@ def build_research_model_from_context(
         "sbn_10y": f"{macro_data.get('sbn_yield_10y')}%" if macro_data.get('sbn_yield_10y') else "N/A",
     }
 
-    # 1. Scenario Analysis (Bull, Base, Bear)
-    bull_tp = round(target_price * 1.25)
-    base_tp = round(target_price)
-    bear_tp = round(curr_p * 0.88)
-    prob_weighted_tp = round((0.25 * bull_tp) + (0.50 * base_tp) + (0.25 * bear_tp))
-    
+    # 1. Scenario Analysis (Bull, Base, Bear) — N/A bila target/harga tidak tersedia.
+    # Jangan pakai target_price*1.25 bila target_price None (akan crash / karang).
+    _em = (c.ebit_margin * 100) if c.ebit_margin is not None else None
+    _up = lambda tp: round(((tp - curr_p) / curr_p) * 100, 1) if (tp is not None and curr_p) else None
+
+    if target_price is not None and curr_p:
+        bull_tp = round(target_price * 1.25)
+        base_tp = round(target_price)
+        bear_tp = round(curr_p * 0.88)
+        prob_weighted_tp = round((0.25 * bull_tp) + (0.50 * base_tp) + (0.25 * bear_tp))
+        weighted_upside = _up(prob_weighted_tp)
+    else:
+        bull_tp = base_tp = bear_tp = prob_weighted_tp = None
+        weighted_upside = None
+
+    def _margin(delta):
+        return f"{_em + delta:.1f}%" if _em is not None else "N/A"
+
     scenario_analysis = {
         "bull": {
             "target": bull_tp,
-            "upside": round(((bull_tp - curr_p) / curr_p) * 100, 1),
+            "upside": _up(bull_tp),
             "prob": 25,
             "catalysts": "Akselerasi perolehan kontrak baru, efisiensi bahan baku optimal, dan re-rating kelipatan PE ke +1.5SD.",
             "rev_growth": "+14.5% YoY",
-            "ebit_margin": f"{(c.ebit_margin or 0.12)*100 + 2.0:.1f}%",
+            "ebit_margin": _margin(2.0),
         },
         "base": {
             "target": base_tp,
-            "upside": round(((base_tp - curr_p) / curr_p) * 100, 1),
+            "upside": _up(base_tp),
             "prob": 50,
             "catalysts": "Pertumbuhan inline target anggaran, stabilisasi margin operasi, konvergensi nilai intrinsik DCF.",
             "rev_growth": "+7.5% YoY",
-            "ebit_margin": f"{(c.ebit_margin or 0.12)*100:.1f}%",
+            "ebit_margin": _margin(0.0),
         },
         "bear": {
             "target": bear_tp,
-            "upside": round(((bear_tp - curr_p) / curr_p) * 100, 1),
+            "upside": _up(bear_tp),
             "prob": 25,
             "catalysts": "Kenaikan inflasi material konstruksi/impor, penundaan termin pembayaran klien, kompresi PE ke -1SD.",
             "rev_growth": "-2.0% YoY",
-            "ebit_margin": f"{(c.ebit_margin or 0.12)*100 - 2.5:.1f}%",
+            "ebit_margin": _margin(-2.5),
         },
         "probability_weighted_target": prob_weighted_tp,
-        "weighted_upside": round(((prob_weighted_tp - curr_p) / curr_p) * 100, 1),
+        "weighted_upside": weighted_upside,
+        "basis": valuation_basis,
     }
 
     # 2. Variant Perception ("Where We Differ from Market Consensus")
@@ -531,20 +745,30 @@ def build_research_model_from_context(
         pass
         
     if pe_mean is None:
-        # Fallback transparan jika belum ada quote harian: jangan karang std 0.18!
-        pe_mean = round(pe, 1)
-        pe_std = round(pe * 0.15, 1)
-        valuation_regime = "Fairly Valued (Estimated Historical Band)"
+        # Tanpa riwayat PE, band valuasi TIDAK dapat dibentuk. Jangan karang
+        # mean dari PE saat ini lalu memberi +/-15% sebagai "historical band".
+        pe_std = None
+        valuation_regime = "N/A (riwayat PE belum tersedia)"
         
-    pe_band_history = {
-        "mean": pe_mean,
-        "plus_1sd": round(pe_mean + pe_std, 1),
-        "plus_2sd": round(pe_mean + (2 * pe_std), 1),
-        "minus_1sd": round(max(0.1, pe_mean - pe_std), 1),
-        "minus_2sd": round(max(0.1, pe_mean - (2 * pe_std)), 1),
-        "current_pe": round(pe, 1),
-        "valuation_regime": valuation_regime,
-    }
+    # Band PE — null-safe. Bila riwayat PE tidak ada, semua band = None (N/A).
+    if pe_mean is not None and pe_std is not None:
+        pe_band_history = {
+            "mean": _rnd(pe_mean, 1),
+            "plus_1sd": _rnd(pe_mean + pe_std, 1),
+            "plus_2sd": _rnd(pe_mean + 2 * pe_std, 1),
+            "minus_1sd": _rnd(max(0.1, pe_mean - pe_std), 1),
+            "minus_2sd": _rnd(max(0.1, pe_mean - 2 * pe_std), 1),
+            "current_pe": _rnd(pe, 1),
+            "valuation_regime": valuation_regime,
+        }
+    else:
+        pe_band_history = {
+            "mean": _rnd(pe_mean, 1),
+            "plus_1sd": None, "plus_2sd": None,
+            "minus_1sd": None, "minus_2sd": None,
+            "current_pe": _rnd(pe, 1),
+            "valuation_regime": valuation_regime,
+        }
 
     # ============ REAL MARKET STATS (52W Range, Beta vs IHSG, Price Series) ============
     # ZERO-LIE: hanya dihitung dari QuoteHistoryDaily riil. None jika histori tidak cukup.
@@ -621,7 +845,7 @@ def build_research_model_from_context(
                     if _var > 0:
                         beta_vs_ihsg = round(_cov / _var, 2)
         # EV / Revenue (pakai revenue FY terbaru = proxy NTM, diberi label jelas di UI)
-        _ev = (curr_p * shares_m * 1e6 / 1e9) + debt_bn - cash_bn
+        _ev = ((curr_p * shares_m * 1e6 / 1e9) + (debt_bn or 0.0) - (cash_bn or 0.0)) if (curr_p and shares_m) else None
         if rev_bn > 0:
             ev_to_ntm_revenue = round(_ev / rev_bn, 2)
     except Exception:
@@ -744,6 +968,9 @@ def build_research_model_from_context(
                     "non_current_liabilities_bn": None if _r.get("non_current_liabilities_bn") is None else round(_r["non_current_liabilities_bn"], 1),
                     "retained_earnings_bn": None if _r.get("retained_earnings_bn") is None else round(_r["retained_earnings_bn"], 1),
                     "st_debt_bn": None if _r.get("st_debt_bn") is None else round(_r["st_debt_bn"], 1),
+                    "property_plant_equipment_bn": None if _r.get("property_plant_equipment_bn") is None else round(_r["property_plant_equipment_bn"], 1),
+                    "intangible_assets_bn": None if _r.get("intangible_assets_bn") is None else round(_r["intangible_assets_bn"], 1),
+                    "dividends_paid_bn": None if _r.get("dividends_paid_bn") is None else round(_r["dividends_paid_bn"], 1),
                     "eps": _r.get("eps"),
                     "audited": True,
                     "is_bank": _r.get("is_bank", False),
@@ -903,17 +1130,17 @@ def build_research_model_from_context(
              "basis": f"P/E saat ini {pe:.2f}x"},
         ]
         valuation_waterfall = [
-            {"step": "DCF Intrinsic", "value": round(dcf_fv, 2)},
-            {"step": "Exit Multiple", "value": round(exit_fv, 2)},
-            {"step": "Relative Comps", "value": round(rel_fv, 2)},
-            {"step": "Blended Target", "value": round(target_price, 2)},
+            {"step": "DCF Intrinsic", "value": round(dcf_fv, 2) if dcf_fv else None},
+            {"step": "Exit Multiple", "value": round(exit_fv, 2) if exit_fv else None},
+            {"step": "Relative Comps", "value": round(rel_fv, 2) if rel_fv else None},
+            {"step": "Blended Target", "value": round(target_price, 2) if target_price else None},
         ]
     except Exception:
         pass
 
     # ---- Appendix 16: Reverse DCF (growth yang di-implied harga pasar) ----
     try:
-        if dcf_fv and curr_p and dcf_fv > 0:
+        if dcf_fv and curr_p and dcf_fv > 0 and tg is not None:
             _gap_ratio = curr_p / dcf_fv
             # Growth implied: harga pasar menyiratkan growth lebih tinggi/rendah dari asumsi model
             _implied_g = tg + (_gap_ratio - 1.0) * 10.0
@@ -1021,6 +1248,8 @@ def build_research_model_from_context(
         shares_bn=shares_m,
         is_bank=_is_b,
         ticker=ticker.upper(),
+        # catatan: curr_p/shares_m boleh None untuk emiten tersuspensi (WSKT).
+        # build_wacc_components menangani None -> komponen N/A, bukan crash.
     )
 
     # ---- CFA Figure 31: Extended Peer Comps ----
@@ -1084,6 +1313,7 @@ def build_research_model_from_context(
         total_debt_bn=debt_bn,
         cash_bn=cash_bn,
         net_cash_bn=net_cash_bn,
+        current_ratio=current_ratio,
         technical_signal=tech_sig,
         technical_confidence=tech_conf,
         hurst_exponent=hurst,
@@ -1131,6 +1361,26 @@ def build_research_model_from_context(
         is_bank=is_bank,
         fundamentals_source=fundamentals_source,
     )
+
+
+def _fy(v, fmt=",.0f", prefix="Rp", fallback="N/A"):
+    """Format angka null-safe untuk PDF: None -> N/A, tidak crash."""
+    if v is None:
+        return fallback
+    try:
+        return f"{prefix}{v:{fmt}}" if prefix else f"{v:{fmt}}"
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _rnd(v, nd=1, fallback=None):
+    """round() null-safe — None tetap None, bukan TypeError."""
+    if v is None:
+        return fallback
+    try:
+        return round(float(v), nd)
+    except (TypeError, ValueError):
+        return fallback
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -1249,11 +1499,11 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     header_table_data = [
         [
             Paragraph(f"<b>{model.company_name}</b> ({model.ticker}.JK)", title_style),
-            Paragraph(f"<font color='{call_rec_color}' size=16><b>{model.recommendation}</b></font><br/><font size=8 color='#64748b'>Target: Rp{model.target_price:,.0f} ({model.upside_pct:+.1f}%)</font>", ParagraphStyle("Rec", alignment=2))
+            Paragraph(f"<font color='{call_rec_color}' size=16><b>{model.recommendation}</b></font><br/><font size=8 color='#64748b'>Target: {_fy(model.target_price)} ({_fy(model.upside_pct, '+.1f', '', 'N/A')}%)</font>", ParagraphStyle("Rec", alignment=2))
         ],
         [
             Paragraph(f"Sector: <b>{model.sector}</b> | Date: {model.report_date}", subtitle_style),
-            Paragraph(f"Current Price: <b>Rp{model.current_price:,.0f}</b>", ParagraphStyle("CurrP", alignment=2, fontName="Helvetica-Bold", fontSize=9))
+            Paragraph(f"Current Price: <b>{_fy(model.current_price)}</b>", ParagraphStyle("CurrP", alignment=2, fontName="Helvetica-Bold", fontSize=9))
         ]
     ]
     t_head = Table(header_table_data, colWidths=[360, 163])
@@ -1268,24 +1518,24 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     # Two-Column Layout for Page 1: Left (~38%) Teardown Table, Right (~62%) Narrative
     teardown_rows = [
         ["Market Data", "Value"],
-        ["Market Cap", f"Rp{model.market_cap_bn:,.1f} B"],
-        ["Shares Out", f"{model.shares_outstanding_m:,.0f} M"],
-        ["P/E Ratio", f"{model.pe_ratio:.2f}x"],
-        ["P/BV Ratio", f"{model.pbv_ratio:.2f}x"],
-        ["ROE (TTM)", f"{model.roe_pct:.1f}%"],
+        ["Market Cap", _fy(model.market_cap_bn, ",.1f", "Rp", "N/A") + (" B" if model.market_cap_bn is not None else "")],
+        ["Shares Out", _fy(model.shares_outstanding_m, ",.0f", "", "N/A") + (" M" if model.shares_outstanding_m is not None else "")],
+        ["P/E Ratio", _fy(model.pe_ratio, ".2f", "", "N/A") + ("x" if model.pe_ratio is not None else "")],
+        ["P/BV Ratio", _fy(model.pbv_ratio, ".2f", "", "N/A") + ("x" if model.pbv_ratio is not None else "")],
+        ["ROE (TTM)", _fy(model.roe_pct, ".1f", "", "N/A") + ("%" if model.roe_pct is not None else "")],
         ["Valuation Model", "Fair Value"],
-        ["DCF (WACC 11.5%)", f"Rp{model.dcf_fair_value:,.0f}"],
-        ["Exit Multiple P/E", f"Rp{model.exit_multiple_fair_value:,.0f}"],
-        ["Relative Comps", f"Rp{model.relative_fair_value:,.0f}"],
-        ["Blended Target", f"Rp{model.target_price:,.0f}"],
+        ["DCF (WACC 11.5%)", _fy(model.dcf_fair_value)],
+        ["Exit Multiple P/E", _fy(model.exit_multiple_fair_value)],
+        ["Relative Comps", _fy(model.relative_fair_value)],
+        ["Blended Target", _fy(model.target_price)],
         ["Balance Sheet", "Position"],
-        ["Cash & Equiv.", f"Rp{model.cash_bn:,.1f} B"],
-        ["Total Debt", f"Rp{model.total_debt_bn:,.1f} B"],
-        ["Net Cash Status", f"Rp{model.net_cash_bn:,.1f} B"],
+        ["Cash & Equiv.", _fy(model.cash_bn, ",.1f", "Rp", "N/A") + (" B" if model.cash_bn is not None else "")],
+        ["Total Debt", _fy(model.total_debt_bn, ",.1f", "Rp", "N/A") + (" B" if model.total_debt_bn is not None else "")],
+        ["Net Cash Status", _fy(model.net_cash_bn, ",.1f", "Rp", "N/A") + (" B" if model.net_cash_bn is not None else "")],
         ["AI Technical Agent", "Signal"],
         ["Ensemble Signal", model.technical_signal],
-        ["Confidence Score", f"{model.technical_confidence:.0f}%"],
-        ["Hurst Exponent", f"{model.hurst_exponent:.2f}"],
+        ["Confidence Score", _fy(model.technical_confidence, ".0f", "", "N/A") + ("%" if model.technical_confidence is not None else "")],
+        ["Hurst Exponent", _fy(model.hurst_exponent, ".2f", "", "N/A")],
     ]
     t_tear = Table(teardown_rows, colWidths=[100, 85])
     t_tear.setStyle(TableStyle([
@@ -1311,9 +1561,9 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     narrative_p1 = [
         Paragraph("<b>EXECUTIVE INVESTMENT SUMMARY</b>", h1_style),
         Paragraph(
-            f"Kami menetapkan rekomendasi <b>{model.recommendation}</b> untuk saham <b>{model.ticker}</b> dengan target harga 12-bulan sebesar <b>Rp{model.target_price:,.0f}</b>, "
-            f"mencerminkan potensi apresiasi nilai (upside) sebesar <b>{model.upside_pct:+.1f}%</b> dari harga pasar saat ini Rp{model.current_price:,.0f}. "
-            f"Tesis investasi kami didukung oleh kombinasi fundamental earnings quality yang solid, rasio pengembalian ekuitas (ROE) sebesar {model.roe_pct:.1f}%, serta neraca defensif yang steril dari leverage agresif.",
+            f"Kami menetapkan rekomendasi <b>{model.recommendation}</b> untuk saham <b>{model.ticker}</b> dengan target harga 12-bulan sebesar <b>{_fy(model.target_price)}</b>, "
+            f"mencerminkan potensi apresiasi nilai (upside) sebesar <b>{_fy(model.upside_pct, '+.1f', '', 'N/A')}%</b> dari harga pasar saat ini {_fy(model.current_price)}. "
+            f"Tesis investasi kami didukung oleh kombinasi fundamental earnings quality yang solid, rasio pengembalian ekuitas (ROE) sebesar {_fy(model.roe_pct, '.1f', '', 'N/A')}%, serta neraca defensif yang steril dari leverage agresif.",
             body_style
         ),
         Spacer(1, 8),
@@ -1350,7 +1600,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=12))
 
     dupont_summary_p = Paragraph(
-        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({model.roe_pct:.1f}%). Dekomposisi matematis membuktikan bahwa rasio profitabilitas didorong secara sehat oleh efisiensi operasi (EBIT Margin {model.ebit_margin*100:.1f}%) "
+        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({_fy(model.roe_pct, '.1f', '', 'N/A')}%). Dekomposisi matematis membuktikan bahwa rasio profitabilitas didorong secara sehat oleh efisiensi operasi (EBIT Margin {_fy((model.ebit_margin*100) if model.ebit_margin is not None else None, '.1f', '', 'N/A')}%) "
         f"dan perputaran aset (Asset Turnover {model.asset_turnover:.2f}x), dengan beban bunga yang terkendali (Interest Burden {model.interest_burden*100:.1f}%) serta beban pajak normal (Tax Burden {model.tax_burden*100:.1f}%). "
         f"Struktur ini mengindikasikan laba berkualitas tinggi (high quality of earnings) tanpa manipulasi financial leverage berlebihan (Equity Multiplier {model.equity_multiplier:.2f}x).",
         body_style
@@ -1365,7 +1615,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
         ["3. Operating Margin", "EBIT / Revenue", f"{model.ebit_margin*100:.1f}%", "Operating efficiency tinggi"],
         ["4. Asset Turnover", "Revenue / Total Assets", f"{model.asset_turnover:.2f}x", "Produktivitas aset prima"],
         ["5. Equity Multiplier", "Total Assets / Total Equity", f"{model.equity_multiplier:.2f}x", "Leverage konservatif/sehat"],
-        ["Total ROE Terurai", "1 x 2 x 3 x 4 x 5", f"{model.roe_pct:.1f}%", "Return on Equity Prima"],
+        ["Total ROE Terurai", "1 x 2 x 3 x 4 x 5", _fy(model.roe_pct, ".1f", "", "N/A") + ("%" if model.roe_pct is not None else ""), "Return on Equity"],
     ]
     t_dp = Table(dupont_table_data, colWidths=[120, 140, 100, 163])
     t_dp.setStyle(TableStyle([
@@ -1384,13 +1634,26 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(Spacer(1, 14))
 
     elements.append(Paragraph("<b>IKHTISAR POSISI KEUANGAN & NERACA KAS</b>", h1_style))
+    def _bn(v):
+        return _fy(v, ",.1f", "Rp", "N/A") + (" M" if v is not None else "")
+
+    def _ratio(num, den, fmt=".2f", suffix="x"):
+        if num is None or not den or den == 0:
+            return "N/A"
+        return f"{num / den:{fmt}}{suffix}"
+
+    _cr = model.current_ratio                       # dari neraca, bukan 1.85 statis
+    _der = _ratio(model.total_debt_bn, model.total_equity_bn)
+    _cash_r = _ratio(model.cash_bn, model.total_debt_bn)
+    _nca = (f"{(model.net_cash_bn / model.total_assets_bn) * 100:.1f}%"
+            if (model.net_cash_bn is not None and model.total_assets_bn) else "N/A")
     fin_summary_data = [
-        ["Metrik Finansial", "Nilai (Rp Miliar)", "Rasio Solvabilitas & Likuiditas", "Skor Status"],
-        ["Pendapatan Usaha (Revenue)", f"Rp{model.revenue_bn:,.1f} M", "Current Ratio (Proxy)", "1.85x (Sehat)"],
-        ["Laba Usaha (EBIT)", f"Rp{model.ebit_bn:,.1f} M", "Debt to Equity Ratio", f"{(model.total_debt_bn/max(1.0, model.total_equity_bn)):.2f}x (Rendah)"],
-        ["Laba Bersih Entitas Induk", f"Rp{model.net_income_bn:,.1f} M", "Cash Ratio", f"{(model.cash_bn/max(1.0, model.total_debt_bn)):.2f}x (Kuat)"],
-        ["Total Aset Konsolidasi", f"Rp{model.total_assets_bn:,.1f} M", "Net Cash / Total Aset", f"{(model.net_cash_bn/max(1.0, model.total_assets_bn))*100:.1f}%"],
-        ["Total Ekuitas Bersih", f"Rp{model.total_equity_bn:,.1f} M", "S&P / Fitch Proxy Rating", "AAA / AA (Investment Grade)"],
+        ["Metrik Finansial", "Nilai (Rp Miliar)", "Rasio Solvabilitas & Likuiditas", "Status"],
+        ["Pendapatan Usaha (Revenue)", _bn(model.revenue_bn), "Current Ratio", _ratio(_cr, 1, ".2f", "x") if _cr is not None else "N/A"],
+        ["Laba Usaha (EBIT)", _bn(model.ebit_bn), "Debt to Equity Ratio", _der],
+        ["Laba Bersih Entitas Induk", _bn(model.net_income_bn), "Cash / Total Debt", _cash_r],
+        ["Total Aset Konsolidasi", _bn(model.total_assets_bn), "Net Cash / Total Aset", _nca],
+        ["Total Ekuitas Bersih", _bn(model.total_equity_bn), "Peringkat Kredit", "N/A"],
     ]
     t_fin = Table(fin_summary_data, colWidths=[140, 120, 140, 123])
     t_fin.setStyle(TableStyle([
@@ -1412,7 +1675,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=12))
 
     val_intro = Paragraph(
-        f"Penentuan Target Harga <b>Rp{model.target_price:,.0f}</b> menggunakan metodologi <i>Blended Valuation</i> dengan pembobotan komprehensif: "
+        f"Penentuan Target Harga <b>{_fy(model.target_price)}</b> menggunakan metodologi <i>Blended Valuation</i> dengan pembobotan komprehensif: "
         f"<b>40% Discounted Cash Flow (DCF)</b>, <b>35% Exit Multiple P/E</b>, dan <b>25% Relative Peer Multiple</b>. "
         f"Pendekatan ini menyelaraskan nilai intrinsik fundamental jangka panjang dengan dinamika apresiasi pasar jangka menengah.",
         body_style
@@ -1422,10 +1685,10 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
 
     val_summary_data = [
         ["Metodologi Valuasi", "Bobot", "Parameter Kunci", "Nilai Wajar per Saham", "Implikasi vs Market"],
-        ["Discounted Cash Flow (FCFF)", "40%", f"WACC {model.wacc_pct:.1f}%, g={model.terminal_growth_pct:.1f}%", f"Rp{model.dcf_fair_value:,.0f}", f"{((model.dcf_fair_value-model.current_price)/model.current_price)*100:+.1f}%"],
-        ["Exit Multiple P/E Valuation", "35%", f"Exit Target P/E {model.pe_ratio*1.05:.1f}x", f"Rp{model.exit_multiple_fair_value:,.0f}", f"{((model.exit_multiple_fair_value-model.current_price)/model.current_price)*100:+.1f}%"],
-        ["Relative Valuation Peer Comps", "25%", f"P/BV Multiple {model.pbv_ratio*1.02:.2f}x", f"Rp{model.relative_fair_value:,.0f}", f"{((model.relative_fair_value-model.current_price)/model.current_price)*100:+.1f}%"],
-        ["KONSENSUS BLENDED TARGET", "100%", "Weighted Linear Combination", f"Rp{model.target_price:,.0f}", f"{model.upside_pct:+.1f}% (REKOMENDASI: {model.recommendation})"],
+        ["Discounted Cash Flow (FCFF)", "40%", f"WACC {_fy(model.wacc_pct, '.1f', '', 'N/A')}%, g={_fy(model.terminal_growth_pct, '.1f', '', 'N/A')}%", _fy(model.dcf_fair_value), (_fy((model.dcf_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.dcf_fair_value is not None and model.current_price) else "N/A"],
+        ["Exit Multiple P/E Valuation", "35%", f"Exit Target P/E {_fy(model.pe_ratio*1.05 if model.pe_ratio is not None else None, '.1f', '', 'N/A')}x", _fy(model.exit_multiple_fair_value), (_fy((model.exit_multiple_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.exit_multiple_fair_value is not None and model.current_price) else "N/A"],
+        ["Relative Valuation Peer Comps", "25%", f"P/BV Multiple {_fy(model.pbv_ratio*1.02 if model.pbv_ratio is not None else None, '.2f', '', 'N/A')}x", _fy(model.relative_fair_value), (_fy((model.relative_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.relative_fair_value is not None and model.current_price) else "N/A"],
+        ["KONSENSUS BLENDED TARGET", "100%", "Weighted Linear Combination", _fy(model.target_price), f"{_fy(model.upside_pct, '+.1f', '', 'N/A')}% (REKOMENDASI: {model.recommendation})"],
     ]
     t_val = Table(val_summary_data, colWidths=[130, 45, 140, 100, 108])
     t_val.setStyle(TableStyle([
@@ -1447,16 +1710,26 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(Paragraph("Tabel di bawah menguji sensitivitas nilai wajar per saham terhadap fluktuasi biaya modal (WACC) dan laju pertumbuhan abadi (Terminal Growth):", subtitle_style))
     elements.append(Spacer(1, 6))
 
-    sg = model.sensitivity_grid
-    sens_table_data = [
-        ["WACC \\ Terminal Growth", f"g = {sg['tg_labels'][0]}", f"g = {sg['tg_labels'][1]} (Base)", f"g = {sg['tg_labels'][2]}"]
-    ]
-    for i, w_label in enumerate(sg["wacc_labels"]):
-        base_tag = " (Base)" if i == 1 else ""
-        row = [f"WACC = {w_label}{base_tag}"]
-        for val in sg["values"][i]:
-            row.append(f"Rp{val:,.0f}")
-        sens_table_data.append(row)
+    sg = model.sensitivity_grid or {}
+    _has_sens = bool(sg.get("wacc_labels") and sg.get("tg_labels") and sg.get("values"))
+    if _has_sens:
+        sens_table_data = [
+            ["WACC \\ Terminal Growth",
+             f"g = {sg['tg_labels'][0]}",
+             f"g = {sg['tg_labels'][1]} (Base)",
+             f"g = {sg['tg_labels'][2]}"]
+        ]
+        for i, w_label in enumerate(sg["wacc_labels"]):
+            base_tag = " (Base)" if i == 1 else ""
+            row = [f"WACC = {w_label}{base_tag}"]
+            for val in sg["values"][i]:
+                row.append(_fy(val))
+            sens_table_data.append(row)
+    else:
+        # DCF tidak tersedia -> tidak ada grid sensitivitas. Jangan kosongkan
+        # dengan angka karangan; sampaikan apa adanya.
+        sens_table_data = [["WACC \\ Terminal Growth", "g = N/A", "g = N/A", "g = N/A"],
+                           ["Model DCF tidak dapat dihitung", "N/A", "N/A", "N/A"]]
 
     t_sens = Table(sens_table_data, colWidths=[150, 124, 125, 124])
     t_sens.setStyle(TableStyle([

@@ -268,6 +268,60 @@ def compute_altman_z(row: dict) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────
 # EVA / Economic Profit
 # ─────────────────────────────────────────────────────────────────
+def compute_sustainable_growth(hist: list) -> tuple[Optional[float], str]:
+    """
+    g berkelanjutan untuk model Justified PBV.
+
+    Formula standar: g = ROE x (1 - payout ratio).
+
+    Dua jalur, dipilih berdasarkan ketersediaan data:
+      1. PAYOUT RIIL — bila dividen kas dibayar dan laba tersedia.
+         payout = dividend / net income, dibatasi 0-100%.
+      2. CAGR EKUITAS — fallback bila dividen tidak ada. Dalam steady state,
+         pertumbuhan ekuitas = ROE x retention, jadi definisinya setara tanpa
+         perlu data DPS.
+
+    Dibatasi 0%-8%: terminal growth di atas nominal PDB Indonesia (~5-7%)
+    tidak realistis untuk horizon panjang.
+    """
+    hist = hist or []
+    if not hist:
+        return None, "N/A (tidak ada data historis)"
+
+    last = hist[-1]
+    eq_last = last.get("equity_parent_bn") or last.get("equity_total_bn")
+    ni_last = last.get("net_income_parent_bn")
+    div_last = last.get("dividends_paid_bn")
+
+    # ── Jalur 1: payout ratio riil ──────────────────────────────────
+    if (ni_last and ni_last > 0 and div_last is not None
+            and eq_last and eq_last > 0):
+        payout = abs(div_last) / ni_last
+        if 0.0 <= payout <= 1.0:
+            roe = ni_last / eq_last
+            g = roe * (1.0 - payout)
+            g = max(0.0, min(0.08, g))
+            return round(g * 100.0, 2), (
+                f"COMPUTED (g = ROE {roe*100:.2f}% x (1 - payout {payout*100:.1f}%), "
+                f"dividen dari filing, dibatasi 0-8%)"
+            )
+
+    # ── Jalur 2: CAGR ekuitas buku ──────────────────────────────────
+    eqs = [r.get("equity_parent_bn") or r.get("equity_total_bn") for r in hist]
+    eqs = [e for e in eqs if e is not None and e > 0]
+    if len(eqs) < 2:
+        return None, "N/A (butuh minimal 2 tahun ekuitas positif / data dividen)"
+    start, end = eqs[0], eqs[-1]
+    n = len(eqs) - 1
+    if start <= 0:
+        return None, "N/A (ekuitas awal tidak valid)"
+    cagr = (end / start) ** (1.0 / n) - 1.0
+    g = max(0.0, min(0.08, cagr))
+    src = (f"COMPUTED (CAGR ekuitas buku {cagr*100:.2f}% dari {n} tahun "
+           f"sebagai pengganti ROE x retention, dibatasi 0-8%)")
+    return round(g * 100.0, 2), src
+
+
 def compute_eva(session: Optional[Session], ticker: str, row: dict,
                 wacc_result: Optional[Dict[str, Any]] = None,
                 rf_pct: float = DEFAULT_RF_PCT) -> Dict[str, Any]:

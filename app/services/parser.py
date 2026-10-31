@@ -335,11 +335,25 @@ def sync_audited_to_statement_cache(session: Session) -> int:
                 tax_provision=_f("tax_provision_bn"),
                 shares_outstanding=_f("shares_outstanding"),
                 interest_bearing_debt=_f("total_loans_bn"),
+                eps=fy.get("eps"),
             )
 
             if rec:
                 changed = False
+                # PRESERVE MARKET DATA: XBRL BEI tidak punya tag jumlah lembar,
+                # jadi `shares_outstanding` (dan EPS turunannya) diisi dari
+                # yfinance di backfill_shares_eps.py. Jangan ditimpa None/0
+                # setiap startup — itu menghapus data MARKET yang valid.
+                # EPS juga dihitung ulang dari shares yfinance (NI/lembar) dan
+                # filing BEI kadang rusak (TLKM 1,8e-07; ITMG 0,17 USD), jadi
+                # jangan biarkan nilai filing menimpa EPS hasil backfill.
+                _preserve = {"shares_outstanding", "eps"}
                 for k, v in payload.items():
+                    if k in _preserve:
+                        if v is None or v == 0:
+                            continue
+                        if k == "eps" and getattr(rec, "eps", None):
+                            continue      # EPS DB (turunan MARKET) dipertahankan
                     if getattr(rec, k, None) != v:
                         setattr(rec, k, v)
                         changed = True
@@ -406,6 +420,7 @@ def load_ticker_pair(
             capex=r.capex,
             depreciation=r.depreciation,
             minority_interest=r.minority_interest,
+            eps=getattr(r, "eps", None),
         )
 
     latest = rows[0]

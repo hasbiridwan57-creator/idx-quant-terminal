@@ -96,21 +96,44 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
     roa = (net_income / total_assets) if total_assets > 0 else None
     roe = (net_income / total_equity) if total_equity > 0 else None
     dte = (total_debt / total_equity) if total_equity > 0 else None
-    etr = (tax / pretax) if (pretax > 0 and tax > 0) else None
+    # Beban pajak di XBRL BEI dilaporkan NEGATIF -> pakai nilai absolut.
+    # Versi lama `tax > 0` membuat ETR selalu None.
+    etr = (abs(tax) / pretax) if (pretax > 0 and tax is not None and abs(tax) > 0) else None
 
     # ── CFA Excess-Return (Residual Income) valuation ─────────────────────────
+    # Ke RIIL dari cost_of_capital (beta regresi vs IHSG), bukan konstanta 10.5%.
+    # g = pertumbuhan berkelanjutan (sustainable growth) = ROE x (1 - payout ratio);
+    # bila data dividen tidak tersedia, g = pertumbuhan ekuitas buku historis.
     justified_pbv = None
     bvps = None
     fair_value_per_share = None
 
-    if roe is not None and roe > KE:
-        # Justified PBV = (ROE - g) / (Ke - g)
-        justified_pbv = (roe - G) / (KE - G)
+    ke_used = data.get("cost_of_equity_pct")
+    ke_used = (ke_used / 100.0) if isinstance(ke_used, (int, float)) and ke_used else KE
+    g_used = data.get("sustainable_growth_pct")
+    g_used = (g_used / 100.0) if isinstance(g_used, (int, float)) else G
+
+    if roe is not None and (ke_used - g_used) > 0.005:
+        # Justified PBV = (ROE - g) / (Ke - g).
+        # Dihitung juga saat ROE < Ke: hasilnya < 1, yang berarti bank
+        # mempertahankan laba di bawah biaya ekuitas (menghancurkan nilai).
+        # Versi lama menyembunyikannya (roe > KE) sehingga PBV wajar hilang.
+        justified_pbv = (roe - g_used) / (ke_used - g_used)
         justified_pbv = round(justified_pbv, 4)
 
     # BVPS = total_equity / shares_outstanding  (IDR per share)
     if total_equity > 0 and shares_out > 0:
         bvps = total_equity / shares_out
+    elif total_equity > 0:
+        # Shares outstanding tidak dilaporkan langsung di XBRL BEI. Diturunkan
+        # dari identitas: EPS = Laba Bersih / Jumlah Saham  =>  Shares = NI / EPS.
+        # Diverifikasi pada BBCA: NI Rp 54.486,5 B / EPS 467 = 116,67 miliar lembar
+        # (sesuai 3,08 miliar lembar pasca stock split 1:5, Apr 2025).
+        eps_val = data.get("eps")
+        if isinstance(eps_val, (int, float)) and eps_val not in (0, None) and net_income:
+            shares_derived = net_income / float(eps_val)
+            if shares_derived > 0:
+                bvps = total_equity / shares_derived
 
     # Fair Value Bank = BVPS × Justified PBV
     if bvps is not None and justified_pbv is not None:

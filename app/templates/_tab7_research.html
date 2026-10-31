@@ -641,6 +641,92 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
     </div>
   </div>
 
+  <!-- FORENSIC & EARNINGS QUALITY (Beneish, Sloan, Altman, WC, EBITDA) -->
+  <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
+    <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Forensic Accounting &amp; Earnings Quality</h2>
+      </div>
+      <span class="text-[10px] font-mono text-purple-400">SECTION 9</span>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+
+      <!-- Beneish M-Score -->
+      <div class="bg-[#080C14] border border-white/[0.06] rounded-lg p-3 space-y-1.5">
+        <div class="text-[9px] font-mono text-slate-500 uppercase">Beneish M-Score (1999)</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-xl font-bold font-mono"
+                :class="researchData?.forensic_beneish?.is_manipulator ? 'text-rose-400' : 'text-emerald-400'"
+                x-text="nf(researchData?.forensic_beneish?.m_score, 2)"></span>
+          <span class="text-[9px] font-mono text-slate-600">thr -1.78</span>
+        </div>
+        <div class="text-[10px] font-sans leading-snug"
+             :class="researchData?.forensic_beneish?.is_manipulator ? 'text-rose-400' : 'text-emerald-400'"
+             x-text="researchData?.forensic_beneish?.label || 'N/A'"></div>
+        <div class="text-[9px] font-mono text-slate-600 pt-1 border-t border-white/[0.05]"
+             x-text="'Variabel aktif: ' + (researchData?.forensic_beneish?.coverage?.variabel_aktif ?? 'N/A') + '/8'"></div>
+      </div>
+
+      <!-- Sloan Accruals -->
+      <div class="bg-[#080C14] border border-white/[0.06] rounded-lg p-3 space-y-1.5">
+        <div class="text-[9px] font-mono text-slate-500 uppercase">Sloan Accruals (1996)</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-xl font-bold font-mono text-sky-400"
+                x-text="nf(researchData?.forensic_sloan?.sloan_ratio_pct, 2, '%')"></span>
+          <span class="text-[9px] font-mono text-slate-600">bench ±10%</span>
+        </div>
+        <div class="text-[10px] font-sans leading-snug text-sky-400"
+             x-text="researchData?.forensic_sloan?.label || 'N/A'"></div>
+        <div class="text-[9px] font-mono text-slate-600 pt-1 border-t border-white/[0.05]"
+             x-text="'Akrual: Rp ' + nf(researchData?.forensic_sloan?.accruals_bn, 0) + ' B'"></div>
+      </div>
+
+      <!-- Altman Z'' -->
+      <div class="bg-[#080C14] border border-white/[0.06] rounded-lg p-3 space-y-1.5">
+        <div class="text-[9px] font-mono text-slate-500 uppercase">Altman Z&Prime; (Distress)</div>
+        <template x-if="researchData?.altman?.available">
+          <div class="space-y-1.5">
+            <div class="flex items-baseline gap-2">
+              <span class="text-xl font-bold font-mono text-white" x-text="nf(researchData.altman.z_score, 2)"></span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold border"
+                    :class="researchData.altman.zone === 'SAFE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : (researchData.altman.zone === 'GREY' ? 'bg-amber-500/10 text-amber-400 border-amber-500/25' : 'bg-rose-500/10 text-rose-400 border-rose-500/25')"
+                    x-text="researchData.altman.zone"></span>
+            </div>
+            <div class="text-[9px] font-mono text-slate-500 leading-relaxed"
+                 x-text="'X1 ' + nf(researchData.altman.x1_wc_ta,3) + ' · X2 ' + nf(researchData.altman.x2_re_ta,3) + ' · X3 ' + nf(researchData.altman.x3_ebit_ta,3) + ' · X4 ' + nf(researchData.altman.x4_bve_tl,3)"></div>
+            <template x-if="researchData.altman.notes && researchData.altman.notes.length">
+              <div class="text-[9px] font-sans text-amber-400/90 leading-snug pt-1 border-t border-white/[0.05]"
+                   x-text="researchData.altman.notes[0]"></div>
+            </template>
+          </div>
+        </template>
+        <template x-if="!researchData?.altman?.available">
+          <div class="text-[10px] font-sans text-slate-500 leading-snug"
+               x-text="researchData?.altman?.reason || 'Tidak tersedia'"></div>
+        </template>
+      </div>
+
+      <!-- Working Capital / CCC + EBITDA -->
+      <div class="bg-[#080C14] border border-white/[0.06] rounded-lg p-3 space-y-1.5">
+        <div class="text-[9px] font-mono text-slate-500 uppercase">Working Capital &amp; EBITDA</div>
+        <div class="flex items-baseline gap-2">
+          <span class="text-xl font-bold font-mono text-teal-400"
+                x-text="nf(researchData?.working_capital?.ccc_days, 1)"></span>
+          <span class="text-[9px] font-mono text-slate-600">hari CCC</span>
+        </div>
+        <div class="text-[10px] font-sans leading-snug"
+             :class="researchData?.working_capital?.interpretation?.tone === 'good' ? 'text-emerald-400' : (researchData?.working_capital?.interpretation?.tone === 'warn' ? 'text-amber-400' : 'text-slate-400')"
+             x-text="researchData?.working_capital?.interpretation?.label || 'N/A'"></div>
+        <div class="text-[9px] font-mono text-slate-500 pt-1 border-t border-white/[0.05] leading-relaxed"
+             x-text="'DIO ' + nf(researchData?.working_capital?.dio_days,1) + ' · DSO ' + nf(researchData?.working_capital?.dso_days,1) + ' · DPO ' + nf(researchData?.working_capital?.dpo_days,1)"></div>
+        <div class="text-[9px] font-mono text-slate-500"
+             x-text="'EBITDA: ' + (researchData?.ebitda_analysis?.available ? ('Rp ' + nf(researchData.ebitda_analysis.ebitda_bn, 0) + ' B (' + nf(researchData.ebitda_analysis.ebitda_margin_pct,1) + '%)') : 'N/A — D&amp;A tidak dilaporkan')"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- RISK MATRIX -->
   <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-6 shadow-sm space-y-4">
     <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">

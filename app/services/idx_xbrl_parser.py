@@ -62,11 +62,16 @@ CONCEPTS = {
     "short_term_bank_loans": ["ShortTermBankLoans"],
     "current_maturities_bonds": ["CurrentMaturitiesOfBondsPayable"],
     "current_maturities_lease": ["CurrentMaturitiesOfFinanceLeaseLiabilities"],
+    # Aset tidak lancar produktif — untuk AQI/DEPI Beneish yang benar.
+    # AQI = [1 - (CA + PPE + Securities)/TA]  -> butuh PPE.
+    # DEPI = DepRate_t-1 / DepRate_t, DepRate = Dep / (Dep + PPE).
+    "property_plant_equipment": ["PropertyPlantAndEquipment"],
+    "investment_property": ["InvestmentProperty"],
+    "intangible_assets": ["IntangibleAssetsOtherThanGoodwill"],
     "loans_gross": ["TotalLoansGross"],
     "selling_expense": ["SellingExpenses"],
     "ga_expense": ["GeneralAndAdministrativeExpenses"],
     "finance_costs": ["InterestAndFinanceCosts", "FinanceCosts"],
-    "finance_income": ["FinanceIncome"],
     "interest_expense": ["InterestExpenses", "BorrowingsInterestExpense"],
     # Bank / FIG: PPOP asli dari filing (BUKAN proxy)
     "ppop": ["ProfitFromOperation"],
@@ -98,11 +103,19 @@ CONCEPTS = {
                             "CashFlowsFromUsedInOperatingActivities"],
     # Beban pajak P&L: cari konsep yang benar (bukan arus kas)
     "tax_expense": ["TaxBenefitExpenses", "TaxExpense", "IncomeTaxExpense", "CurrentTaxExpense"],
-    "dividends_paid": ["DividendsPaidFromFinancingActivities", "DividendsPaidFromOperatingActivities"],
+    # Dividen kas dibayar — PAYOUT RATIO riil (g = ROE x (1 - payout)).
+    # Konsep "DistributionsOfCashDividends" ada di 4.185/4.185 filing.
+    "dividends_paid": ["DistributionsOfCashDividends",
+                       "DividendsPaidFromFinancingActivities",
+                       "DividendsPaidFromOperatingActivities"],
     "treasury_stock": ["TreasuryStocks"],
     "npl_gross": ["NonPerformingFinancingGross"],
     "npl_net": ["NonPerformingFinancingNet"],
-    "capex": ["PaymentsForAcquisitionOfPropertyPlantAndEquipment", "PaymentsForAcquisitionOfIntangibleAssets"],
+    # Capex = PPE + Intangible (keduanya komponen investasi). Tag filing BEI
+    # memakai "PropertyAndEquipment" (bukan "...PlantAndEquipment").
+    "capex_ppe": ["PaymentsForAcquisitionOfPropertyAndEquipment",
+                  "PaymentsForAcquisitionOfPropertyPlantAndEquipment"],
+    "capex_intangible": ["PaymentsForAcquisitionOfIntangibleAssets"],
     # Syariah: total liabilitas wajib + dana syirkah temporer (PSAK 101/105)
     "liab_syirkah_equity": ["LiabilitiesTemporarySyirkahFundsAndEquity"],
     "temporary_syirkah": ["TemporarySyirkahFunds"],
@@ -160,7 +173,7 @@ def parse_xbrl_file(path: str) -> Dict[str, Any]:
                             "cost_of_sales", "other_operating_income",
                             "other_operating_expenses", "depreciation", "amortization",
                             "operating_cash_flow",
-                            "dividends_paid", "capex")
+                            "dividends_paid", "capex_ppe", "capex_intangible")
         allowed = _MAIN_CTX_DUR if is_flow else _MAIN_CTX_INST
         val = None
         used_concept = None
@@ -182,6 +195,15 @@ def parse_xbrl_file(path: str) -> Dict[str, Any]:
         res[field] = val
         if used_concept:
             res.setdefault("_concepts", {})[field] = used_concept
+
+    # Capex = penjumlahan komponen (versi lama hanya mengambil tag pertama,
+    # sehingga TLKM tercatat capex 2.897 B padahal PPE saja 22.871 B).
+    _cpx = [abs(v) for v in (res.get("capex_ppe"), res.get("capex_intangible"))
+            if isinstance(v, (int, float)) and v]
+    res["capex"] = sum(_cpx) if _cpx else None
+    if _cpx:
+        res.setdefault("_concepts", {})["capex"] = "+".join(
+            k for k in ("capex_ppe", "capex_intangible") if res.get(k))
 
     # --- REVENUE resolution (tiered, no invention) ---
     # Tier A: baris "Pendapatan"/"Penjualan" PSAK umum

@@ -224,6 +224,7 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             "pretax_income": curr_in.ebt or 0.0,
             "shares_outstanding": curr_in.shares_outstanding or 0.0,
             "period": curr_in.year,
+            "eps": getattr(curr_in, "eps", None),
         }
         b_ratios = calculate_banking_ratios(banking_data)
 

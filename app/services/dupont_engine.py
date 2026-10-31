@@ -50,6 +50,7 @@ class FinancialStatementInput(BaseModel):
     capex: Optional[float] = None
     depreciation: Optional[float] = None
     minority_interest: Optional[float] = None
+    eps: Optional[float] = None
 
     @property
     def annualization_factor(self) -> float:

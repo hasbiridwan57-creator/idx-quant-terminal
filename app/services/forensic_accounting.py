@@ -88,7 +88,7 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     
     Formula:
       M = -4.84 + 0.920*DSRI + 0.528*GMI + 0.404*AQI + 0.892*SGI
-          + 0.115*DEPI - 0.172*SGAI + 4.037*TATA + 0.0327*LVGI
+          + 0.115*DEPI - 0.172*SGAI + 4.037*TATA - 0.327*LVGI
     
     Threshold:
       - M-Score > -1.78 : High Probability of Earnings Manipulation (Merah)
@@ -116,6 +116,10 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
             ("receivables_bn", ("receivables_bn", "trade_receivables_bn")),
             ("gross_profit_bn", ("gross_profit_bn",)),
             ("cost_of_sales_bn", ("cost_of_sales_bn",)),
+            ("current_assets_bn", ("current_assets_bn",)),
+            ("property_plant_equipment_bn", ("property_plant_equipment_bn",)),
+            ("depreciation_amortization_bn", ("depreciation_amortization_bn",)),
+            ("depreciation_bn", ("depreciation_bn",)),
         ]
         for target, keys in pairs:
             for k in keys:
@@ -126,6 +130,18 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
 
     c = _norm(current_stmt)
     p = _norm(prior_stmt)
+
+    # Guard: total aset WAJIB ada. Tanpa ini TATA dibagi 1 rupiah dan skor meledak.
+    ta_c = c.get("assets_bn")
+    ta_p = p.get("assets_bn")
+    if not ta_c or ta_c <= 0:
+        return {
+            "m_score": None,
+            "verdict": "N/A",
+            "label": "Total aset tidak tersedia — M-Score tidak dapat dihitung",
+            "provenance": "N/A",
+            "components": {},
+        }
 
     # 1. DSRI (Days Sales in Receivables Index)
     # Butuh piutang usaha (receivables). Bila tidak terpisah di XBRL, beri nilai default 1.0 (netral)
@@ -149,21 +165,31 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     else:
         gmi = 1.0
 
-    # 3. AQI (Asset Quality Index): [1 - (Current Assets + PP&E + Securities)/Total Assets]_t / [...]_t-1
-    # Proxy: Non-Current Assets selain Fixed Assets / Total Assets
-    # CATATAN: jangan pakai `or 1.0` — itu membuat pembagi TATA menjadi 1 rupiah
-    # dan skor meledak. Bila total aset tidak ada, fungsi berhenti dengan N/A.
-    ta_c = c.get("assets_bn")
-    ta_p = p.get("assets_bn")
-    if not ta_c or ta_c <= 0:
-        return {
-            "m_score": None,
-            "verdict": "N/A",
-            "label": "Total aset tidak tersedia — M-Score tidak dapat dihitung",
-            "provenance": "N/A",
-            "components": {},
-        }
-    aqi = 1.0  # Netral bila sub-aset tidak lengkap
+    # 3. AQI (Asset Quality Index) — Beneish (1999):
+    #      AQI = [1 - (CA + PPE + Securities)/TA]_t  /  [sama]_t-1
+    #      Mengukur porsi aset "non-produktif" (goodwill, aset tak berwujud, dll).
+    #      Versi lama selalu 1.0 karena PPE tidak dipetakan dari XBRL.
+    sec_c = c.get("securities_bn") or 0.0
+    sec_p = p.get("securities_bn") or 0.0
+    ca_c = c.get("current_assets_bn")
+    ca_p = p.get("current_assets_bn")
+    ppe_c = c.get("property_plant_equipment_bn")
+    ppe_p = p.get("property_plant_equipment_bn")
+
+    if (ca_c is not None and ppe_c is not None
+            and ca_p is not None and ppe_p is not None
+            and ta_p and ta_p > 0):
+        aqi_c = 1.0 - (ca_c + ppe_c + sec_c) / ta_c
+        aqi_p = 1.0 - (ca_p + ppe_p + sec_p) / ta_p
+        # Rasio bisa negatif bila komponen > total aset (data tidak konsisten).
+        # Hanya dipakai bila keduanya bertanda sama dan tidak nol.
+        if aqi_p > 0.0001 and aqi_c > -1.0 and aqi_p > -1.0:
+            aqi = aqi_c / aqi_p
+            aqi = max(0.1, min(10.0, aqi))   # batasi outlier ekstrem
+        else:
+            aqi = 1.0
+    else:
+        aqi = 1.0
 
     # 4. SGI (Sales Growth Index): Rev_t / Rev_t-1
     if rev_c and rev_p and rev_p > 0:
@@ -171,8 +197,20 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     else:
         sgi = 1.0
 
-    # 5. DEPI (Depreciation Index): DeprRate_t-1 / DeprRate_t
-    depi = 1.0  # Netral
+    # 5. DEPI (Depreciation Index) — Beneish (1999):
+    #      DepRate = Dep / (Dep + PPE) ;  DEPI = DepRate_t-1 / DepRate_t
+    #      DEPI > 1 berarti laju penyusutan MELAMBAT -> potensi perpanjangan
+    #      masa manfaat untuk mempercantik laba.
+    #      Versi lama selalu 1.0 karena PPE dan Depreciation tidak dipetakan.
+    dep_c = c.get("depreciation_amortization_bn") or c.get("depreciation_bn")
+    dep_p = p.get("depreciation_amortization_bn") or p.get("depreciation_bn")
+    depi = 1.0
+    if dep_c and dep_p and ppe_c is not None and ppe_p is not None:
+        rate_c = dep_c / (dep_c + ppe_c) if (dep_c + ppe_c) > 0 else None
+        rate_p = dep_p / (dep_p + ppe_p) if (dep_p + ppe_p) > 0 else None
+        if rate_c and rate_p and rate_c > 0:
+            depi = rate_p / rate_c
+            depi = max(0.1, min(10.0, depi))
 
     # 6. SGAI (Sales, General & Admin Expenses Index): (SGA_t / Rev_t) / (SGA_t-1 / Rev_t-1)
     sga_c = (c.get("selling_expense_bn") or 0.0) + (c.get("ga_expense_bn") or 0.0)
@@ -246,10 +284,18 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
         "components": {
             "dsri": round(dsri, 3),
             "gmi": round(gmi, 3),
+            "aqi": round(aqi, 3),
             "sgi": round(sgi, 3),
+            "depi": round(depi, 3),
             "sgai": round(sgai, 3),
             "lvgi": round(lvgi, 3),
             "tata": round(tata, 3),
+        },
+        "coverage": {
+            "variabel_aktif": sum(1 for v in (dsri, gmi, aqi, sgi, depi, sgai, lvgi) if v != 1.0) + (1 if tata != 0.0 else 0),
+            "catatan": ("AQI/DEPI bernilai 1.0 (netral) bila PPE atau D&A tidak "
+                        "dilaporkan pada filing; M-Score tetap dihitung dengan "
+                        "variabel yang tersedia."),
         },
         "provenance": "COMPUTED_BENEISH_1999",
     }

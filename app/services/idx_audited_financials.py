@@ -183,7 +183,18 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
             "treasury_stock_bn": _bn(r.get("treasury_stock"), cur, usdidr),
             "npl_gross_pct": r.get("npl_gross"),
             "npl_net_pct": r.get("npl_net"),
-            "eps": r.get("eps"),
+            # EPS: filing BEI kadang rusak satuannya (TLKM: 0.00000017983 per
+            # lembar; ITMG: 0.17 dalam USD). Normalisasi:
+            #   1) bila unit USD -> konversi ke Rupiah via kurs;
+            #   2) bila nilai tidak wajar (EPS < 1 Rp padahal laba positif besar),
+            #      turunkan ulang dari identitas EPS = NI / jumlah lembar.
+            "eps": _norm_eps(r, cur, usdidr),
+            # Aset tidak lancar produktif — untuk AQI/DEPI Beneish 8-variabel
+            "property_plant_equipment_bn": _bn(r.get("property_plant_equipment"), cur, usdidr),
+            "investment_property_bn": _bn(r.get("investment_property"), cur, usdidr),
+            "intangible_assets_bn": _bn(r.get("intangible_assets"), cur, usdidr),
+            # Dividen kas dibayar — payout ratio riil
+            "dividends_paid_bn": _bn(r.get("dividends_paid"), cur, usdidr),
             "revenue_concept": (r.get("_concepts") or {}).get("revenue_sales"),
         })
 
@@ -236,6 +247,39 @@ def derive_ratios(row: dict) -> Dict[str, Optional[float]]:
         "equity_multiplier": div(aset, eq),
         "asset_turnover": div(rev, aset),
     }
+
+
+def _norm_eps(r: dict, cur: str, usdidr: float):
+    """EPS dalam Rupiah per saham, tahan terhadap filing yang rusak satuannya."""
+    raw = r.get("eps")
+    try:
+        raw = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        raw = None
+    if raw is None:
+        return None
+    # Konversi mata uang
+    if (cur or "IDR").upper() == "USD":
+        raw = raw * usdidr
+    # sanity: EPS harus >= 1 rupiah bila laba bersih > 1 miliar rupiah.
+    # (saham BEI minimal ~100 juta lembar -> EPS minimal ~10 Rp untuk NI 1 T)
+    ni = r.get("net_income_parent")
+    try:
+        ni = float(ni) if ni is not None else None
+    except (TypeError, ValueError):
+        ni = None
+    if raw is not None and raw < 1.0 and ni and abs(ni) > 1e9:
+        # Nilai tidak wajar: coba turunkan via jumlah lembar
+        sh = r.get("shares_outstanding") or r.get("number_of_shares")
+        try:
+            sh = float(sh) if sh is not None else None
+        except (TypeError, ValueError):
+            sh = None
+        if sh and sh > 0:
+            return round(ni / sh, 4)
+        # tahu bahwa EPS tidak dapat dipercaya lebih baik N/A
+        return None
+    return raw
 
 
 def five_year_table(ticker: str, usdidr: float = 16000.0) -> List[dict]:
