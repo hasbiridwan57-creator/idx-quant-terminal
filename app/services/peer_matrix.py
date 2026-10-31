@@ -91,7 +91,12 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
         # ── ROIC / WACC / EVA: pakai engine institusional (bukan hardcode) ──
         from app.services.cost_of_capital import compute_wacc, compute_eva
         _wacc_res = compute_wacc(session, tk, r)
+        # Bank: `wacc_pct` = biaya ekuitas (WACC korporat tidak berlaku untuk
+        # bank — lihat catatan di cost_of_capital.compute_wacc). Kolomnya tetap
+        # satu agar tabel tidak berubah bentuk; `cost_basis` menjelaskan isinya.
+        _is_bank_row = bool(_wacc_res.get("is_bank"))
         wacc_pct = _wacc_res.get("wacc_pct") if _wacc_res.get("available") else None
+        cost_basis = ("Cost of Equity (Ke)" if _is_bank_row else "WACC")
         _eva_res = compute_eva(session, tk, r, _wacc_res)
         roic = _eva_res.get("roic_pct") if _eva_res.get("available") else None
         eva_spread = _eva_res.get("spread_pct") if _eva_res.get("available") else None
@@ -140,6 +145,9 @@ def build_peer_matrix(primary_ticker: str, peer_tickers: list[str] = None,
             "liabilities_bn": r.get("liabilities_bn"),
             "cash_bn": r.get("cash_bn"),
             "wacc_pct": wacc_pct,
+            "cost_basis": cost_basis,
+            "eva_available": bool(_eva_res.get("available")),
+            "eva_reason": _eva_res.get("reason"),
             "altman_z": z_double_prime,
             "altman_zone": altman_zone,
             "altman_note": altman_note,

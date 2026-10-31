@@ -363,13 +363,31 @@ def build_research_model_from_context(
             # Catatan: `historical_financials` & `beta_vs_ihsg` BELUM ada di
             # titik ini (didefinisikan setelah blok valuasi). Pakai `_bfy`
             # (audited FY terbaru) agar Ke benar-benar terhitung, bukan N/A.
-            _wb_bank = _bwc2(
-                financials=[_bfy] if _bfy else [],
-                beta_raw=None,
-                current_price=curr_p, shares_bn=shares_m or 0.0,
-                is_bank=True, ticker=ticker.upper(),
-            )
-            wacc = _wb_bank.get("ke_pct")
+            # Sumber tunggal biaya modal: cost_of_capital.compute_wacc.
+            # Versi lama memanggil build_wacc_components dengan daftar satu
+            # baris tanpa `sector`, sehingga beta bank jatuh ke default 1.0 dan
+            # Ke berbeda dari tab Peers (BMRI 14,64% vs 15,36%).
+            from app.services.cost_of_capital import compute_wacc as _cw_bank
+            from app.services.idx_audited_financials import five_year_table as _fyt_bank
+            _row_bank = (_fyt_bank(ticker.upper()) or [_bfy or {}])[-1]
+            # Beta butuh Session untuk regresi vs IHSG; tanpa session beta jatuh
+            # ke rata-rata sektor. Buka session sendiri bila pemanggil tidak
+            # menyediakannya (fungsi ini tidak menerima `session`).
+            _wr_bank = None
+            try:
+                from sqlmodel import Session as _S_b
+                from app.db.database import engine as _eng_b
+                with _S_b(_eng_b) as _sess_b:
+                    _wr_bank = _cw_bank(_sess_b, ticker.upper(), _row_bank)
+            except Exception:
+                _wr_bank = _cw_bank(None, ticker.upper(), _row_bank)
+            wacc = _wr_bank.get("wacc_pct") if _wr_bank and _wr_bank.get("available") else None
+            # `dcf` (dict dari quick_dcf_valuation) tetap membawa wacc_pct lama
+            # yang dihitung dari CAPM/relever sendiri. Untuk bank, timpa agar
+            # payload hanya punya SATU angka biaya modal (BMRI 15,36%, bukan
+            # 14,64% di blok dcf dan 15,36% di blok wacc).
+            if isinstance(dcf, dict) and wacc is not None:
+                dcf["wacc_pct"] = round(float(wacc), 2)
         except Exception:
             wacc = None
         tg = None
@@ -1897,16 +1915,50 @@ def build_research_model_from_context(
     _last_fy = historical_financials[-1] if historical_financials else {}
     _beta = beta_vs_ihsg
     _is_b = _last_fy.get("is_bank", False)
-    _wacc_build = build_wacc_components(
-        financials=historical_financials,
-        beta_raw=_beta,
-        current_price=curr_p,
-        shares_bn=shares_m,
-        is_bank=_is_b,
-        ticker=ticker.upper(),
-        # catatan: curr_p/shares_m boleh None untuk emiten tersuspensi (WSKT).
-        # build_wacc_components menangani None -> komponen N/A, bukan crash.
-    )
+    # ── Satu sumber biaya modal ─────────────────────────────────────────────
+    # Versi lama memakai build_wacc_components di sini (beta PROXY 0,85,
+    # ERP sendiri) sementara tab Peers/EVA memakai cost_of_capital.compute_wacc
+    # (beta regresi 0,90). Hasilnya ASII tampil 11,24% di satu tempat dan
+    # 11,64% di tempat lain. Sekarang SEMUA turun dari compute_wacc; field
+    # `beta`, `ke_pct`, `wacc_pct` dst. dipetakan ke bentuk yang sama supaya
+    # template tidak perlu berubah.
+    _wacc_build = {}
+    try:
+        from app.services.cost_of_capital import compute_wacc as _cw_final
+        from app.services.idx_audited_financials import five_year_table as _fyt_final
+        _row_final = (_fyt_final(ticker.upper()) or [{}])[-1]
+        # Fungsi ini tidak menerima `session`; buka sendiri untuk regresi beta.
+        _w_final = None
+        try:
+            from sqlmodel import Session as _S_f
+            from app.db.database import engine as _eng_f
+            with _S_f(_eng_f) as _sess_f:
+                _w_final = _cw_final(_sess_f, ticker.upper(), _row_final)
+        except Exception:
+            _w_final = _cw_final(None, ticker.upper(), _row_final)
+        if _w_final and _w_final.get("available"):
+            _wacc_build = {
+                "beta": _w_final.get("beta"),
+                "ke_pct": _w_final.get("cost_equity_pct"),
+                "cod_pre_tax_pct": _w_final.get("cost_debt_pct"),
+                "kd_post_tax_pct": _w_final.get("cost_debt_pct"),
+                "etr_pct": _w_final.get("etr_pct"),
+                "rf_pct": _w_final.get("rf_pct"),
+                "erp_pct": (_w_final.get("erp_pct") or 0) + (_w_final.get("crp_pct") or 0) or None,
+                "we_pct": _w_final.get("w_equity_pct"),
+                "wd_pct": _w_final.get("w_debt_pct"),
+                "wacc_pct": _w_final.get("wacc_pct"),
+                "market_cap_bn": _w_final.get("market_cap_bn"),
+                "total_debt_bn": None,
+                "total_cap_bn": None,
+                "justified_pbv": _w_final.get("justified_pbv"),
+                "justified_pbv_note": None,
+                "method": "STANDARD_CAPM",
+                "provenance": _w_final.get("provenance") or {},
+            }
+    except Exception as _wf_exc:
+        print(f"[WACC FINAL] {ticker}: {type(_wf_exc).__name__}: {_wf_exc}")
+        _wacc_build = {}
 
     # ---- CFA Figure 31: Extended Peer Comps ----
     _peers_raw = get_peers(ticker.upper())[:5]

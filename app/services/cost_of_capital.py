@@ -87,6 +87,40 @@ def _get_cost_of_debt(row: dict, etr: float) -> tuple[float, str]:
     return 0.09 * (1.0 - etr), "PROXY (cost of debt 9% pre-tax)"
 
 
+def _market_cap_bn(session, ticker: str) -> Optional[float]:
+    """Kapitalisasi pasar dalam miliar rupiah, atau None bila tidak dapat dihitung.
+
+    Urutan sumber:
+      1. `QuoteLatest.market_cap` (sudah dalam rupiah penuh) — paling langsung.
+      2. harga terakhir x jumlah saham dari tabel 5 tahun audited.
+    Tidak memakai `QuoteLatest.shares_outstanding` karena kolom itu tidak ada
+    di model; percobaan sebelumnya mengembalikan None untuk semua emiten
+    sehingga bobot WACC jatuh ke ekuitas buku.
+    """
+    if session is None:
+        return None
+    tk = ticker.upper()
+    try:
+        from sqlmodel import select as _sel
+        from app.db.models import QuoteLatest as _QL
+        q = session.exec(_sel(_QL).where(_QL.ticker == tk)).first()
+        mc = getattr(q, "market_cap", None) if q is not None else None
+        if mc and mc > 0:
+            return float(mc) / 1e9        # rupiah penuh -> miliar
+        px = float(q.price) if (q and q.price and q.price > 0) else None
+        from app.services.idx_audited_financials import five_year_table as _fyt
+        hist = _fyt(tk) or []
+        if px is None and hist:
+            _c = hist[-1].get("close")
+            px = float(_c) if _c else None
+        sh = hist[-1].get("shares_outstanding") if hist else None
+        if px and sh and float(sh) > 0:
+            return (px * float(sh)) / 1e9
+        return None
+    except Exception:
+        return None
+
+
 def compute_wacc(session: Optional[Session], ticker: str, row: dict,
                  rf_pct: float = DEFAULT_RF_PCT,
                  erp_pct: float = DEFAULT_ERP_PCT,
@@ -108,9 +142,23 @@ def compute_wacc(session: Optional[Session], ticker: str, row: dict,
 
     kd_post, kd_src = _get_cost_of_debt(row, etr)
 
-    # Struktur modal target (bukan book value mentah)
+    # ── Struktur modal ──────────────────────────────────────────────────────
+    # BANK: WACC = biaya ekuitas. "Utang" bank adalah DPK nasabah — itu bahan
+    # baku usaha dengan biaya yang SUDAH tercermin di NIM, bukan pendanaan
+    # korporat yang dibobot dalam WACC. Versi lama memakai `total_loans_bn`
+    # (kredit yang DISALURKAN, yaitu ASET senilai Rp970 T untuk BBCA) sebagai
+    # bobot utang, menghasilkan WACC 3,97% — DI BAWAH risk-free 6,0%, mustahil.
+    # NON-BANK: pakai utang berbunga bila ada; `liabilities_bn` (termasuk utang
+    # usaha & beban akrual) hanya sebagai PROXY dan ditandai demikian.
     equity = row.get("equity_parent_bn") or row.get("equity_total_bn")
-    debt = row.get("total_loans_bn") if is_bank else row.get("liabilities_bn")
+    if is_bank:
+        debt = None
+    else:
+        debt = row.get("interest_bearing_debt_bn")
+        if debt is None:
+            debt = row.get("st_debt_bn")
+        if debt is None:
+            debt = row.get("liabilities_bn")
 
     if equity is None or equity <= 0:
         return {
@@ -119,16 +167,52 @@ def compute_wacc(session: Optional[Session], ticker: str, row: dict,
             "is_bank": is_bank,
         }
 
-    if debt is None or debt < 0:
+    if is_bank:
+        # Bank: biaya modal relevan = biaya ekuitas (lihat catatan di atas).
+        we, wd = 1.0, 0.0
+        wacc = ke
+        debt_prov = ("N/A — bank: biaya modal relevan adalah biaya ekuitas; "
+                     "DPK bukan pendanaan korporat")
+    elif debt is None or debt < 0:
         # Tidak ada utang berbunga -> WACC = cost of equity
         we, wd = 1.0, 0.0
         wacc = ke
         debt_prov = "N/A (tidak ada utang berbunga)"
     else:
-        total = equity + debt
-        we, wd = equity / total, debt / total
+        # Bobot memakai NILAI PASAR ekuitas (market cap) bila tersedia — itu
+        # standar WACC institusional. Memakai ekuitas BUKU membuat bobot utang
+        # terlalu kecil (ASII: 23,2% vs 26,6% berbasis pasar) dan WACC terlalu
+        # tinggi; sementara memakai total liabilitas membuatnya terlalu besar
+        # (53,2%). Dua jalur (halaman utama vs tab Peers) sempat berbeda
+        # 9,58% vs 11,84% untuk emiten yang sama karena ini.
+        _mc = _market_cap_bn(session, ticker)
+        _eq_w = _mc if (_mc and _mc > 0) else equity
+        _eq_basis = "MARKET" if (_mc and _mc > 0) else "BOOK"
+        # Catatan konsistensi: bobot memakai market cap, sama seperti
+        # equity_research_helpers.build_wacc_components. Dua fungsi WACC yang
+        # berbeda basis (buku vs pasar) menghasilkan ASII 11,84% vs 11,30%.
+        total = _eq_w + debt
+        we, wd = _eq_w / total, debt / total
         wacc = we * ke + wd * kd_post
-        debt_prov = f"{'MARKET' if is_bank else 'REPORTED'} (ekuitas + {'pinjaman' if is_bank else 'liabilitas'})"
+        _ibd = row.get("interest_bearing_debt_bn") is not None or row.get("st_debt_bn") is not None
+        debt_prov = ((f"REPORTED ({_eq_basis} equity + utang berbunga)" if _ibd
+                      else f"PROXY ({_eq_basis} equity + total liabilitas; utang "
+                           f"berbunga tidak tersedia di filing)"))
+
+    # SANITY GATE: biaya modal tidak boleh di bawah risk-free. Bila terjadi,
+    # ada komponen yang salah (bobot utang keliru, Kd mustahil, beta rusak).
+    # Menampilkan angka di bawah rf = menyatakan pendanaan lebih murah daripada
+    # obligasi pemerintah tanpa risiko — tidak dapat dipertanggungjawabkan.
+    _wacc_mustahil = wacc < rf
+    if _wacc_mustahil:
+        return {
+            "available": False,
+            "is_bank": is_bank,
+            "reason": (f"WACC {wacc*100:.2f}% di bawah risk-free {rf*100:.2f}% — "
+                       f"komponen biaya modal tidak valid, hasil disembunyikan "
+                       f"daripada disajikan sebagai fakta."),
+            "cost_equity_pct": round(ke * 100.0, 2),
+        }
 
     return {
         "available": True,

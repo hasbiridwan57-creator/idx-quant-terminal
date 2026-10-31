@@ -10,8 +10,16 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
     ERP = Damodaran Indonesia (~6.5%)
     Beta = covariance vs IHSG dari XBRL 24-bulan price series
     """
-    rf = 0.068  # SBN 10Y Indonesia
-    erp = 0.065  # Damodaran ERP + country risk
+    # ── Satu sumber parameter biaya modal ──────────────────────────────────
+    # Versi lama memakai rf 6,8% + ERP 6,5% di sini, sementara
+    # cost_of_capital.compute_wacc memakai rf 6,0% + ERP 5,5% + CRP 2,5%,
+    # dan app/main.RISK_FREE_PCT = 6,0. Tiga konstanta untuk hal yang sama
+    # membuat WACC ASII menjadi 11,30% di satu jalur dan 11,64% di jalur lain.
+    # Sekarang semua menurunkan dari cost_of_capital.
+    from app.services.cost_of_capital import (
+        DEFAULT_RF_PCT as _RF, DEFAULT_ERP_PCT as _ERP, DEFAULT_CRP_PCT as _CRP)
+    rf = _RF / 100.0
+    erp = (_ERP + _CRP) / 100.0
     latest = financials[-1] if financials else {}
 
     # Beta: regresi return harian vs IHSG (5 tahun) bila tersedia, lalu beta
@@ -63,7 +71,11 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
         # Non-bank: interest-bearing debt TIDAK punya tag tunggal di XBRL.
         # Gunakan Total Liabilities sebagai PROXY konservatif (upper bound WACC),
         # dan tandai secara eksplisit agar tidak dibaca sebagai angka pasti.
-        total_debt = liabilities
+        # Utang BERBUNGA bila ada; total liabilitas hanya proxy (ditandai).
+        _ibd = latest.get("interest_bearing_debt_bn")
+        if _ibd is None:
+            _ibd = latest.get("st_debt_bn")
+        total_debt = (_ibd if _ibd is not None else liabilities)
         if market_cap is None:
             total_cap = None
             we = wd = None

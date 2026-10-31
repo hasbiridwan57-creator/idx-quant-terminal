@@ -316,6 +316,25 @@ async def dashboard_home(
             if _debt is None:
                 _debt = min(tl_bn, te_bn) if (tl_bn and te_bn) else tl_bn
 
+            # Sumber tunggal biaya modal untuk semua jalur.
+            _wacc_override_main = None
+            try:
+                from app.services.cost_of_capital import compute_wacc as _cw_m
+                from app.services.idx_audited_financials import five_year_table as _fyt_m
+                _row_m = (_fyt_m(curr_stmt.ticker) or [{}])[-1]
+                _wr_m = _cw_m(session, curr_stmt.ticker, _row_m)
+                if _wr_m.get("available"):
+                    _wacc_override_main = float(_wr_m["wacc_pct"])
+            except Exception:
+                _wacc_override_main = None
+            # DCF hanya bermakna bila laba operasi positif. Emiten rugi
+            # (GOTO, BUKA) menghasilkan FCF & terminal value negatif ->
+            # "upside -100%" yang tidak dapat dipertanggungjawabkan.
+            # Lebih baik DCF = None (N/A) daripada angka tak bermakna.
+            if (_ebit_norm_bn or 0) <= 0:
+                print(f"[DCF] {curr_stmt.ticker}: EBIT {_ebit_norm_bn} <= 0 -> DCF dilewati "
+                      f"(valuasi berbasis laba tidak berlaku)")
+                raise ValueError("EBIT non-positif")
             dcf_result = quick_dcf_valuation(
                 ticker=curr_stmt.ticker,
                 current_market_price=current_price,
@@ -325,6 +344,10 @@ async def dashboard_home(
                 cost_of_debt_pre_tax=_kd * 100.0,
                 tax_rate=_etr,
                 target_debt_ratio=_wd,
+                # WACC dari sumber tunggal (cost_of_capital.compute_wacc),
+                # sama dengan tab Peers/EVA. Tanpa ini DCF me-relever beta
+                # sendiri dan menyimpang 0,4-1,7 pp dari tab Peers.
+                wacc_override=_wacc_override_main,
                 ebit=_ebit_norm_bn,
                 depreciation=dep_bn,
                 capex=capex_bn,
@@ -338,6 +361,17 @@ async def dashboard_home(
             )
             if isinstance(dcf_result, dict):
                 dcf_result.setdefault("terminal_growth_rate", 0.025)
+                # GUARD HASIL: DCF yang menghasilkan terminal value / equity
+                # negatif berarti asumsi rusak (capex > EBIT setelah pajak,
+                # mis. BUKA: capex Rp1.182 B vs EBIT Rp519 B). Menyajikannya
+                # sebagai "upside -100%" menyesatkan; DCF dibatalkan -> N/A.
+                _tv_v = dcf_result.get("terminal_value_bn")
+                _eq_v = dcf_result.get("equity_value_bn")
+                if ((_tv_v is not None and _tv_v <= 0)
+                        or (_eq_v is not None and _eq_v <= 0)):
+                    print(f"[DCF] {curr_stmt.ticker}: TV {_tv_v} / equity {_eq_v} negatif "
+                          f"-> DCF dibatalkan (arus kas tidak menopang nilai)")
+                    dcf_result = None
                 # Simpan input apa adanya supaya slider sensitivitas di tab
                 # Valuation dapat MENGHITUNG ULANG DCF, bukan mengira-ngira
                 # dengan koefisien linear seperti versi lama.
@@ -928,18 +962,52 @@ def _build_dcf_raw_inputs(tk: str, session) -> dict | None:
     if len(_revs) >= 2:
         _n = len(_revs) - 1
         _g = max(-0.10, min(0.12, (_revs[-1] / _revs[0]) ** (1.0 / _n) - 1.0))
+    # `financials` WAJIB diisi: dengan list kosong, build_wacc_components
+    # mengembalikan bobot default (wd 53,2% untuk ASII) sehingga WACC DCF
+    # berbeda dari WACC tab Peers (23,2%) untuk emiten yang sama.
     _wb = _bwc(financials=_tbl, beta_raw=None, current_price=_latest_price(session, tk),
                shares_bn=shares_m, is_bank=False, ticker=tk)
+    # Utang untuk DCF = utang BERBUNGA. Total liabilitas (utang usaha, beban
+    # akrual) bukan pendanaan berbunga; memakainya menggelembungkan bobot utang
+    # dan menekan WACC secara artifisial.
     _debt = debt_bn
     if _debt is None:
-        _debt = min(tl_bn, te_bn) if (tl_bn and te_bn) else tl_bn
+        _debt = (getattr(curr_stmt, "st_debt", None) or 0.0) * factor_to_bn or None
+    if _debt is None:
+        _debt = 0.0
+    # Bobot WACC berbasis pasar, sama seperti tab Peers.
+    _mc_bn = None
+    try:
+        _px = _latest_price(session, tk)
+        if _px and shares_m:
+            _mc_bn = (_px * shares_m) / 1000.0
+    except Exception:
+        _mc_bn = None
+    _eq_w = _mc_bn if (_mc_bn and _mc_bn > 0) else te_bn
+    _wd = (_debt / (_eq_w + _debt)) if (_eq_w and (_eq_w + _debt) > 0) else 0.0
+    # WACC dari SATU sumber (cost_of_capital) supaya halaman utama, tab Peers,
+    # EVA, dan DCF menyebut angka yang sama.
+    _wacc_src = None
+    try:
+        from app.services.cost_of_capital import compute_wacc as _cw
+        from app.services.idx_audited_financials import five_year_table as _fyt_w
+        _row_w = (_fyt_w(tk) or [{}])[-1]
+        _wr = _cw(session, tk, _row_w)
+        if _wr.get("available"):
+            _wacc_src = float(_wr["wacc_pct"])
+    except Exception:
+        _wacc_src = None
     return {
         "risk_free_rate": float(RISK_FREE_PCT),
         "market_risk_premium": 6.5,
         "levered_beta": float(_wb.get("beta") or 1.0),
         "cost_of_debt_pre_tax": float((_wb.get("cod_pre_tax_pct") or 7.5)),
         "tax_rate": float((_wb.get("etr_pct") or 22.0)) / 100.0,
-        "target_debt_ratio": float((_wb.get("wd_pct") or 30.0)) / 100.0,
+        # Bobot utang: pakai _wd hasil hitungan di atas (utang berbunga /
+        # (market cap + utang berbunga)), bukan `_wb.wd_pct` yang bisa default
+        # 30% saat financials kosong.
+        "target_debt_ratio": float(_wd),
+        "wacc_override": _wacc_src,
         "ebit": float(ebit_bn),
         "depreciation": float(dep_bn),
         "capex": float(capex_bn),

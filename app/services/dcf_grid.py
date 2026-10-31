@@ -29,9 +29,23 @@ def dcf_price_at(raw: Dict[str, float], wacc_pct: float,
     g = tg_pct / 100.0
     if w <= g:
         return None
+    # DCF hanya bermakna bila arus kas operasi positif. EBIT negatif -> FCF
+    # negatif, terminal value negatif, dan harga hasilnya tidak dapat
+    # dipertanggungjawabkan (GOTO: EBIT -378 -> EV -18.250 T, "harga" Rp2).
+    # Kembalikan None supaya UI menampilkan N/A dengan alasan, bukan angka palsu.
+    if (raw.get("ebit") or 0) <= 0:
+        return None
+    # Pertumbuhan abadi harus di bawah WACC; bila CAGR historis melampaui
+    # WACC, model menilai perusahaan selamanya tumbuh lebih cepat dari biaya
+    # modalnya — asumsi yang tidak dapat dipertahankan.
+    if (raw.get("fcf_growth_rate") or 0.0) >= w:
+        return None
     try:
         from app.services.fincept_valuation import DCFModel
         model = DCFModel(raw.get("ticker", "NA"))
+        # WACC di sini SELALU parameter (wacc_pct), bukan hasil hitungan ulang:
+        # grid memang memvariasikan WACC. Yang disamakan adalah komponen lain
+        # (pajak, utang, kas, saham, pertumbuhan) dengan valuasi utama.
         base_fcf = model.calculate_free_cash_flow(
             raw["ebit"],
             raw.get("tax_rate", 0.22),

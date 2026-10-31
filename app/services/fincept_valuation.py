@@ -158,17 +158,26 @@ class DCFModel:
         beta = wacc_inputs.get("levered_beta", 1.0)
         tax = wacc_inputs.get("tax_rate", 0.25)
         d_ratio = wacc_inputs.get("target_debt_ratio", 0.3)
-        u_beta = self.unlever_beta(beta, tax, d_ratio)
-        r_beta = self.relever_beta(u_beta, tax, d_ratio)
 
-        wacc = self.calculate_wacc(
-            wacc_inputs["risk_free_rate"],
-            wacc_inputs["market_risk_premium"],
-            r_beta,
-            wacc_inputs["cost_of_debt_pre_tax"],
-            tax,
-            d_ratio,
-        )
+        # WACC OVERRIDE: bila pemanggil sudah menghitung WACC lewat
+        # cost_of_capital.compute_wacc (sumber tunggal untuk tab Peers, EVA,
+        # dan halaman utama), pakai angka itu apa adanya. Tanpa ini DCF
+        # meng-unlever lalu me-relever beta dan memakai ERP 6,5% sendiri,
+        # menghasilkan ASII 10,54% vs 11,64% untuk emiten yang sama.
+        _wacc_override = wacc_inputs.get("wacc_override")
+        if _wacc_override:
+            wacc = float(_wacc_override) / 100.0
+        else:
+            u_beta = self.unlever_beta(beta, tax, d_ratio)
+            r_beta = self.relever_beta(u_beta, tax, d_ratio)
+            wacc = self.calculate_wacc(
+                wacc_inputs["risk_free_rate"],
+                wacc_inputs["market_risk_premium"],
+                r_beta,
+                wacc_inputs["cost_of_debt_pre_tax"],
+                tax,
+                d_ratio,
+            )
 
         base_fcf = self.calculate_free_cash_flow(
             fcf_inputs["ebit"],
@@ -296,6 +305,10 @@ def quick_dcf_valuation(
     cost_of_debt_pre_tax: float = 8.5,
     tax_rate: float = 0.25,
     target_debt_ratio: float = 0.35,
+    # WACC yang sudah dihitung sumber lain (cost_of_capital.compute_wacc).
+    # Bila diisi, model memakainya apa adanya agar DCF dan tab Peers/EVA
+    # menyebut angka yang sama.
+    wacc_override: Optional[float] = None,
     projection_years: int = 5,
     # Current market price (optional, dalam IDR per lembar)
     current_market_price: Optional[float] = None,
@@ -315,6 +328,7 @@ def quick_dcf_valuation(
         tax_rate=tax_rate,
         target_debt_ratio=target_debt_ratio,
         fcf_growth_rate=fcf_growth_rate,
+        wacc_override=wacc_override,
     )
 
     fcf_inp = dict(

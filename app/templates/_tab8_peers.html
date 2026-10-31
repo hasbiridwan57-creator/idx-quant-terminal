@@ -157,9 +157,10 @@
               <div class="text-[9px] text-slate-600" x-show="peer.eva_method && peer.eva_method.indexOf('EXCESS') === 0">bank</div>
             </td>
 
-            <!-- WACC -->
+            <!-- Biaya Modal: WACC untuk non-bank, Cost of Equity untuk bank -->
             <td class="text-right px-3 py-3">
               <span class="text-slate-300" x-text="fmtPct(peer.wacc_pct)"></span>
+              <div class="text-[9px] text-slate-500" x-text="peer.cost_basis"></div>
             </td>
 
             <!-- EVA Spread (ROIC - WACC) -->
@@ -169,6 +170,9 @@
                     x-text="peer.eva_spread_pct === null || peer.eva_spread_pct === undefined ? 'N/A' : (peer.eva_spread_pct > 0 ? '+' : '') + peer.eva_spread_pct.toFixed(2) + '%'"></span>
               <div class="text-[9px] text-slate-500"
                    x-text="peer.eva_bn === null || peer.eva_bn === undefined ? '' : (peer.eva_bn >= 0 ? '+Rp ' : '-Rp ') + formatBn(Math.abs(peer.eva_bn))"></div>
+              <div class="text-[9px] text-amber-500/80 mt-0.5"
+                   x-show="peer.eva_available === false && peer.eva_reason"
+                   x-text="peer.eva_reason"></div>
             </td>
 
             <!-- Altman Z'' -->
