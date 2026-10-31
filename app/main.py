@@ -724,6 +724,17 @@ async def get_risk_json(ticker: str, risk_free: float = 6.0,
     from app.db.models import QuoteHistoryDaily as _QH
     from app.services.fincept_risk import calculate_risk_metrics
 
+    # VALIDASI: risk-free harus dalam rentang yang masuk akal. Tanpa ini,
+    # ?risk_free=-100 menghasilkan Sharpe +3,44 dan ?risk_free=10000
+    # menghasilkan -318,6 — angka omong kosong yang tampil seolah valid.
+    # Rentang 0-30% mencakup semua rezim suku bunga yang pernah terjadi
+    # di Indonesia (SBN 10Y historis 5-20%).
+    if not (0.0 <= risk_free <= 30.0):
+        raise HTTPException(
+            status_code=422,
+            detail=(f"risk_free={risk_free}% di luar rentang wajar. "
+                    f"Gunakan 0-30 (persen). Contoh: 6.0 untuk SBN 10Y."))
+
     tk = ticker.upper().strip()
     curr_stmt, _ = load_ticker_pair(session, tk)
     if not curr_stmt:
@@ -845,6 +856,27 @@ async def get_bond_calc_json(
     years: float = 5.0,
     freq: int = 2,
 ):
+    # VALIDASI INPUT: tanpa ini, face_value=-1000 atau coupon_pct=999
+    # menghasilkan harga obligasi negatif/absurd dengan status 200 —
+    # angka yang tidak mungkin ada di pasar namun tampil seolah valid.
+    if face_value <= 0:
+        raise HTTPException(status_code=422,
+                            detail=f"face_value={face_value} harus > 0.")
+    if face_value > 1e15:
+        raise HTTPException(status_code=422,
+                            detail="face_value terlalu besar (maks 1e15).")
+    if not (-5.0 <= coupon_pct <= 100.0):
+        raise HTTPException(status_code=422,
+                            detail=f"coupon_pct={coupon_pct}% di luar rentang wajar (-5 s/d 100).")
+    if not (0.0 < ytm_pct <= 100.0):
+        raise HTTPException(status_code=422,
+                            detail=f"ytm_pct={ytm_pct}% harus > 0 dan <= 100.")
+    if not (0.0 < years <= 100.0):
+        raise HTTPException(status_code=422,
+                            detail=f"years={years} harus > 0 dan <= 100.")
+    if freq not in (1, 2, 4):
+        raise HTTPException(status_code=422,
+                            detail=f"freq={freq} tidak valid (1=tahunan, 2=semiannual, 4=kuartalan).")
     try:
         cf = CouponFrequency.SEMIANNUAL if freq == 2 else (CouponFrequency.ANNUAL if freq == 1 else CouponFrequency.QUARTERLY)
         res = bond_price(
@@ -1387,7 +1419,21 @@ async def api_get_performance(
     """
     from sqlmodel import Session as _Session
     from app.db.database import engine as _engine
-    from app.services.performance_engine import compute_performance
+    from app.services.performance_engine import _valid_date_str, compute_performance
+
+    if not (0.0 <= risk_free <= 30.0):
+        raise HTTPException(
+            status_code=422,
+            detail=f"risk_free={risk_free}% di luar rentang wajar (0-30).")
+    if start and _valid_date_str(start) is None:
+        raise HTTPException(status_code=422,
+                            detail=f"start='{start}' bukan tanggal ISO (YYYY-MM-DD).")
+    if end and _valid_date_str(end) is None:
+        raise HTTPException(status_code=422,
+                            detail=f"end='{end}' bukan tanggal ISO (YYYY-MM-DD).")
+    if start and end and start > end:
+        raise HTTPException(status_code=422,
+                            detail=f"start ({start}) harus sebelum end ({end}).")
 
     with _Session(_engine) as sess:
         return compute_performance(sess, ticker, benchmark=benchmark,
@@ -1405,6 +1451,10 @@ async def api_get_rolling(
     from app.db.database import engine as _engine
     from app.services.performance_engine import compute_rolling_stats
 
+    if not (0.0 <= risk_free <= 30.0):
+        raise HTTPException(
+            status_code=422,
+            detail=f"risk_free={risk_free}% di luar rentang wajar (0-30).")
     w = max(60, min(756, int(window)))
     with _Session(_engine) as sess:
         return compute_rolling_stats(sess, ticker, window_days=w, risk_free_pct=risk_free)
@@ -1421,9 +1471,14 @@ async def api_compare_performance(
     from app.db.database import engine as _engine
     from app.services.performance_engine import compute_performance_multi
 
+    if not (0.0 <= risk_free <= 30.0):
+        raise HTTPException(
+            status_code=422,
+            detail=f"risk_free={risk_free}% di luar rentang wajar (0-30).")
     tl = [t.strip().upper() for t in tickers.split(",") if t.strip()][:12]
     if not tl:
-        return {"error": "Tidak ada ticker"}
+        raise HTTPException(status_code=422,
+                            detail="Tidak ada ticker. Contoh: /api/performance/compare/ASII,TLKM")
     with _Session(_engine) as sess:
         return compute_performance_multi(sess, tl, benchmark=benchmark, risk_free_pct=risk_free)
 

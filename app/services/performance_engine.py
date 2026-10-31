@@ -41,10 +41,30 @@ TRADING_DAYS = 252
 # ─────────────────────────────────────────────────────────────────
 # Data access
 # ─────────────────────────────────────────────────────────────────
+def _valid_date_str(v: Optional[str]) -> Optional[str]:
+    """Normalisasi tanggal ISO. Nilai tak valid -> None (diabaikan), bukan
+    diteruskan mentah ke SQL — versi lama menerima "2024-13-45" dan
+    "abc" lalu diam-diam mengembalikan seri kosong atau seri penuh,
+    sehingga pengguna tidak tahu filternya tidak berlaku.
+    """
+    if not v:
+        return None
+    try:
+        from datetime import date as _d
+        return _d.fromisoformat(str(v)[:10]).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
 def load_prices(session: Session, ticker: str,
                 start: Optional[str] = None,
                 end: Optional[str] = None) -> List[Tuple[str, float]]:
     """Ambil (date, close) terurut naik. Hanya harga valid (> 0)."""
+    start, end = _valid_date_str(start), _valid_date_str(end)
+    # Rentang terbalik dianggap tidak ada filter (lebih baik daripada
+    # mengembalikan seri kosong yang terlihat seperti "data tidak cukup").
+    if start and end and start > end:
+        start = end = None
     q = "SELECT date, close FROM quotehistorydaily WHERE ticker = :t AND close > 0"
     params: Dict[str, Any] = {"t": ticker.upper()}
     if start:
@@ -454,6 +474,17 @@ def compute_rolling_stats(session: Session, ticker: str,
     Sharpe 0.5 secara total tapi sebenarnya 3 tahun bagus lalu 2 tahun hancur.
     Rolling window memperlihatkan stabilitas, bukan cuma rata-rata.
     """
+    # window_days negatif/nol membuat irisan seri tak bermakna: versi lama
+    # meloloskan window=-5 sampai IndexError di dalam loop (endpoint publik
+    # /api/performance/rolling bisa dipanggil dengan parameter sembarang).
+    try:
+        window_days = int(window_days)
+    except (TypeError, ValueError):
+        window_days = 252
+    if window_days < 5:
+        return {"available": False, "window_days": window_days,
+                "reason": f"window_days={window_days} tidak valid (minimum 5 hari)"}
+
     rows = load_prices(session, ticker)
     if len(rows) < window_days + 30:
         return {
