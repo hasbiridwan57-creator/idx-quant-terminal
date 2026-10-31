@@ -39,6 +39,8 @@ class BankingRatios(BaseModel):
 
     # ── CFA Excess-Return (Residual Income) valuation fields ───────────────────
     justified_pbv: Optional[float] = None             # (ROE - g) / (Ke - g)
+    cost_of_equity_pct: Optional[float] = None        # Ke yang BENAR dipakai (%, bukan konstanta)
+    sustainable_growth_pct: Optional[float] = None    # g yang BENAR dipakai (%, bukan konstanta)
     bvps: Optional[float] = None                      # total_equity / shares_outstanding (IDR/share)
     fair_value_per_share: Optional[float] = None        # BVPS × Justified PBV
 
@@ -170,6 +172,11 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
         debt_to_equity=dte,
         effective_tax_rate=etr,
         justified_pbv=justified_pbv,
+        # Simpan Ke/g yang benar-benar dipakai agar UI dapat menampilkannya.
+        # Tanpa ini template menulis "10.50% / 5.00%" untuk semua bank, yang
+        # hanya benar bila jalur pemanggil tidak mengirim Ke/g riil.
+        cost_of_equity_pct=round(ke_used * 100.0, 2),
+        sustainable_growth_pct=round(g_used * 100.0, 2),
         bvps=bvps,
         fair_value_per_share=fair_value_per_share,
     )

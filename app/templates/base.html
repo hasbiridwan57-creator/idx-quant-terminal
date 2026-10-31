@@ -193,12 +193,12 @@
         <div class="pt-2 border-t border-white/[0.04] grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400">
           <div>
             <span class="block text-[10px] text-slate-500 font-sans">Turnover</span>
-            <span class="text-slate-200">Rp {{ "%.1f"|format(terminal.header.total_value_idr_bn / 1000) }}T</span>
+            <span class="text-slate-200">{{ 'Rp %.1fT'|format(terminal.header.total_value_idr_bn / 1000) if terminal.header.total_value_idr_bn is not none else 'N/A' }}</span>
           </div>
           <div>
             <span class="block text-[10px] text-slate-500 font-sans">Net Asing RG</span>
-            <span class="{{ 'text-emerald-400' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-rose-400' }}">
-              {{ "%+.0f"|format(terminal.header.net_foreign_rg_idr_bn) }}M
+            <span class="{{ 'text-slate-500' if terminal.header.net_foreign_rg_idr_bn is none else ('text-emerald-400' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-rose-400') }}">
+              {{ ("%+.0f"|format(terminal.header.net_foreign_rg_idr_bn) ~ 'M') if terminal.header.net_foreign_rg_idr_bn is not none else 'N/A' }}
             </span>
           </div>
         </div>
@@ -481,10 +481,14 @@
         showUploadModal: false,
         showCompareModal: false,
         chartLayout: 1,
-        chartSlot1: 'IDX:COMPOSITE',
-        chartSlot2: 'IDX:BBCA',
-        chartSlot3: 'IDX:BBRI',
-        chartSlot4: 'IDX:ASII',
+        // Slot chart HARUS mengikuti emiten yang sedang dibuka. Sebelumnya
+        // keempat slot hardcode (COMPOSITE/BBCA/BBRI/ASII), sehingga untuk
+        // TLKM atau GOTO pun yang tampil tetap IHSG dan BBCA -- pengguna
+        // melihat chart emiten lain tanpa tahu.
+        chartSlot1: 'IDX:{{ bundle.current.ticker }}',
+        chartSlot2: 'IDX:COMPOSITE',
+        chartSlot3: 'IDX:COMPOSITE',
+        chartSlot4: 'IDX:COMPOSITE',
         showAiModal: false,
         aiLoading: false,
         aiData: null,
@@ -918,6 +922,21 @@
             const resEl = document.getElementById('research-data') || document.getElementById('research-json');
             this.researchData = resEl ? JSON.parse(resEl.textContent) : null;
           } catch(e) { console.error('Error parsing research JSON:', e); }
+          // Slot 2-4 diisi peer riil emiten ini (bukan BBCA/BBRI tetap).
+          try {
+            // `peer_comps_extended` / `peer_benchmark` berisi array objek
+            // dengan field `ticker` (bukan array string). Ambil dari keduanya
+            // lalu buang emiten utama.
+            const rd = this.researchData || {};
+            const cand = []
+              .concat(rd.peer_comps_extended || [], rd.peer_benchmark || [])
+              .map(r => (r && (r.ticker || r.symbol)) || '')
+              .filter(t => t && String(t).toUpperCase() !== String(this.ticker).toUpperCase());
+            const picks = [...new Set(cand.map(t => String(t).toUpperCase()))].slice(0, 3);
+            if (picks[0]) this.chartSlot2 = 'IDX:' + picks[0];
+            if (picks[1]) this.chartSlot3 = 'IDX:' + picks[1];
+            if (picks[2]) this.chartSlot4 = 'IDX:' + picks[2];
+          } catch (e) { /* peer belum tersedia: biarkan default IHSG */ }
           this.loadTradingStatus();
           setTimeout(() => {
             try {

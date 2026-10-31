@@ -80,7 +80,10 @@
       </div>
       <div>
         <span class="text-slate-400 block font-sans">Cost of Equity (Ke) / g</span>
-        <span class="text-lg font-semibold text-white mt-1 block">10.50% / 5.00%</span>
+        <span class="text-lg font-semibold text-white mt-1 block">
+          {{ "%.2f"|format(banking.cost_of_equity_pct) ~ '%' if banking.cost_of_equity_pct is not none else 'N/A' }} /
+          {{ "%.2f"|format(banking.sustainable_growth_pct) ~ '%' if banking.sustainable_growth_pct is not none else 'N/A' }}
+        </span>
         <span class="text-[11px] text-slate-500">Asumsi Pertumbuhan Berkelanjutan</span>
       </div>
       <div>

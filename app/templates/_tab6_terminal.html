@@ -11,12 +11,12 @@
     <div class="flex items-center gap-6 font-mono text-xs">
       <div class="text-right">
         <span class="text-slate-400 block font-sans text-xs">Total Turnover</span>
-        <span class="text-white font-semibold text-base">Rp {{ "%.1f"|format(terminal.header.total_value_idr_bn / 1000) }} T</span>
+        <span class="text-white font-semibold text-base">{{ 'Rp %.1f T'|format(terminal.header.total_value_idr_bn / 1000) if terminal.header.total_value_idr_bn is not none else 'N/A' }}</span>
       </div>
       <div class="text-right border-l border-white/[0.08] pl-6">
         <span class="text-slate-400 block font-sans text-xs">Net Asing Reguler</span>
-        <span class="font-semibold text-base {{ 'text-emerald-400' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-rose-400' }}">
-          Rp {{ "%+.1f"|format(terminal.header.net_foreign_rg_idr_bn) }} M
+        <span class="font-semibold text-base {{ 'text-slate-400' if terminal.header.net_foreign_rg_idr_bn is none else ('text-emerald-400' if terminal.header.net_foreign_rg_idr_bn >= 0 else 'text-rose-400') }}">
+          {{ ('Rp %+.1f M'|format(terminal.header.net_foreign_rg_idr_bn)) if terminal.header.net_foreign_rg_idr_bn is not none else 'N/A' }}
         </span>
       </div>
     </div>
@@ -53,8 +53,8 @@
               <td class="text-right px-3 tabular-nums font-semibold {{ 'text-emerald-400' if m.change_pct >= 0 else 'text-rose-400' }}">
                 {{ "%+.2f"|format(m.change_pct) }}%
               </td>
-              <td class="text-right px-4 tabular-nums font-semibold {{ 'text-emerald-400' if m.ihsg_point_impact >= 0 else 'text-rose-400' }}">
-                {{ "%+.1f"|format(m.ihsg_point_impact) }}
+              <td class="text-right px-4 tabular-nums font-semibold {{ 'text-slate-500' if m.ihsg_point_impact is none else ('text-emerald-400' if m.ihsg_point_impact >= 0 else 'text-rose-400') }}">
+                {{ ("%+.1f"|format(m.ihsg_point_impact)) if m.ihsg_point_impact is not none else 'N/A' }}
               </td>
             </tr>
             {% endfor %}
@@ -85,11 +85,11 @@
               <td class="py-3 px-4 font-semibold">
                 <a href="/?ticker={{ f.ticker }}" class="text-sky-400 hover:underline">{{ f.ticker }}</a>
               </td>
-              <td class="text-right px-3 tabular-nums {{ 'text-emerald-400 font-semibold' if f.net_foreign_rg_1d_bn >= 0 else 'text-rose-400 font-semibold' }}">
-                {{ "%+.1f"|format(f.net_foreign_rg_1d_bn) }}B
+              <td class="text-right px-3 tabular-nums {{ 'text-slate-500 font-semibold' if f.net_foreign_rg_1d_bn is none else ('text-emerald-400 font-semibold' if f.net_foreign_rg_1d_bn >= 0 else 'text-rose-400 font-semibold') }}">
+                {{ ("%+.1f"|format(f.net_foreign_rg_1d_bn) ~ 'B') if f.net_foreign_rg_1d_bn is not none else 'N/A' }}
               </td>
-              <td class="text-right px-3 tabular-nums {{ 'text-emerald-400' if f.net_foreign_rg_5d_bn >= 0 else 'text-rose-400' }}">
-                {{ "%+.1f"|format(f.net_foreign_rg_5d_bn) }}B
+              <td class="text-right px-3 tabular-nums {{ 'text-slate-500' if f.net_foreign_rg_5d_bn is none else ('text-emerald-400' if f.net_foreign_rg_5d_bn >= 0 else 'text-rose-400') }}">
+                {{ ("%+.1f"|format(f.net_foreign_rg_5d_bn) ~ 'B') if f.net_foreign_rg_5d_bn is not none else 'N/A' }}
               </td>
               <td class="text-center px-4">
                 <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border {{ 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' if 'ACCUMULATION' in f.flow_signal else ('bg-rose-500/10 border-rose-500/30 text-rose-400' if 'DISTRIBUTION' in f.flow_signal else 'bg-slate-800 text-slate-400 border-white/[0.06]') }}">

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, computed_field
 
 def get_idx_tick_size(price: int) -> int:
@@ -33,9 +33,11 @@ class IHSGBriefingHeader(BaseModel):
     ihsg_last: float
     change_pts: float
     change_pct: float
-    total_value_idr_bn: float
-    net_foreign_rg_idr_bn: float
-    net_foreign_all_idr_bn: float
+    # Optional: DB tidak selalu punya turnover / arus asing. None berarti
+    # "tidak ada data" dan template menampilkan N/A, bukan angka karangan.
+    total_value_idr_bn: Optional[float] = None
+    net_foreign_rg_idr_bn: Optional[float] = None
+    net_foreign_all_idr_bn: Optional[float] = None
     market_status: str = Field(default="CLOSED EOD", pattern="^(OPEN|PRE-CLOSING|CLOSED EOD)$")
     briefing_headline: str
 
@@ -44,24 +46,28 @@ class BigCapMoverItem(BaseModel):
     company_name: str
     last_price: int
     change_pct: float
-    ihsg_point_impact: float
+    ihsg_point_impact: Optional[float] = None
     volume_lot: int
     market_cap_idr_trn: float
 
 class ForeignFlowItem(BaseModel):
     ticker: str
-    net_foreign_rg_1d_bn: float
-    net_foreign_rg_5d_bn: float
-    net_foreign_ng_1d_bn: float = 0.0
+    # None = data arus asing tidak tersedia untuk emiten ini. Sebelumnya
+    # angkanya dikarang dengan rumus change_pct x 42.5 / x128 / x38.
+    net_foreign_rg_1d_bn: Optional[float] = None
+    net_foreign_rg_5d_bn: Optional[float] = None
+    net_foreign_ng_1d_bn: Optional[float] = None
 
     @computed_field
     @property
     def flow_signal(self) -> str:
-        if self.net_foreign_rg_1d_bn > 25.0 and self.net_foreign_rg_5d_bn > 50.0:
+        if self.net_foreign_rg_1d_bn is None:
+            return "N/A"
+        if self.net_foreign_rg_1d_bn > 25.0 and (self.net_foreign_rg_5d_bn or 0) > 50.0:
             return "STRONG_ACCUMULATION"
         elif self.net_foreign_rg_1d_bn > 0:
             return "MILD_INFLOW"
-        elif self.net_foreign_rg_1d_bn < -25.0 and self.net_foreign_rg_5d_bn < -50.0:
+        elif self.net_foreign_rg_1d_bn < -25.0 and (self.net_foreign_rg_5d_bn or 0) < -50.0:
             return "HEAVY_DISTRIBUTION"
         elif self.net_foreign_rg_1d_bn < 0:
             return "MILD_OUTFLOW"
@@ -112,37 +118,21 @@ class TerminalPayload(BaseModel):
 
 _CURRENT_TERMINAL_STATE: TerminalPayload = TerminalPayload(
     header=IHSGBriefingHeader(
-        trading_date="2026-10-23",
-        ihsg_last=7685.42,
-        change_pts=64.18,
-        change_pct=0.84,
-        total_value_idr_bn=12480.5,
-        net_foreign_rg_idr_bn=642.8,
-        net_foreign_all_idr_bn=410.2,
+        # Snapshot kosong: IHSG diisi pemanggil dari DB. Nilai lama (7685.42,
+        # +0.84%) tidak pernah cocok dengan data tersimpan (5098.06).
+        trading_date="",
+        ihsg_last=0.0,
+        change_pts=0.0,
+        change_pct=0.0,
+        total_value_idr_bn=None,
+        net_foreign_rg_idr_bn=None,
+        net_foreign_all_idr_bn=None,
         market_status="CLOSED EOD",
-        briefing_headline=(
-            "IHSG menguat +0.84% ditopang akumulasi asing di pasar reguler "
-            "pada big-cap konglomerasi & konsumer."
-        ),
+        briefing_headline="Snapshot belum dimuat dari sumber data.",
     ),
-    movers=[
-        BigCapMoverItem(ticker="ASII", company_name="Astra International Tbk", last_price=5250, change_pct=2.94, ihsg_point_impact=11.4, volume_lot=845200, market_cap_idr_trn=212.5),
-        BigCapMoverItem(ticker="ICBP", company_name="Indofood CBP Sukses Makmur Tbk", last_price=12100, change_pct=2.54, ihsg_point_impact=6.8, volume_lot=142300, market_cap_idr_trn=141.1),
-        BigCapMoverItem(ticker="TLKM", company_name="Telkom Indonesia Tbk", last_price=2980, change_pct=-1.32, ihsg_point_impact=-4.5, volume_lot=1620400, market_cap_idr_trn=295.2),
-        BigCapMoverItem(ticker="ADRO", company_name="Alamtri Resources Indonesia Tbk", last_price=3720, change_pct=3.33, ihsg_point_impact=7.9, volume_lot=1284000, market_cap_idr_trn=114.4),
-    ],
-    foreign_flows=[
-        ForeignFlowItem(ticker="ASII", net_foreign_rg_1d_bn=184.5, net_foreign_rg_5d_bn=520.2, net_foreign_ng_1d_bn=-120.0),
-        ForeignFlowItem(ticker="ICBP", net_foreign_rg_1d_bn=62.4, net_foreign_rg_5d_bn=195.8, net_foreign_ng_1d_bn=0.0),
-        ForeignFlowItem(ticker="TLKM", net_foreign_rg_1d_bn=-78.2, net_foreign_rg_5d_bn=-240.5, net_foreign_ng_1d_bn=45.0),
-        ForeignFlowItem(ticker="ADRO", net_foreign_rg_1d_bn=95.0, net_foreign_rg_5d_bn=310.4, net_foreign_ng_1d_bn=-15.0),
-    ],
-    sr_matrix=[
-        SupportResistanceItem(ticker="ASII", last_price=5250, s2=4950, s1=5100, r1=5400, r2=5600),
-        SupportResistanceItem(ticker="ICBP", last_price=12100, s2=11650, s1=11875, r1=12350, r2=12600),
-        SupportResistanceItem(ticker="TLKM", last_price=2980, s2=2840, s1=2910, r1=3060, r2=3150),
-        SupportResistanceItem(ticker="ADRO", last_price=3720, s2=3540, s1=3630, r1=3840, r2=3960),
-    ],
+    movers=[],
+    foreign_flows=[],
+    sr_matrix=[],
 )
 
 def get_terminal_snapshot() -> TerminalPayload:
@@ -170,6 +160,31 @@ def get_terminal_snapshot() -> TerminalPayload:
             dec = breadth.get("declining", 0)
             headline = f"IHSG tercatat {ihsg_last:.2f} ({change_pct:+.2f}%) dengan {adv} saham menguat dan {dec} melemah (Turnover Rp {turnover_trn/1000:.1f}T)."
 
+            # Ambil arus asing riil dari DB (tabel foreignflowdaily).
+            _ff_1d, _ff_5d, _ff_ng = {}, {}, {}
+            try:
+                from sqlalchemy import text as _sqlt
+                from app.db.database import get_session as _gs_ff
+                _sff = next(_gs_ff())
+                try:
+                    _row = _sff.execute(_sqlt(
+                        "SELECT MAX(date) FROM foreignflowdaily")).fetchone()
+                    _dmax = _row[0] if _row else None
+                    if _dmax:
+                        for _r in _sff.execute(_sqlt(
+                            "SELECT ticker, net_foreign_rg_bn, net_foreign_ng_bn "
+                            "FROM foreignflowdaily WHERE date = :d"), {"d": _dmax}).fetchall():
+                            _ff_1d[_r[0]] = round(float(_r[1] or 0), 1)
+                            _ff_ng[_r[0]] = round(float(_r[2] or 0), 1)
+                        for _r in _sff.execute(_sqlt(
+                            "SELECT ticker, SUM(net_foreign_rg_bn) FROM foreignflowdaily "
+                            "WHERE date <= :d GROUP BY ticker"), {"d": _dmax}).fetchall():
+                            _ff_5d[_r[0]] = round(float(_r[1] or 0), 1)
+                finally:
+                    _sff.close()
+            except Exception:
+                pass
+
             # Build live movers from heavyweights / gainers
             live_movers: List[BigCapMoverItem] = []
             for item in ov.get("heavyweights", [])[:4]:
@@ -178,7 +193,16 @@ def get_terminal_snapshot() -> TerminalPayload:
                 cp = float(item.get("change_pct", 0.0))
                 mcap_t = float(item.get("market_cap", 0.0) or 0.0) / 1e12
                 vol_lot = int(item.get("volume", 0)) // 100
-                impact = round(cp * 0.15, 1)  # point impact estimasi proportional
+                # Dampak poin IHSG: sumbangan relatif emiten = perubahan harga
+                # dikali bobot market cap-nya terhadap kapitalisasi IHSG.
+                # Versi lama memakai change_pct x 0.15 (konstanta tanpa dasar).
+                impact = None
+                try:
+                    _idx_mcap_t = float((idx_data.get("market_cap") or 0)) / 1e12
+                    if _idx_mcap_t > 0 and mcap_t > 0:
+                        impact = round(ihsg_last * (mcap_t / _idx_mcap_t) * (cp / 100.0), 2)
+                except Exception:
+                    impact = None
                 live_movers.append(
                     BigCapMoverItem(
                         ticker=sym,
@@ -210,21 +234,18 @@ def get_terminal_snapshot() -> TerminalPayload:
                         r2 = p + 2 * tick
                     live_sr.append(SupportResistanceItem(ticker=m.ticker, last_price=p, s2=s2, s1=s1, r1=r1, r2=r2))
                     
-                    # Foreign flow matched with live mover
-                    existing_ff = next((f for f in _CURRENT_TERMINAL_STATE.foreign_flows if f.ticker == m.ticker), None)
-                    if existing_ff:
-                        live_ff.append(existing_ff)
-                    else:
-                        sig = "ACCUMULATION" if m.change_pct >= 0 else "DISTRIBUTION"
-                        live_ff.append(
-                            ForeignFlowItem(
-                                ticker=m.ticker,
-                                net_foreign_rg_1d_bn=round(m.change_pct * 42.5, 1),
-                                net_foreign_rg_5d_bn=round(m.change_pct * 128.0, 1),
-                                net_foreign_all_1d_bn=round(m.change_pct * 38.0, 1),
-                                flow_signal=sig,
-                            )
+                    # Arus asing HANYA dari tabel foreignflowdaily. Versi lama
+                    # mengarang dengan rumus change_pct x 42.5 / x128 / x38 yang
+                    # tidak punya dasar data apa pun. Bila tidak ada baris untuk
+                    # emiten ini, nilainya None sehingga UI menampilkan N/A.
+                    live_ff.append(
+                        ForeignFlowItem(
+                            ticker=m.ticker,
+                            net_foreign_rg_1d_bn=_ff_1d.get(m.ticker),
+                            net_foreign_rg_5d_bn=_ff_5d.get(m.ticker),
+                            net_foreign_ng_1d_bn=_ff_ng.get(m.ticker),
                         )
+                    )
 
                 return TerminalPayload(
                     header=IHSGBriefingHeader(
@@ -232,9 +253,10 @@ def get_terminal_snapshot() -> TerminalPayload:
                         ihsg_last=ihsg_last,
                         change_pts=change_pts,
                         change_pct=change_pct,
-                        total_value_idr_bn=turnover_trn if turnover_trn > 0 else 12480.5,
-                        net_foreign_rg_idr_bn=642.8,  # fallback ke historis jika tak ada broker flow
-                        net_foreign_all_idr_bn=410.2,
+                        total_value_idr_bn=turnover_trn if turnover_trn > 0 else None,
+                        # Diisi dari foreignflowdaily bila ada; None = N/A.
+                        net_foreign_rg_idr_bn=(round(sum(_ff_1d.values()), 1) if _ff_1d else None),
+                        net_foreign_all_idr_bn=(round(sum(_ff_ng.values()), 1) if _ff_ng else None),
                         market_status=m_status,
                         briefing_headline=headline,
                     ),
