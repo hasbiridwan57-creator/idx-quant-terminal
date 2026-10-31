@@ -53,7 +53,9 @@
             <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('equity_multiplier')">EM</th>
             <th class="py-3 px-2 text-right cursor-pointer hover:text-white" @click="sortBy('ocf_to_ni')">OCF/NI</th>
             <th class="py-3 px-2 text-center cursor-pointer hover:text-white" @click="sortBy('credit_score')">Credit</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('price')">Harga</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('fair_value')">Fair Value</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" @click="sortBy('upside_pct')">Upside</th>
             <th class="py-3 px-3 text-center">Aksi</th>
           </tr>
         </thead>
@@ -78,8 +80,14 @@
                 <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 border border-white/[0.06] text-slate-200"
                       x-text="r.credit_grade + ' (' + r.credit_score + ')'"></span>
               </td>
+              <td class="py-3 px-3 text-right font-mono text-slate-300 tabular-nums"
+                  x-text="r.price ? 'Rp ' + r.price.toLocaleString() : '—'"></td>
               <td class="py-3 px-3 text-right font-semibold font-mono text-emerald-400 tabular-nums"
                   x-text="r.fair_value ? 'Rp ' + r.fair_value.toLocaleString() : '—'"></td>
+              {# Upside tanpa harga pasar tidak bermakna; tampilkan — bila kosong. #}
+              <td class="py-3 px-3 text-right font-mono tabular-nums"
+                  :class="r.upside_pct === null || r.upside_pct === undefined ? 'text-slate-500' : (r.upside_pct >= 0 ? 'text-emerald-400' : 'text-rose-400')"
+                  x-text="r.upside_pct === null || r.upside_pct === undefined ? '—' : (r.upside_pct >= 0 ? '+' : '') + r.upside_pct.toFixed(1) + '%'"></td>
               <td class="py-3 px-3 text-center">
                 <a :href="'/?ticker=' + r.ticker"
                    class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-sky-400 border border-white/[0.06] transition-colors">
