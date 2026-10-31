@@ -103,12 +103,21 @@
           </div>
         </div>
 
+        <!-- Pesan gagal: tanpa ini, kartu hasil lama tetap tampil seolah
+             masih berlaku untuk input yang baru (dan tidak valid). -->
+        <template x-if="bondError">
+          <div class="flex items-start gap-2 text-xs bg-rose-500/10 border border-rose-500/25 text-rose-300 rounded-xl px-3.5 py-2.5 font-sans">
+            <span class="font-bold">!</span>
+            <span x-text="bondError"></span>
+          </div>
+        </template>
+
         <!-- 6 Results Grid (Subtle Luminance Cards) -->
         <div class="grid grid-cols-2 md:grid-cols-3 gap-3.5 font-mono text-xs">
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Clean Price</span>
             <span class="text-xl font-semibold font-mono text-sky-400 block my-1">
-              Rp <span x-text="formatNum(bondResult.clean_price)"></span>
+              Rp <span x-text="formatNum(bondResult?.clean_price)"></span>
             </span>
             <span class="text-[11px] text-slate-500">Harga Pasar Tanpa Bunga Berjalan</span>
           </div>
@@ -116,7 +125,7 @@
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Dirty Price</span>
             <span class="text-xl font-semibold font-mono text-emerald-400 block my-1">
-              Rp <span x-text="formatNum(bondResult.dirty_price)"></span>
+              Rp <span x-text="formatNum(bondResult?.dirty_price)"></span>
             </span>
             <span class="text-[11px] text-slate-500">Clean Price + Bunga Berjalan</span>
           </div>
@@ -124,7 +133,7 @@
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Accrued Interest</span>
             <span class="text-xl font-semibold font-mono text-white block my-1">
-              Rp <span x-text="formatNum(bondResult.accrued_interest)"></span>
+              Rp <span x-text="formatNum(bondResult?.accrued_interest)"></span>
             </span>
             <span class="text-[11px] text-slate-500">Bunga Berjalan Kupon</span>
           </div>
@@ -132,7 +141,7 @@
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Current Yield</span>
             <span class="text-xl font-semibold font-mono text-white block my-1">
-              <span x-text="((bondResult.current_yield ?? 0) * 100).toFixed(2)"></span>%
+              <span x-text="((bondResult?.current_yield ?? 0) * 100).toFixed(2)"></span>%
             </span>
             <span class="text-[11px] text-slate-500">Kupon Tahunan / Clean Price</span>
           </div>
@@ -140,7 +149,7 @@
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Modified Duration</span>
             <span class="text-xl font-semibold font-mono text-white block my-1">
-              <span x-text="(bondResult.modified_duration ?? 0).toFixed(2)"></span> Tahun
+              <span x-text="(bondResult?.modified_duration ?? 0).toFixed(2)"></span> Tahun
             </span>
             <span class="text-[11px] text-slate-500">Sensitivitas Harga / Yield</span>
           </div>
@@ -148,7 +157,7 @@
           <div class="bg-slate-800/40 rounded-xl p-4">
             <span class="text-xs text-slate-400 font-sans block mb-1">Convexity / PVBP</span>
             <span class="text-xl font-semibold font-mono text-white block my-1">
-              <span x-text="(bondResult.convexity ?? 0).toFixed(1)"></span> / Rp <span x-text="(bondResult.pvbp ?? 0).toFixed(0)"></span>
+              <span x-text="(bondResult?.convexity ?? 0).toFixed(1)"></span> / Rp <span x-text="(bondResult?.pvbp ?? 0).toFixed(0)"></span>
             </span>
             <span class="text-[11px] text-slate-500">Kelengkungan &amp; Nilai 1 Bps</span>
           </div>

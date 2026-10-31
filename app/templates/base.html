@@ -510,10 +510,27 @@
               const d = await res.json();
               this.rollingData = d;
               const s = d.series || [];
-              this.rollingAbsMax = s.length
-                ? Math.max(...s.map(p => Math.abs(p.sharpe || 0)), 0.1) : 1;
+              // JANGAN Math.max(...arr): spread pada array besar (>~124k
+              // argumen di V8) melempar RangeError, dan panjang riwayat
+              // bertambah tiap hari. Loop biasa bebas dari batas itu.
+              let mx = 0.1;
+              for (const pt of s) {
+                const a = Math.abs(pt.sharpe || 0);
+                if (a > mx) mx = a;
+              }
+              this.rollingAbsMax = s.length ? mx : 1;
+            } else {
+              // Respons gagal (422/500): jangan biarkan grafik lama tampil
+              // seolah masih berlaku.
+              this.rollingData = { available: false,
+                reason: 'Rolling gagal dimuat (HTTP ' + res.status + ')' };
+              this.rollingAbsMax = 1;
             }
-          } catch(e) { console.error('Rolling error:', e); }
+          } catch(e) {
+            console.error('Rolling error:', e);
+            this.rollingData = { available: false, reason: 'Rolling gagal dimuat: ' + e.message };
+            this.rollingAbsMax = 1;
+          }
         },
         async loadPerformance() {
           try {
@@ -525,7 +542,16 @@
               const d = await res.json();
               this.perfData = d;
               const eq = d.equity_curve || [];
-              this.maxGrowth = eq.length ? Math.max(...eq.map(p => p.growth), 1) : 1;
+              let mg = 1;
+              for (const pt of eq) {
+                const g = pt.growth || 0;
+                if (g > mg) mg = g;
+              }
+              this.maxGrowth = eq.length ? mg : 1;
+            } else {
+              this.perfData = { available: false, ticker: this.ticker,
+                reason: 'Data performa gagal dimuat (HTTP ' + res.status + ').' };
+              this.maxGrowth = 1;
             }
             await this.loadRolling();
           } catch(e) { console.error('Performance error:', e); }
@@ -538,13 +564,25 @@
             if (res.ok) {
               this.peerMatrix = await res.json();
               this.peerTickers = (this.peerMatrix.peers || []).map(p => p.ticker);
+            } else {
+              this.peerMatrix = { error: 'Peer matrix gagal dimuat (HTTP ' + res.status + ')' };
+              this.peerTickers = [];
             }
-          } catch(e) { console.error('Peer matrix error:', e); }
+          } catch(e) {
+            console.error('Peer matrix error:', e);
+            this.peerMatrix = { error: 'Peer matrix gagal dimuat: ' + e.message };
+            this.peerTickers = [];
+          }
         },
         async loadTradingStatus() {
           try {
             let res = await fetch('/api/trading-status/' + this.ticker);
-            if (res.ok) this.tradingStatus = await res.json();
+            if (res.ok) {
+              this.tradingStatus = await res.json();
+            } else {
+              this.tradingStatus = { status_unknown: true,
+                reason: 'Status perdagangan tidak dapat diverifikasi (HTTP ' + res.status + ')' };
+            }
           } catch(e) { this.tradingStatus = null; }
         },
         addPeer() {
@@ -563,8 +601,15 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ peers: this.peerTickers })
             });
-            if (res.ok) this.peerMatrix = await res.json();
-          } catch(e) { console.error(e); }
+            if (res.ok) {
+              this.peerMatrix = await res.json();
+            } else {
+              this.peerMatrix = { error: 'Peer matrix gagal dimuat (HTTP ' + res.status + ')' };
+            }
+          } catch(e) {
+            console.error(e);
+            this.peerMatrix = { error: 'Peer matrix gagal dimuat: ' + e.message };
+          }
         },
         formatBn(v) {
           // Input selalu dalam miliar (bn). Output selalu menyertakan satuan:
@@ -684,11 +729,13 @@
         basePrice: 0,
         bondForm: { face: 1000000, coupon: 7.25, ytm: 6.75, tenor: 5.0, freq: 2 },
         bondResult: {},
+        bondError: null,
         researchData: null,
         llmThesisLoading: false,
         llmResearchText: '',
         newsLoading: false,
         newsArticles: [],
+        newsError: null,
         filterTicker: '',
         filterKeyword: '',
         analysisLoading: false,
@@ -710,9 +757,16 @@
             if (res.ok) {
               let data = await res.json();
               this.newsArticles = data.articles || [];
+              this.newsError = null;
+            } else {
+              // Jangan biarkan daftar berita emiten sebelumnya tetap tampil.
+              this.newsArticles = [];
+              this.newsError = 'Berita gagal dimuat (HTTP ' + res.status + ')';
             }
           } catch(e) {
             console.error('News fetch error:', e);
+            this.newsArticles = [];
+            this.newsError = 'Berita gagal dimuat: ' + e.message;
           } finally {
             this.newsLoading = false;
           }
@@ -727,6 +781,9 @@
             if (res.ok) {
               let data = await res.json();
               this.newsAnalysis = data.thesis || 'Analisis selesai, tidak ada dampak berita khusus terdeteksi.';
+            } else {
+              this.newsAnalysis = 'Analisis gagal (HTTP ' + res.status + '). '
+                + 'Tidak ada kesimpulan yang bisa ditarik dari data yang gagal dimuat.';
             }
           } catch(e) {
             console.error('News analysis error:', e);
@@ -742,9 +799,15 @@
             if (res.ok) {
               let data = await res.json();
               this.newsArticles = data.articles || [];
+              this.newsError = null;
+            } else {
+              this.newsArticles = [];
+              this.newsError = 'Berita gagal dimuat (HTTP ' + res.status + ')';
             }
           } catch(e) {
             console.error('News fetch error:', e);
+            this.newsArticles = [];
+            this.newsError = 'Berita gagal dimuat: ' + e.message;
           } finally {
             this.newsLoading = false;
           }
@@ -1004,8 +1067,22 @@
           try {
             let url = `/api/bonds/calculate?face_value=${this.bondForm.face}&coupon_pct=${this.bondForm.coupon}&ytm_pct=${this.bondForm.ytm}&years=${this.bondForm.tenor}&freq=${this.bondForm.freq}`;
             let res = await fetch(url);
-            if (res.ok) { this.bondResult = await res.json(); }
-          } catch(e) { console.error('Error fetching bond calculation:', e); }
+            if (res.ok) {
+              this.bondResult = await res.json();
+              this.bondError = null;
+            } else {
+              // Input tidak valid (422) atau server error: kosongkan hasil
+              // supaya harga obligasi lama tidak tampil untuk input baru.
+              let msg = 'Perhitungan gagal (HTTP ' + res.status + ')';
+              try { const d = await res.json(); if (d.detail) msg = d.detail; } catch(_) {}
+              this.bondResult = null;
+              this.bondError = msg;
+            }
+          } catch(e) {
+            console.error('Error fetching bond calculation:', e);
+            this.bondResult = null;
+            this.bondError = 'Perhitungan gagal: ' + e.message;
+          }
         },
         formatNum(val) {
           if (val === undefined || val === null) return '0.00';
