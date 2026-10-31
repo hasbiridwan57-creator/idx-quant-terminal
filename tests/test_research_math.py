@@ -62,5 +62,11 @@ def test_tick():
     assert round_down_tick(5237) == 5225 and round_up_tick(5237) == 5250 and round_up_tick(1993) == 1995
 
 def test_altman_and_sloan():
-    assert altman_z_em(20, 40, 15, 60, 100, 40) > 2.6
+    # Z'' = 6.56*(20/100) + 3.26*(40/100) + 6.72*(15/100) + 1.05*(60/40)
+    #     = 1.312 + 1.304 + 1.008 + 1.575 = 5.199
+    # Test lama hanya memeriksa "> 2.6" sehingga lolos walau rumus menambah
+    # konstanta 3.25 yang tidak seharusnya ada (skor jadi 8.449).
+    assert abs(altman_z_em(20, 40, 15, 60, 100, 40) - 5.199) < 1e-6
+    # Emiten nyata berisiko: Z'' harus jatuh di zona distress
+    assert altman_z_em(-50, -80, -10, 20, 500, 480) < 1.1
     assert abs(sloan_accrual_ratio(100, 80, 1000, 1100) - 20/1050) < 1e-12

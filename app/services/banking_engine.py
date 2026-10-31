@@ -34,6 +34,8 @@ class BankingRatios(BaseModel):
     loans_to_assets_ratio: Optional[float] = None      # Net Loan / Total Assets
     debt_to_equity: Optional[float] = None            # Total Debt / Total Equity
     effective_tax_rate: Optional[float] = None        # Tax Provision / Pretax Income
+    funding_cost_ratio: Optional[float] = None         # Interest Expense / Revenue
+                                                       # (BUKAN CIR — dulu salah label)
 
     # ── CFA Excess-Return (Residual Income) valuation fields ───────────────────
     justified_pbv: Optional[float] = None             # (ROE - g) / (Ke - g)
@@ -90,8 +92,25 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
     # NIM = net_interest_income / total_assets
     nim = (net_int / total_assets) if (total_assets > 0 and net_int > 0) else None
 
-    # CIR = interest_expense / revenue  (proxy: how much revenue goes to funding cost)
-    cir = (int_exp / revenue) if (revenue > 0 and int_exp > 0) else None
+    # ── CIR (Cost-to-Income Ratio) ─────────────────────────────────────────────
+    # BUG lama: CIR dihitung sebagai interest_expense / revenue — itu
+    # "funding cost ratio", BUKAN CIR. CIR baku = beban operasional dibagi
+    # pendapatan operasional. Untuk bank di BEI, pendapatan operasional =
+    # pendapatan bunga bersih + pendapatan operasional lainnya, dan beban
+    # operasional dilaporkan terpisah (OperatingExpenses / GeneralAndAdministrative).
+    # Bila komponennya tidak ada, CIR dikembalikan None (N/A) — bukan
+    # disubstitusi rasio lain yang namanya berbeda.
+    _opex = data.get("operating_expenses") or data.get("operating_expense")
+    _oprev = data.get("operating_revenue")
+    if _oprev is None and int_inc > 0:
+        _oprev = int_inc          # pendapatan operasional bank = pendapatan bunga
+    if _opex and _oprev and float(_oprev) > 0:
+        cir = float(_opex) / float(_oprev)
+    else:
+        cir = None
+
+    # Funding cost ratio dilaporkan TERPISAH dengan nama yang benar.
+    funding_cost_ratio = (int_exp / revenue) if (revenue > 0 and int_exp > 0) else None
 
     roa = (net_income / total_assets) if total_assets > 0 else None
     roe = (net_income / total_equity) if total_equity > 0 else None
@@ -144,6 +163,7 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
         year=int(data.get("period", data.get("year", 2025))),
         net_interest_margin=nim,
         cost_to_income_ratio=cir,
+        funding_cost_ratio=funding_cost_ratio,
         return_on_assets=roa,
         return_on_equity=roe,
         loans_to_assets_ratio=None,          # requires net_loan field — not always available

@@ -351,19 +351,27 @@ async def dashboard_home(
     ihsg_series = []
     aligned_dates = []
     try:
-        stock_hist = ensure_history(session, curr_stmt.ticker, years=2)
-        bench_hist = ensure_history(session, "IHSG", years=2)
+        # Risiko & backtest memakai SELURUH riwayat yang tersedia (5 tahun),
+        # bukan 2 tahun seperti versi lama. Dengan 2 tahun, skor risiko di
+        # halaman ini berbeda dari /api/risk untuk emiten yang sama.
+        stock_hist = ensure_history(session, curr_stmt.ticker, years=5)
+        bench_hist = ensure_history(session, "IHSG", years=5)
         prices_series, ihsg_series, aligned_dates = aligned_closes(stock_hist, bench_hist)
     except Exception as exc:
         print(f"Market history fetch error: {exc}")
 
+    # Satu nilai risk-free untuk seluruh aplikasi (dulu 6,85% di sini,
+    # 6,0% di /api/risk, dan label template menulis angka ketiga).
+    RISK_FREE_PCT = 6.0
+
     if len(prices_series) >= 30:
         realized_vol = calculate_realized_volatility(prices_series) or 0.25
-        risk = calculate_risk_metrics(prices_series, benchmark_prices=ihsg_series, risk_free_rate=0.0685)
+        risk = calculate_risk_metrics(prices_series, benchmark_prices=ihsg_series,
+                                      risk_free_rate=RISK_FREE_PCT / 100.0)
         ref_price_mc = float(current_price or prices_series[-1])
         beta_val = getattr(risk, "beta", 1.0) or 1.0
         # CAPM drift: rf + beta * ERP (bukan ROE)
-        capm_drift = 0.0685 + float(beta_val) * 0.065
+        capm_drift = (RISK_FREE_PCT / 100.0) + float(beta_val) * 0.065
         monte_carlo = run_monte_carlo_gbm(
             current_price=ref_price_mc,
             annual_drift=capm_drift,
@@ -438,6 +446,10 @@ async def dashboard_home(
             "credit_payload": credit_payload,
             "risk": risk,
             "risk_payload": risk_payload,
+            "risk_free_pct": RISK_FREE_PCT,
+            "risk_n_obs": len(prices_series),
+            "risk_date_range": (f"{aligned_dates[0]} s/d {aligned_dates[-1]}"
+                                if aligned_dates else None),
             "monte_carlo": monte_carlo,
             "mc_payload": mc_payload,
             "history_metrics": history_metrics,
@@ -593,48 +605,186 @@ async def get_screener_json(ticker: str, session: Session = Depends(get_session)
 # ── FASE 3.2 Monte Carlo Endpoint ──────────────────────────────
 @app.get("/api/monte-carlo/{ticker}")
 async def get_monte_carlo_json(ticker: str, session: Session = Depends(get_session)):
-    curr_stmt, _ = load_ticker_pair(session, ticker)
+    tk = ticker.upper().strip()
+    curr_stmt, _ = load_ticker_pair(session, tk)
     if not curr_stmt:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} belum ada di cache.")
-    
-    # Ambil harga terkini jika ada
+        raise HTTPException(status_code=404, detail=f"Ticker {tk} belum ada di cache.")
+
     # ZERO-FAKE: dulu fallback Rp5.000 (harga karangan) untuk emiten tanpa
-    # quote -> simulasi Monte Carlo dari harga fiktif. Sekarang N/A.
-    ref_p = _latest_price(session, ticker.upper())
+    # quote -> simulasi Monte Carlo dari harga fiktif. Sekarang 404 jujur.
+    ref_p = _latest_price(session, tk)
     if not ref_p:
         raise HTTPException(status_code=404,
-                            detail=f"Harga {ticker.upper()} tidak tersedia — simulasi tidak dijalankan.")
+                            detail=f"Harga {tk} tidak tersedia — simulasi tidak dijalankan.")
+
+    # Drift & volatilitas WAJIB dari data riil. Dulu keduanya hardcode
+    # (10% / 24%) untuk SEMUA emiten — hasil simulasi tidak ada hubungannya
+    # dengan perilaku saham yang bersangkutan.
+    from sqlmodel import select as _select
+    from app.db.models import QuoteHistoryDaily as _QH
+    rows = session.exec(
+        _select(_QH).where(_QH.ticker == tk).order_by(_QH.date)
+    ).all()
+    px = [float(r.close) for r in rows if getattr(r, "close", None)]
+    if len(px) < 60:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"Riwayat harga {tk} hanya {len(px)} observasi; butuh minimal "
+                    f"60 untuk mengestimasi drift & volatilitas. Simulasi tidak "
+                    f"dijalankan (tidak memakai asumsi karangan)."))
+
+    import math
+    rets = [px[i] / px[i - 1] - 1.0 for i in range(1, len(px)) if px[i - 1]]
+    n = len(rets)
+    mean_d = sum(rets) / n
+    var_d = sum((x - mean_d) ** 2 for x in rets) / (n - 1)
+    ann_vol = math.sqrt(var_d) * math.sqrt(252)
+    ann_drift = max(-0.35, min(0.45, mean_d * 252))
 
     result = run_monte_carlo_gbm(
         current_price=ref_p,
-        annual_drift=0.10,
-        annual_vol=0.24,
+        annual_drift=ann_drift,
+        annual_vol=max(0.05, min(1.5, ann_vol)),
         days=252,
-        n_paths=200,
+        n_paths=500,
     )
-    return {"ticker": ticker.upper(), "monte_carlo": result}
+    result["assumptions"] = {
+        "annual_drift_pct": round(ann_drift * 100, 2),
+        "annual_vol_pct": round(ann_vol * 100, 2),
+        "drift_source": "rata-rata return harian x 252 (data riil)",
+        "vol_source": "stdev return harian x sqrt(252) (data riil)",
+        "observations": len(px),
+        "note": ("Drift historis BUKAN ramalan — hanya meneruskan tren masa lalu. "
+                 "Model GBM mengasumsikan return berdistribusi normal, sedangkan "
+                 "return saham nyata berekor gemuk (fat tail)."),
+    }
+    return {"ticker": tk, "monte_carlo": result}
 
 # ── FASE 3.3 Risk Endpoint ────────────────────────────────────
 @app.get("/api/risk/{ticker}")
-async def get_risk_json(ticker: str, session: Session = Depends(get_session)):
-    curr_stmt, _ = load_ticker_pair(session, ticker)
-    if not curr_stmt:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} belum ada di cache.")
-    
-    ref_p = _latest_price(session, ticker.upper())
+async def get_risk_json(ticker: str, risk_free: float = 6.0,
+                       session: Session = Depends(get_session)):
+    """Risk metrics (volatilitas, VaR/CVaR, Sharpe, Sortino, beta, max DD)
+    untuk SATU emiten terhadap IHSG.
 
-    # RISK METRICS: JANGAN gunakan data sintetis - hanya hitung dari data pasar real
+    Sebelum versi ini endpoint mengembalikan 500 karena memakai variabel
+    `price_series`, `ihsg_series`, dan `mc` yang tidak pernah didefinisikan
+    (sisa refactor) — seluruh fitur risk mati.
+    """
+    from sqlmodel import select as _select
+    from app.db.models import QuoteHistoryDaily as _QH
+    from app.services.fincept_risk import calculate_risk_metrics
+
+    tk = ticker.upper().strip()
+    curr_stmt, _ = load_ticker_pair(session, tk)
+    if not curr_stmt:
+        raise HTTPException(status_code=404, detail=f"Ticker {tk} belum ada di cache.")
+
+    def _pairs(sym: str) -> dict:
+        rows = session.exec(
+            _select(_QH).where(_QH.ticker == sym).order_by(_QH.date)
+        ).all()
+        out = {}
+        for r in rows:
+            c = getattr(r, "close", None)
+            if c:
+                d = getattr(r, "date", None)
+                out[str(d)[:10] if d else len(out)] = float(c)
+        return out
+
+    own = _pairs(tk)
+    bench = _pairs("IHSG")
+
+    # SEBELUMNYA dua seri diambil terpisah lalu dipotong ke panjang terpendek
+    # dari AWAL. Kalau emiten punya hari perdagangan berbeda (suspensi, hari
+    # pertama listing), tanggalnya tidak sepadan sehingga beta/alpha diukur
+    # pada pasangan hari yang salah. Sekarang diselaraskan per tanggal.
+    common = sorted(set(own) & set(bench))
+
+    # Metrik STANDALONE (return, volatilitas, Sharpe, Sortino, drawdown, VaR)
+    # tidak membutuhkan benchmark -> pakai seluruh riwayat emiten. Memotongnya
+    # ke tanggal benchmark membuat satu hari terakhir hilang dan Sharpe
+    # bergeser (ASII: 0,060 -> 0,046 hanya karena IHSG belum punya tanggal
+    # 2026-10-30).
+    price_series = [own[d] for d in sorted(own)]
+
+    # Metrik RELATIF (beta, alpha, IR) wajib sepasang tanggal yang sama.
+    rel_price_series = [own[d] for d in common]
+    ihsg_series = [bench[d] for d in common]
+
+    # ZERO-FAKE: tidak ada angka risk bila data pasar tidak cukup.
     risk_m = None
-    if len(price_series) >= 30 and ihsg_series and len(ihsg_series) >= 30:
+    reason = None
+    if len(price_series) < 30:
+        reason = (f"Butuh minimal 30 observasi harga, tersedia "
+                  f"{len(price_series)}. Data pasar tidak cukup — metrik risiko "
+                  f"tidak dihitung (tidak diestimasi).")
+    else:
         try:
-            risk_m = calculate_risk_metrics(price_series, benchmark_prices=ihsg_series, risk_free_rate=0.0685)
+            # Standalone dari riwayat PENUH (Sharpe/vol/drawdown/VaR tidak
+            # boleh terpengaruh ketersediaan tanggal benchmark).
+            risk_m = calculate_risk_metrics(
+                price_series, benchmark_prices=None,
+                risk_free_rate=risk_free / 100.0,
+            )
+
+            # Metrik relatif dihitung terpisah pada pasangan tanggal identik,
+            # lalu ditimpa ke hasil standalone.
+            if len(ihsg_series) >= 30:
+                rel = calculate_risk_metrics(
+                    rel_price_series, benchmark_prices=ihsg_series,
+                    risk_free_rate=risk_free / 100.0,
+                )
+                risk_m.beta = rel.beta
+                risk_m.alpha_annualized = rel.alpha_annualized
+                risk_m.information_ratio = rel.information_ratio
+                risk_m.treynor_ratio = rel.treynor_ratio
         except Exception as exc:
-            print(f"Risk metrics calculation failed: {exc}")
-    # Jika data tidak cukup, risk_metrics = None (tidak boleh mengarang)
+            reason = f"Perhitungan gagal: {exc}"
+
+    # Monte Carlo memakai drift & volatilitas DARI DATA, bukan angka tetap.
+    mc = None
+    ref_p = _latest_price(session, tk)
+    if ref_p and len(price_series) >= 60:
+        try:
+            import math
+            rets = [price_series[i] / price_series[i - 1] - 1.0
+                    for i in range(1, len(price_series))
+                    if price_series[i - 1]]
+            n = len(rets)
+            mean_d = sum(rets) / n
+            var_d = sum((x - mean_d) ** 2 for x in rets) / (n - 1) if n > 1 else 0.0
+            ann_vol = math.sqrt(var_d) * math.sqrt(252)
+            ann_drift = mean_d * 252
+            # batasi drift pada rentang wajar agar tidak ekstrapolasi ekstrem
+            ann_drift = max(-0.35, min(0.45, ann_drift))
+            mc = run_monte_carlo_gbm(
+                current_price=ref_p,
+                annual_drift=ann_drift,
+                annual_vol=max(0.05, min(1.5, ann_vol)),
+                days=252,
+                n_paths=300,
+            )
+            mc["assumptions"] = {
+                "drift_source": "rata-rata return harian x 252 (data riil)",
+                "vol_source": "stdev return harian x sqrt(252) (data riil)",
+                "annual_drift_pct": round(ann_drift * 100, 2),
+                "annual_vol_pct": round(ann_vol * 100, 2),
+                "observations": len(price_series),
+            }
+        except Exception as exc:
+            mc = {"available": False, "reason": f"Simulasi gagal: {exc}"}
+
+    _dates = sorted(own)
     return {
-        "ticker": ticker.upper(),
+        "ticker": tk,
         "risk_metrics": risk_m,
+        "risk_reason": reason,
+        "risk_free_pct": risk_free,
+        "n_obs": len(_dates),
+        "date_range": (f"{_dates[0]} s/d {_dates[-1]}" if _dates else None),
         "monte_carlo": mc,
+        "provenance": "MARKET (OHLCV harian dari DB)" if risk_m else "N/A",
     }
 
 # ── FASE 3.4 Bonds Calculator Endpoint ─────────────────────────

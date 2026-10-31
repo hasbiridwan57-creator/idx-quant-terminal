@@ -65,13 +65,28 @@ def reverse_dcf_growth(x: DCFInputs, market_price: float) -> Optional[float]:
 
 # ---------- 3. Beta selaras tanggal + Blume ----------
 def beta_aligned(stock: List[float], bench: List[float]) -> Tuple[float, float]:
-    """stock & bench HARUS sudah selaras per tanggal (aligned_closes). Return (raw, blume)."""
+    """stock & bench HARUS sudah selaras per tanggal (aligned_closes).
+
+    Return (beta_raw, beta_blume) — beta_blume = 0,67*raw + 0,33 (penyesuaian
+    Blume menuju 1,0). Catatan: nilai kedua BUKAN korelasi.
+
+    BUG lama: seri dengan < 3 harga membuat len(rs) == 0 atau pembagi
+    (len-1) == 0 -> ZeroDivisionError. Sekarang mengembalikan beta netral 1.0
+    agar pemanggil tidak crash; pemanggil tetap wajib memeriksa jumlah
+    observasi sebelum memakai hasilnya.
+    """
     n = min(len(stock), len(bench))
-    rs = [stock[i] / stock[i-1] - 1 for i in range(1, n)]
-    rb = [bench[i] / bench[i-1] - 1 for i in range(1, n)]
-    ms, mb = sum(rs)/len(rs), sum(rb)/len(rb)
-    cov = sum((a-ms)*(b-mb) for a, b in zip(rs, rb)) / (len(rs)-1)
-    var = sum((b-mb)**2 for b in rb) / (len(rb)-1)
+    if n < 3:
+        return 1.0, 1.0
+    rs = [stock[i] / stock[i-1] - 1 for i in range(1, n) if stock[i-1]]
+    rb = [bench[i] / bench[i-1] - 1 for i in range(1, n) if bench[i-1]]
+    m = min(len(rs), len(rb))
+    rs, rb = rs[:m], rb[:m]
+    if m < 2:
+        return 1.0, 1.0
+    ms, mb = sum(rs)/m, sum(rb)/m
+    cov = sum((a-ms)*(b-mb) for a, b in zip(rs, rb)) / (m - 1)
+    var = sum((b-mb)**2 for b in rb) / (m - 1)
     raw = cov/var if var > 0 else 1.0
     return raw, 0.67*raw + 0.33
 
@@ -80,8 +95,22 @@ def sloan_accrual_ratio(ni: float, cfo: float, ta_begin: float, ta_end: float) -
     return (ni - cfo) / ((ta_begin + ta_end) / 2)
 
 def altman_z_em(wc, re, ebit, book_equity, ta, tl) -> float:
-    """Altman Z'' (emerging markets / non-manufaktur): >2.6 aman, 1.1-2.6 abu-abu, <1.1 distress."""
-    return 3.25 + 6.56*(wc/ta) + 3.26*(re/ta) + 6.72*(ebit/ta) + 1.05*(book_equity/tl)
+    """Altman Z'' versi 4-variabel untuk emerging market / non-manufaktur.
+
+        Z'' = 6.56·X1 + 3.26·X2 + 6.72·X3 + 1.05·X4
+
+    Ambang: >2.6 aman, 1.1-2.6 abu-abu, <1.1 distress.
+
+    BUG lama: konstanta 3.25 ditambahkan di depan. Konstanta itu milik Altman
+    Z untuk emerging market versi 5-variabel (yang memakai X5 = sales/assets;
+    koefisiennya 3.25). Karena X5 tidak ada di sini, menambah 3.25 membuat
+    skor selalu ~3.25 lebih tinggi dari seharusnya -> emiten DISTRESS
+    (Z 0.5) terlihat GREY (3.75) dan lolos tanpa peringatan.
+
+    Rumus ini harus identik dengan `cost_of_capital.compute_altman_z` yang
+    dipakai seluruh aplikasi.
+    """
+    return 6.56*(wc/ta) + 3.26*(re/ta) + 6.72*(ebit/ta) + 1.05*(book_equity/tl)
 
 # ---------- 5. P/E band dari harga & EPS riil ----------
 def pe_band(prices: List[Tuple[str, float]], eps_steps: List[Tuple[str, float]]):

@@ -31,6 +31,11 @@ class RiskMetrics:
     alpha_annualized: float
     information_ratio: float
     treynor_ratio: float
+    # Ditambahkan: sebelumnya volatilitas & return tidak diekspos sama sekali
+    # padahal sudah dihitung — UI tidak bisa menampilkan risiko absolut.
+    volatility_annual: float = 0.0
+    annualized_return: float = 0.0   # aritmetik (mean x 252), dasar Sharpe/alpha
+    cagr: float = 0.0                # geometrik (majemuk), dasar Calmar
 
 @dataclass
 class ReturnStats:
@@ -95,15 +100,23 @@ def calculate_risk_metrics(
     rf_period = risk_free_rate / periods_per_year
     excess = [r - rf_period for r in returns]
 
+    # Basis konsisten untuk seluruh rasio risk-adjusted:
+    # - Sharpe/Sortino/Treynor/Alpha secara teori memakai return ARITMETIK
+    #   annualized (mean harian x 252), bukan CAGR geometrik.
+    # - Calmar memakai CAGR karena berpasangan dengan drawdown (keduanya
+    #   tentang kekayaan akhir).
+    ann_arith = avg_ret * periods_per_year
+    cagr = ann_ret                      # ann_ret di atas = geometrik
+
     # Sharpe Ratio
     if volatility > 0:
-        sharpe = (ann_ret - risk_free_rate) / volatility
+        sharpe = (ann_arith - risk_free_rate) / volatility
     else:
         sharpe = 0.0
 
     # Sortino Ratio
     if downside_dev > 0:
-        sortino = (ann_ret - risk_free_rate) / downside_dev
+        sortino = (ann_arith - risk_free_rate) / downside_dev
     else:
         sortino = 0.0
 
@@ -132,7 +145,12 @@ def calculate_risk_metrics(
             cov = sum((r - avg_ret) * (b - sum(cb)/min_len) for r, b in zip(cr, cb)) / (min_len - 1)
             b_var = sum((b - sum(cb)/min_len) ** 2 for b in cb) / (min_len - 1)
             beta = cov / b_var if b_var > 0 else 0.0
-            alpha_annualized = ann_ret - (risk_free_rate + beta * (sum(cb)/min_len * periods_per_year - risk_free_rate))
+            # Alpha CAPM: return aktual - return yang diharapkan dari beta.
+            # Sebelumnya memakai CAGR (geometrik) dikurangi beta x aritmetik —
+            # dua basis berbeda dicampur, sehingga angkanya berbeda dari
+            # engine performa (8,37% vs 3,85%) untuk saham yang sama.
+            ann_b = sum(cb) / min_len * periods_per_year
+            alpha_annualized = ann_arith - (risk_free_rate + beta * (ann_b - risk_free_rate))
 
     # Treynor Ratio
     if beta > 0:
@@ -166,6 +184,9 @@ def calculate_risk_metrics(
         alpha_annualized=round(alpha_annualized, 4),
         information_ratio=round(ir, 4),
         treynor_ratio=round(treynor, 6),
+        volatility_annual=round(volatility, 4),
+        annualized_return=round(ann_arith, 4),
+        cagr=round(cagr, 4),
     )
 
 

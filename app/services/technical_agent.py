@@ -33,9 +33,17 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     loss = -delta.clip(upper=0)
     avg_gain = gain.rolling(window=period, min_periods=period).mean()
     avg_loss = loss.rolling(window=period, min_periods=period).mean()
+    # BUG: avg_loss == 0 (tidak ada hari turun) membuat rs = inf/NaN dan RSI
+    # diisi 50. Padahal secara definisi RSI harus 100 (hanya ada gain) atau 0
+    # (hanya ada loss). Akibatnya sinyal overbought tidak pernah muncul saat
+    # tren naik kuat — justru di situ RSI paling berguna.
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50.0)
+    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
+    # Harga benar-benar datar (gain dan loss sama-sama 0) -> netral 50.
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), 50.0)
+    return rsi.fillna(50.0)      # sisa NaN = periode pemanasan awal
 
 
 def calculate_bollinger_bands(series: pd.Series, window: int = 20, num_std: float = 2.0):

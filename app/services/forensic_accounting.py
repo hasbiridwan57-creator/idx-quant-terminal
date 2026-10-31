@@ -88,7 +88,7 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     
     Formula:
       M = -4.84 + 0.920*DSRI + 0.528*GMI + 0.404*AQI + 0.892*SGI
-          + 0.115*DEPI - 0.172*SGAI + 4.037*TATA - 0.327*LVGI
+          + 0.115*DEPI - 0.172*SGAI + 4.679*TATA - 0.327*LVGI
     
     Threshold:
       - M-Score > -1.78 : High Probability of Earnings Manipulation (Merah)
@@ -249,7 +249,7 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
 
     # Kalkulasi M-Score Beneish 8-Variabel (koefisien sesuai Beneish 1999):
     #   M = -4.84 + 0.920·DSRI + 0.528·GMI + 0.404·AQI + 0.892·SGI
-    #       + 0.115·DEPI - 0.172·SGAI + 4.037·TATA - 0.327·LVGI
+    #       + 0.115·DEPI - 0.172·SGAI + 4.679·TATA - 0.327·LVGI
     # CATATAN: LVGI koefisiennya NEGATIF 0.327. Versi lama memakai +0.0327
     # (tanda salah DAN orde besaran salah 10x).
     # CATATAN: koefisien TATA resmi Beneish (1999) adalah 4.679, bukan 4.037.
