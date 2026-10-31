@@ -45,6 +45,12 @@ class EquityResearchModel:
     dcf_fair_value: Optional[float] = None
     exit_multiple_fair_value: Optional[float] = None
     relative_fair_value: Optional[float] = None
+    # Metode ke-4 + keterangan basis valuasi yang BENAR-BENAR dipakai.
+    # Tanpa field ini PDF menulis bobot statis 40/35/25 yang tidak sesuai
+    # engine (sekarang 30/25/25/20, dan berbeda lagi untuk bank & siklikal).
+    ev_ebitda_fair_value: Optional[float] = None
+    valuation_basis: str = ""
+    valuation_weights: dict = field(default_factory=dict)
     
     # 3 Investment Pillars
     investment_thesis: List[str] = field(default_factory=list)
@@ -535,6 +541,7 @@ def build_research_model_from_context(
     _subsector_now = (audited_fy or _bfy or {}).get("sub_sector")
     is_cyclical = (_sector_now in _SECT_CYCLICAL) or (_subsector_now in _SUBSECT_CYCLICAL)
 
+    _weights_used: dict = {}
     if is_bank and dcf_fv and dcf_fv > 0 and curr_p:
         # STANDAR CFA/FIG UNTUK BANK: Justified PBV adalah satu-satunya metode
         # yang menangkap kualitas neraca + ROE vs cost of equity. Mencampurnya
@@ -543,6 +550,7 @@ def build_research_model_from_context(
         target_price = dcf_fv
         upside_pct = ((target_price - curr_p) / curr_p) * 100.0
         valuation_basis = "Justified PBV (ROE-g)/(Ke-g) x BVPS — metodologi bank"
+        _weights_used = {"Justified PBV": 1.0}
     elif is_cyclical and curr_p and (_ev_ok or _rel_ok):
         # Siklus: EV/EBITDA 60%, Relative PBV 40%. DCF & exit PE tidak dipakai
         # karena keduanya berpijak pada laba historis.
@@ -558,6 +566,9 @@ def build_research_model_from_context(
         if abs(upside_pct) > 75.0:
             _basis += " — SINYAL EKSTREM: verifikasi asumsi siklus"
         valuation_basis = _basis
+        _csum = sum(w for w, _ in _cyc_avail) or 1.0
+        _weights_used = {("EV/EBITDA" if w == 0.60 else "Relative PBV"): w / _csum
+                         for w, v in _cyc_avail}
     elif _avail and curr_p:
         _wsum = sum(w for w, _ in _avail)
         target_price = sum(w * v for w, v in _avail) / _wsum
@@ -570,8 +581,25 @@ def build_research_model_from_context(
             _basis += (" — SINYAL EKSTREM: harga pasar menyimpang jauh dari "
                        "asumsi historis model; verifikasi asumsi sebelum dipakai")
         valuation_basis = _basis
+        # Nama metode HARUS dipetakan per posisi, bukan per nilai bobot:
+        # Exit P/E dan EV/EBITDA sama-sama 25%, sehingga dict berbasis bobot
+        # menimpa salah satunya dan PDF hanya menampilkan 3 dari 4 metode.
+        _order = [(0.30, "DCF"), (0.25, "Exit P/E"),
+                  (0.25, "EV/EBITDA"), (0.20, "Relative PBV")]
+        # Bobot DINORMALISASI ke jumlah metode yang tersedia. Engine membagi
+        # dengan _wsum, jadi bila hanya 2 dari 4 metode ada (UNTR), bobot
+        # efektifnya 25/45 = 55,6% dan 20/45 = 44,4% — bukan 25% dan 20%
+        # (yang hanya berjumlah 45% dan menyesatkan pembaca PDF).
+        _wsum_disp = sum(w for w, v in _parts if v is not None and v > 0) or 1.0
+        _weights_used = {}
+        for _w, _nm in _order:
+            _allow = {"DCF": _dcf_ok, "Exit P/E": _exit_ok,
+                      "EV/EBITDA": _ev_ok, "Relative PBV": _rel_ok}[_nm]
+            if _allow:
+                _weights_used[_nm] = _w / _wsum_disp
     else:
         valuation_basis = _dcf_invalid_note or "N/A — komponen valuasi tidak tersedia"
+        _weights_used = {}
     
     if upside_pct is None:
         recommendation = "N/A"     # tanpa upside, tidak ada rekomendasi (jangan karang)
@@ -593,11 +621,18 @@ def build_research_model_from_context(
         
     # 3 Investment Pillars — angka None ditampilkan N/A, tidak dikarang
     def _f(v, dec=1, suffix=""):
+        # suffix ikut dibuang saat nilai N/A — versi lama menghasilkan
+        # "ROE N/A%" karena "%" ditulis di luar helper.
         return f"{v:.{dec}f}{suffix}" if isinstance(v, (int, float)) else "N/A"
 
+    def _fpct(v, dec=1, signed=False):
+        if not isinstance(v, (int, float)):
+            return "N/A"
+        return f"{v:{'+' if signed else ''}.{dec}f}%"
+
     thesis = [
-        f"Kualitas Laba & Efisiensi Operasional: Emiten membukukan ROE {_f(roe_val)}% dengan "
-        f"EBIT Margin {_f((c.ebit_margin*100) if c.ebit_margin is not None else None)}%, "
+        f"Kualitas Laba & Efisiensi Operasional: Emiten membukukan ROE {_fpct(roe_val)} dengan "
+        f"EBIT Margin {_fpct((c.ebit_margin*100) if c.ebit_margin is not None else None)}, "
         f"ditopang disiplin biaya.",
         f"Struktur Modal & Likuiditas: Posisi kas {('Rp' + _f(cash_bn, 1) + ' Miliar') if cash_bn is not None else 'N/A'} "
         f"dengan net cash {('Rp' + _f(net_cash_bn, 1) + ' Miliar') if net_cash_bn is not None else 'N/A'} — "
@@ -1480,6 +1515,9 @@ def build_research_model_from_context(
         dcf_fair_value=dcf_fv,
         exit_multiple_fair_value=exit_fv,
         relative_fair_value=rel_fv,
+        ev_ebitda_fair_value=ev_ebitda_fv,
+        valuation_basis=valuation_basis or "",
+        valuation_weights=_weights_used,
         investment_thesis=thesis,
         bull_catalysts=bull_catalysts,
         bear_risks=bear_risks,
@@ -1554,6 +1592,20 @@ def _fy(v, fmt=",.0f", prefix="Rp", fallback="N/A"):
         return f"{prefix}{v:{fmt}}" if prefix else f"{v:{fmt}}"
     except (TypeError, ValueError):
         return fallback
+
+
+def _fp(v, fmt="+.1f", suffix="%"):
+    """Format persen null-safe: None -> "N/A" (BUKAN "N/A%").
+
+    Versi lama menulis f"{_fy(x, '.1f', '', 'N/A')}%" sehingga emiten tanpa
+    data menghasilkan "ROE N/A%" dan "upside N/A%" di seluruh laporan PDF.
+    """
+    if v is None:
+        return "N/A"
+    try:
+        return f"{v:{fmt}}{suffix}"
+    except (TypeError, ValueError):
+        return "N/A"
 
 
 def _rnd(v, nd=1, fallback=None):
@@ -1682,7 +1734,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     header_table_data = [
         [
             Paragraph(f"<b>{model.company_name}</b> ({model.ticker}.JK)", title_style),
-            Paragraph(f"<font color='{call_rec_color}' size=16><b>{model.recommendation}</b></font><br/><font size=8 color='#64748b'>Target: {_fy(model.target_price)} ({_fy(model.upside_pct, '+.1f', '', 'N/A')}%)</font>", ParagraphStyle("Rec", alignment=2))
+            Paragraph(f"<font color='{call_rec_color}' size=16><b>{model.recommendation}</b></font><br/><font size=8 color='#64748b'>Target: {_fy(model.target_price)} ({_fp(model.upside_pct, '+.1f')})</font>", ParagraphStyle("Rec", alignment=2))
         ],
         [
             Paragraph(f"Sector: <b>{model.sector}</b> | Date: {model.report_date}", subtitle_style),
@@ -1705,7 +1757,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
         ["Shares Out", _fy(model.shares_outstanding_m, ",.0f", "", "N/A") + (" M" if model.shares_outstanding_m is not None else "")],
         ["P/E Ratio", _fy(model.pe_ratio, ".2f", "", "N/A") + ("x" if model.pe_ratio is not None else "")],
         ["P/BV Ratio", _fy(model.pbv_ratio, ".2f", "", "N/A") + ("x" if model.pbv_ratio is not None else "")],
-        ["ROE (TTM)", _fy(model.roe_pct, ".1f", "", "N/A") + ("%" if model.roe_pct is not None else "")],
+        ["ROE (TTM)", _fp(model.roe_pct, ".1f")],
         ["Valuation Model", "Fair Value"],
         ["DCF (WACC 11.5%)", _fy(model.dcf_fair_value)],
         ["Exit Multiple P/E", _fy(model.exit_multiple_fair_value)],
@@ -1745,8 +1797,8 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
         Paragraph("<b>EXECUTIVE INVESTMENT SUMMARY</b>", h1_style),
         Paragraph(
             f"Kami menetapkan rekomendasi <b>{model.recommendation}</b> untuk saham <b>{model.ticker}</b> dengan target harga 12-bulan sebesar <b>{_fy(model.target_price)}</b>, "
-            f"mencerminkan potensi apresiasi nilai (upside) sebesar <b>{_fy(model.upside_pct, '+.1f', '', 'N/A')}%</b> dari harga pasar saat ini {_fy(model.current_price)}. "
-            f"Tesis investasi kami didukung oleh kombinasi fundamental earnings quality yang solid, rasio pengembalian ekuitas (ROE) sebesar {_fy(model.roe_pct, '.1f', '', 'N/A')}%, serta neraca defensif yang steril dari leverage agresif.",
+            f"mencerminkan potensi apresiasi nilai (upside) sebesar <b>{_fp(model.upside_pct, '+.1f')}</b> dari harga pasar saat ini {_fy(model.current_price)}. "
+            f"Tesis investasi kami didukung oleh kombinasi fundamental earnings quality yang solid, rasio pengembalian ekuitas (ROE) sebesar {_fp(model.roe_pct, '.1f')}, serta neraca defensif yang steril dari leverage agresif.",
             body_style
         ),
         Spacer(1, 8),
@@ -1783,7 +1835,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=12))
 
     dupont_summary_p = Paragraph(
-        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({_fy(model.roe_pct, '.1f', '', 'N/A')}%). Dekomposisi matematis membuktikan bahwa rasio profitabilitas didorong secara sehat oleh efisiensi operasi (EBIT Margin {_fy((model.ebit_margin*100) if model.ebit_margin is not None else None, '.1f', '', 'N/A')}%) "
+        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({_fp(model.roe_pct, '.1f')}). Dekomposisi matematis membuktikan bahwa rasio profitabilitas didorong secara sehat oleh efisiensi operasi (EBIT Margin {_fp((model.ebit_margin*100) if model.ebit_margin is not None else None, '.1f')}) "
         f"dan perputaran aset (Asset Turnover {model.asset_turnover:.2f}x), dengan beban bunga yang terkendali (Interest Burden {model.interest_burden*100:.1f}%) serta beban pajak normal (Tax Burden {model.tax_burden*100:.1f}%). "
         f"Struktur ini mengindikasikan laba berkualitas tinggi (high quality of earnings) tanpa manipulasi financial leverage berlebihan (Equity Multiplier {model.equity_multiplier:.2f}x).",
         body_style
@@ -1798,7 +1850,7 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
         ["3. Operating Margin", "EBIT / Revenue", f"{model.ebit_margin*100:.1f}%", "Operating efficiency tinggi"],
         ["4. Asset Turnover", "Revenue / Total Assets", f"{model.asset_turnover:.2f}x", "Produktivitas aset prima"],
         ["5. Equity Multiplier", "Total Assets / Total Equity", f"{model.equity_multiplier:.2f}x", "Leverage konservatif/sehat"],
-        ["Total ROE Terurai", "1 x 2 x 3 x 4 x 5", _fy(model.roe_pct, ".1f", "", "N/A") + ("%" if model.roe_pct is not None else ""), "Return on Equity"],
+        ["Total ROE Terurai", "1 x 2 x 3 x 4 x 5", _fp(model.roe_pct, ".1f"), "Return on Equity"],
     ]
     t_dp = Table(dupont_table_data, colWidths=[120, 140, 100, 163])
     t_dp.setStyle(TableStyle([
@@ -1857,22 +1909,90 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(Paragraph(f"Integrasi DCF, Multiples, dan Matriks Sensitivitas", subtitle_style))
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=12))
 
-    val_intro = Paragraph(
-        f"Penentuan Target Harga <b>{_fy(model.target_price)}</b> menggunakan metodologi <i>Blended Valuation</i> dengan pembobotan komprehensif: "
-        f"<b>40% Discounted Cash Flow (DCF)</b>, <b>35% Exit Multiple P/E</b>, dan <b>25% Relative Peer Multiple</b>. "
-        f"Pendekatan ini menyelaraskan nilai intrinsik fundamental jangka panjang dengan dinamika apresiasi pasar jangka menengah.",
-        body_style
-    )
+    # Bobot WAJIB dibaca dari model, bukan ditulis statis. Versi lama selalu
+    # mencetak 40/35/25 padahal engine memakai 30/25/25/20 (dan berbeda untuk
+    # bank: 100% Justified PBV; siklikal: 60% EV/EBITDA + 40% PBV).
+    _w = getattr(model, "valuation_weights", None) or {}
+    if _w:
+        # Pembulatan "largest remainder": pembulatan bulat biasa bisa
+        # menghasilkan total 101% (MYOR 36+36+29). Sisa dibagikan ke bobot
+        # terbesar agar jumlahnya selalu tepat 100%.
+        _items = sorted(_w.items(), key=lambda kv: -kv[1])
+        _raw = [v * 100.0 for _, v in _items]
+        _flo = [int(x) for x in _raw]
+        _short = 100 - sum(_flo)
+        _order_idx = sorted(range(len(_raw)),
+                           key=lambda i: _raw[i] - _flo[i], reverse=True)
+        for _i in _order_idx[:_short]:
+            _flo[_i] += 1
+        _w_txt = ", ".join(f"<b>{pct}% {k}</b>" for pct, (k, _) in zip(_flo, _items))
+        _val_lead = (f"Penentuan Target Harga <b>{_fy(model.target_price)}</b> menggunakan "
+                     f"metodologi <i>Blended Valuation</i> dengan pembobotan: {_w_txt}.")
+    else:
+        _val_lead = (f"Target harga <b>{_fy(model.target_price)}</b> — komponen valuasi "
+                     f"tidak tersedia lengkap, bobot tidak dapat dinyatakan.")
+    _basis_txt = (f" Basis yang dipakai: {model.valuation_basis}."
+                  if getattr(model, "valuation_basis", "") else "")
+    val_intro = Paragraph(_val_lead + _basis_txt, body_style)
     elements.append(val_intro)
     elements.append(Spacer(1, 10))
 
+    def _imp(fv):
+        if fv is None or not model.current_price:
+            return "N/A"
+        return _fy((fv - model.current_price) / model.current_price * 100,
+                   "+.1f", "", "N/A") + "%"
+
+    _wmap = getattr(model, "valuation_weights", None) or {}
+    if _wmap:
+        _it = sorted(_wmap.items(), key=lambda kv: -kv[1])
+        _rw = [v * 100.0 for _, v in _it]
+        _fl = [int(x) for x in _rw]
+        _sh = 100 - sum(_fl)
+        for _i in sorted(range(len(_rw)), key=lambda i: _rw[i] - _fl[i],
+                         reverse=True)[:_sh]:
+            _fl[_i] += 1
+        _pctmap = {k: p for p, (k, _) in zip(_fl, _it)}
+    else:
+        _pctmap = {}
+
+    def _wt(name):
+        return f"{_pctmap[name]}%" if name in _pctmap else "—"
+
     val_summary_data = [
         ["Metodologi Valuasi", "Bobot", "Parameter Kunci", "Nilai Wajar per Saham", "Implikasi vs Market"],
-        ["Discounted Cash Flow (FCFF)", "40%", f"WACC {_fy(model.wacc_pct, '.1f', '', 'N/A')}%, g={_fy(model.terminal_growth_pct, '.1f', '', 'N/A')}%", _fy(model.dcf_fair_value), (_fy((model.dcf_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.dcf_fair_value is not None and model.current_price) else "N/A"],
-        ["Exit Multiple P/E Valuation", "35%", f"Exit Target P/E {_fy(model.pe_ratio*1.05 if model.pe_ratio is not None else None, '.1f', '', 'N/A')}x", _fy(model.exit_multiple_fair_value), (_fy((model.exit_multiple_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.exit_multiple_fair_value is not None and model.current_price) else "N/A"],
-        ["Relative Valuation Peer Comps", "25%", f"P/BV Multiple {_fy(model.pbv_ratio*1.02 if model.pbv_ratio is not None else None, '.2f', '', 'N/A')}x", _fy(model.relative_fair_value), (_fy((model.relative_fair_value-model.current_price)/model.current_price*100, "+.1f", "", "N/A") + "%") if (model.relative_fair_value is not None and model.current_price) else "N/A"],
-        ["KONSENSUS BLENDED TARGET", "100%", "Weighted Linear Combination", _fy(model.target_price), f"{_fy(model.upside_pct, '+.1f', '', 'N/A')}% (REKOMENDASI: {model.recommendation})"],
+        ["Discounted Cash Flow (FCFF)", _wt("DCF"),
+         f"WACC {_fp(model.wacc_pct, '.1f')}, g={_fp(model.terminal_growth_pct, '.1f')}",
+         _fy(model.dcf_fair_value), _imp(model.dcf_fair_value)],
+        ["Exit Multiple P/E", _wt("Exit P/E"),
+         f"Exit Target P/E {_fy(model.pe_ratio*1.05 if model.pe_ratio is not None else None, '.1f', '', 'N/A')}x",
+         _fy(model.exit_multiple_fair_value), _imp(model.exit_multiple_fair_value)],
+        ["EV/EBITDA Sektor", _wt("EV/EBITDA"),
+         "Median multiple peer sebanding",
+         _fy(model.ev_ebitda_fair_value), _imp(model.ev_ebitda_fair_value)],
+        ["Relative Valuation Peer Comps", _wt("Relative PBV"),
+         f"P/BV Multiple {_fy(model.pbv_ratio*1.02 if model.pbv_ratio is not None else None, '.2f', '', 'N/A')}x",
+         _fy(model.relative_fair_value), _imp(model.relative_fair_value)],
+        ["Justified PBV (bank)", _wt("Justified PBV"),
+         "Metodologi khusus lembaga keuangan",
+         _fy(model.dcf_fair_value if "Justified" in (model.valuation_basis or "") else None),
+         _imp(model.dcf_fair_value if "Justified" in (model.valuation_basis or "") else None)],
+        ["KONSENSUS BLENDED TARGET", "100%", "Weighted Linear Combination",
+         _fy(model.target_price),
+         (f"{_fp(model.upside_pct, '+.1f')}"
+          if model.upside_pct is not None else "N/A")
+         + f" (REKOMENDASI: {model.recommendation})"],
     ]
+    # Buang baris metode yang tidak punya bobot DAN tidak punya nilai (agar PDF
+    # tidak menampilkan deretan "—/N/A" yang mengaburkan metode yang dipakai).
+    _hdr, _rest = val_summary_data[0], val_summary_data[1:]
+    _keep = [r for r in _rest if r[0].startswith("KONSENSUS") or r[1] != "—" or r[3] != "N/A"]
+    # Bila tidak ada target sama sekali, metode individual hanya menyesatkan:
+    # SUPA menampilkan "Exit P/E Rp40 (-87,5%)" padahal target N/A karena
+    # nilai itu ditolak sanity gate. Tampilkan satu baris keterangan saja.
+    if model.target_price is None:
+        _keep = []
+    val_summary_data = [_hdr] + _keep
     t_val = Table(val_summary_data, colWidths=[130, 45, 140, 100, 108])
     t_val.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0f172a")),

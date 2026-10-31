@@ -370,16 +370,52 @@ async def dashboard_home(
                                       risk_free_rate=RISK_FREE_PCT / 100.0)
         ref_price_mc = float(current_price or prices_series[-1])
         beta_val = getattr(risk, "beta", 1.0) or 1.0
-        # CAPM drift: rf + beta * ERP (bukan ROE)
-        capm_drift = (RISK_FREE_PCT / 100.0) + float(beta_val) * 0.065
+        # Drift & volatilitas HARUS sama dengan /api/monte-carlo, kalau tidak
+        # dua tempat menampilkan simulasi berbeda untuk emiten yang sama.
+        # Versi lama memakai CAPM drift (rf + beta*ERP) di sini dan drift
+        # historis di API -> hasil bertentangan.
+        import math as _m
+        # Pakai seri PENUH (bukan yang sudah di-align ke IHSG), agar drift
+        # di halaman identik dengan /api/monte-carlo. Align membuang hari
+        # terakhir yang belum ada di IHSG sehingga drift bergeser
+        # (ASII 7,87% vs 7,45%).
+        from sqlmodel import select as _sel_mc
+        from app.db.models import QuoteHistoryDaily as _QHmc
+        _mc_rows = session.exec(
+            _sel_mc(_QHmc).where(_QHmc.ticker == curr_stmt.ticker).order_by(_QHmc.date)
+        ).all()
+        _mc_px = [float(r.close) for r in _mc_rows if getattr(r, "close", None)]
+        _r = [_mc_px[i] / _mc_px[i - 1] - 1.0
+              for i in range(1, len(_mc_px)) if _mc_px[i - 1]]
+        if len(_r) >= 59:
+            _mean_d = sum(_r) / len(_r)
+            _var_d = sum((x - _mean_d) ** 2 for x in _r) / (len(_r) - 1)
+            _ann_vol = _m.sqrt(_var_d) * _m.sqrt(252)
+            _raw_drift = _mean_d * 252
+            _ann_drift = max(-0.35, min(0.45, _raw_drift))
+        else:
+            # Data terlalu pendek -> jangan mengarang; pakai CAPM sebagai
+            # asumsi eksplisit yang akan dilabeli di payload.
+            _ann_vol = realized_vol
+            _raw_drift = (RISK_FREE_PCT / 100.0) + float(beta_val) * 0.065
+            _ann_drift = _raw_drift
         monte_carlo = run_monte_carlo_gbm(
             current_price=ref_price_mc,
-            annual_drift=capm_drift,
-            annual_vol=realized_vol,
+            annual_drift=_ann_drift,
+            annual_vol=max(0.05, min(1.5, _ann_vol)),
             days=252,
             n_paths=200,
             seed=42,
         )
+        monte_carlo["assumptions"] = {
+            "annual_drift_pct": round(_ann_drift * 100, 2),
+            "annual_vol_pct": round(_ann_vol * 100, 2),
+            "drift_raw_pct": round(_raw_drift * 100, 2),
+            "drift_clamped": abs(_raw_drift - _ann_drift) > 1e-9,
+            "observations": len(_mc_px),
+            "drift_source": ("rata-rata return harian x 252 (data riil)"
+                             if len(_r) >= 59 else "CAPM rf + beta x ERP (data < 60 observasi)"),
+        }
     else:
         risk = None
         monte_carlo = None
@@ -639,7 +675,13 @@ async def get_monte_carlo_json(ticker: str, session: Session = Depends(get_sessi
     mean_d = sum(rets) / n
     var_d = sum((x - mean_d) ** 2 for x in rets) / (n - 1)
     ann_vol = math.sqrt(var_d) * math.sqrt(252)
-    ann_drift = max(-0.35, min(0.45, mean_d * 252))
+    raw_drift = mean_d * 252
+    ann_drift = max(-0.35, min(0.45, raw_drift))
+    # Transparansi: bila drift historis di luar batas, sebutkan angka aslinya.
+    # Tanpa ini pengguna melihat "-35%" dan mengira itu drift historis,
+    # padahal aslinya bisa -82% (emiten yang harganya jatuh >60%/tahun).
+    drift_clamped = abs(raw_drift - ann_drift) > 1e-9
+    raw_vol = ann_vol
 
     result = run_monte_carlo_gbm(
         current_price=ref_p,
@@ -651,12 +693,19 @@ async def get_monte_carlo_json(ticker: str, session: Session = Depends(get_sessi
     result["assumptions"] = {
         "annual_drift_pct": round(ann_drift * 100, 2),
         "annual_vol_pct": round(ann_vol * 100, 2),
+        "drift_raw_pct": round(raw_drift * 100, 2),
+        "drift_clamped": drift_clamped,
+        "vol_raw_pct": round(raw_vol * 100, 2),
+        "vol_clamped": abs(raw_vol - max(0.05, min(1.5, raw_vol))) > 1e-9,
         "drift_source": "rata-rata return harian x 252 (data riil)",
         "vol_source": "stdev return harian x sqrt(252) (data riil)",
         "observations": len(px),
         "note": ("Drift historis BUKAN ramalan — hanya meneruskan tren masa lalu. "
                  "Model GBM mengasumsikan return berdistribusi normal, sedangkan "
-                 "return saham nyata berekor gemuk (fat tail)."),
+                 "return saham nyata berekor gemuk (fat tail).")
+        + (f" Drift historis sebenarnya {raw_drift*100:.1f}%/tahun, dibatasi ke "
+           f"{ann_drift*100:.1f}% agar simulasi tidak meledak di luar rentang "
+           f"wajar — angka simulasi TIDAK memakai drift asli." if drift_clamped else ""),
     }
     return {"ticker": tk, "monte_carlo": result}
 

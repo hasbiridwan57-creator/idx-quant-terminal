@@ -209,8 +209,8 @@ class CreditMetricsResult:
     debt_to_assets: float
     interest_coverage: float        # EBIT / Interest Expense
     cash_to_debt: float              # Cash / Total Debt
-    current_ratio: float            # Current Assets / Current Liabilities
-    quick_ratio: float               # (CA - Inventory) / CL
+    current_ratio: Optional[float]  # CA / CL — None untuk bank (unclassified BS)
+    quick_ratio: Optional[float]    # (CA - Inventory) / CL — None untuk bank
     credit_score: int               # Score 1-10 (10 = investment grade)
     credit_grade: str               # AAA, AA, A, BBB, BB, B, CCC, D
     debt_service_coverage: float   # CFADS / (Interest + Principal)
@@ -296,9 +296,14 @@ def calculate_credit_metrics(
         if equity > 0 and net_income > 0:
             score += 0.5
 
-        # Format proxy metrics for display in bank context
-        cr = round(cash_ratio * 10, 2)  # liquidity proxy
-        qr = cr
+        # BUG lama: cr = cash_ratio * 10 lalu dilaporkan sebagai "current ratio".
+        # Itu bukan current ratio — hanya rasio kas yang dikali 10 supaya
+        # kebetulan berada di kisaran angka rasio lancar, sehingga bank tampak
+        # punya likuiditas lancar padahal neracanya unclassified (tanpa
+        # aset/kewajiban jangka pendek). Sekarang dikembalikan None (N/A):
+        # rasio lancar tidak berlaku untuk lembaga keuangan.
+        cr = None
+        qr = None
         icr = round(max(icr, roa * 100), 2)
     else:
         # Corporate standard credit scoring (1-10)
@@ -352,8 +357,8 @@ def calculate_credit_metrics(
         debt_to_assets=round(dta, 4),
         interest_coverage=round(icr, 2),
         cash_to_debt=round(ctd, 4),
-        current_ratio=round(cr, 4),
-        quick_ratio=round(qr, 4),
+        current_ratio=round(cr, 4) if cr is not None else None,
+        quick_ratio=round(qr, 4) if qr is not None else None,
         credit_score=int(round(score)),
         credit_grade=grade,
         debt_service_coverage=round(dsr, 4),

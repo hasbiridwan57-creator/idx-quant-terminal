@@ -112,7 +112,22 @@
     <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
       <div>
         <h3 class="text-base font-semibold text-white">Simulasi Monte Carlo Geometric Brownian Motion (GBM)</h3>
-        <p class="text-xs text-slate-400 mt-0.5">200 Iterasi Jalur Stokastik &bull; Horizon 1 Tahun (252 Hari) &bull; Kalibrasi Volatilitas Historis</p>
+        <p class="text-xs text-slate-400 mt-0.5">
+          200 Iterasi Jalur Stokastik &bull; Horizon 1 Tahun (252 Hari) &bull;
+          Kalibrasi Volatilitas Historis
+          {% if mc_payload and mc_payload.assumptions %}
+            &bull; Drift <span class="font-mono text-slate-300">{{ "%+.2f"|format(mc_payload.assumptions.annual_drift_pct) }}%/thn</span>
+            &bull; Vol <span class="font-mono text-slate-300">{{ "%.2f"|format(mc_payload.assumptions.annual_vol_pct) }}%/thn</span>
+            &bull; <span class="font-mono text-slate-500">{{ mc_payload.assumptions.observations }} observasi</span>
+          {% endif %}
+        </p>
+        {% if mc_payload and mc_payload.assumptions and mc_payload.assumptions.drift_clamped %}
+        <p class="text-[11px] text-amber-400/90 mt-1 font-mono">
+          ⚠ Drift historis sebenarnya {{ "%+.2f"|format(mc_payload.assumptions.drift_raw_pct) }}%/thn,
+          dibatasi ke {{ "%+.2f"|format(mc_payload.assumptions.annual_drift_pct) }}%/thn agar simulasi tidak
+          meledak. Hasil di bawah memakai angka yang sudah dibatasi — bukan drift historis apa adanya.
+        </p>
+        {% endif %}
       </div>
       <div class="flex items-center gap-2 font-mono text-xs">
         <span class="text-slate-400">Harga Acuan:</span>
