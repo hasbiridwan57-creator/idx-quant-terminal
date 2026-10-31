@@ -329,7 +329,7 @@ def build_research_model_from_context(
     # `dcf["pe_reference"]` yang tidak pernah dikirim -> keduanya SELALU None,
     # sehingga blended target = 100% DCF (tidak ada pembanding, dampening mati).
     # Sekarang: median PE/PBV dari peer riil di DB (emiten satu sektor).
-    _sector_pe = _sector_pbv = None
+    _sector_pe = _sector_pbv = _sector_ev_ebitda = None
     _peer_n = 0
     try:
         from sqlmodel import Session as _S3, select as _sel3
@@ -341,15 +341,24 @@ def build_research_model_from_context(
             # Emiten kecil/sector langka tidak punya daftar peer terkurasi.
             # Fallback: emiten LAIN di sektor yang sama dari DB (riil, bukan
             # daftar karangan) — maksimal 6.
-            _sect = (audited_fy or {}).get("sector")
+            _sect = (audited_fy or _bfy or {}).get("sector")
             if _sect:
                 with _S3(_eng3) as _s3b:
-                    _peer_tks = [
+                    # Hanya emiten yang PUNYA harga (bisa dihitung multiple).
+                    # Prioritaskan yang punya EPS & shares agar PE/PBV/EV valid.
+                    _cand = [
                         r_.ticker for r_ in _s3b.exec(
                             _sel3(_FSC).where(_FSC.sector == _sect)
                             .where(_FSC.ticker != ticker.upper())
                         ).all()
-                    ][:6]
+                    ]
+                    _uniq = []
+                    for _t in _cand:
+                        if _t in _uniq:
+                            continue
+                        if _s3b.get(_QL, _t):
+                            _uniq.append(_t)
+                    _peer_tks = _uniq[:8]
         if _peer_tks:
             _pes, _pbvs = [], []
             with _S3(_eng3) as _s3:
@@ -368,16 +377,38 @@ def build_research_model_from_context(
                             _bvps = (_row.total_equity_parent * 1e9) / _sh
                             if _bvps > 0:
                                 _pbvs.append(_q.price / _bvps)
-            def _med(v):
-                v = sorted(x for x in v if x and 0 < x < 500)
+            def _med(v, lo=0.0, hi=500.0):
+                # Filter outlier: PBV/PE ekstrem (emiten ekuitas tipis, laba
+                # hampir nol) akan menyeret median dan menghasilkan nilai wajar
+                # mustahil (MYOR rel_fv Rp9.763 = 7x harga).
+                v = sorted(x for x in v if x and lo < x < hi)
                 if not v:
                     return None
                 n = len(v)
                 return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0
-            _sector_pe, _sector_pbv = _med(_pes), _med(_pbvs)
-            _peer_n = max(len(_pes), len(_pbvs))
+            # EV/EBITDA sektor — metode yang paling tahan siklus komoditas:
+            # EBIT historis membuat ANTM -73% / ADRO +105% karena harga
+            # komoditas sudah berubah jauh dari rata-rata 3 tahun.
+            _evs = []
+            for _pt in _peer_tks:
+                _prow = _s3.exec(_sel3(_FSC).where(_FSC.ticker == _pt)
+                                 .order_by(_FSC.year.desc())).first()
+                _pq = _s3.get(_QL, _pt)
+                if not (_prow and _pq and _pq.price and _pq.price > 0):
+                    continue
+                _psh = _prow.shares_outstanding
+                _pebitda = ((_prow.ebit or 0) + abs(_prow.depreciation or 0)) if _prow.ebit else None
+                if not (_psh and _psh > 0 and _pebitda and _pebitda > 0):
+                    continue
+                _pmcap = (_pq.price * _psh) / 1e9
+                _pnet = (_prow.total_liabilities or 0) - (_prow.cash_and_equivalents or 0)
+                if _pmcap + _pnet > 0:
+                    _evs.append((_pmcap + _pnet) / _pebitda)
+            _sector_pe, _sector_pbv = _med(_pes, 2.0, 60.0), _med(_pbvs, 0.2, 15.0)
+            _sector_ev_ebitda = _med(_evs, 1.0, 40.0)
+            _peer_n = max(len(_pes), len(_pbvs), len(_evs))
     except Exception:
-        _sector_pe = _sector_pbv = None
+        _sector_pe = _sector_pbv = _sector_ev_ebitda = None
 
     # Exit-multiple: EPS x median PE sektor (bila tersedia dari peer riil)
     exit_fv = None
@@ -393,7 +424,29 @@ def build_research_model_from_context(
     if not (isinstance(_pbv_just, (int, float)) and _pbv_just > 0):
         _pbv_just = _sector_pbv      # median PBV peer riil
     if pbv and pbv > 0 and isinstance(_pbv_just, (int, float)) and _pbv_just > 0 and curr_p:
-        rel_fv = curr_p * (float(_pbv_just) / pbv)
+        _ratio = float(_pbv_just) / pbv
+        # Median PBV dari sampel tipis (1-2 peer) tidak dapat dipercaya bila
+        # menyimpang >2x. Tolak -> N/A, jangan sajikan nilai wajar mustahil.
+        rel_fv = curr_p * _ratio if 0.5 <= _ratio <= 2.0 else None
+
+    # EV/EBITDA sektor: nilai wajar = (EBITDA x multiple sektor - net debt) / shares.
+    # Metode ini paling tahan siklus karena EBITDA tidak terpengaruh D&A dan
+    # harga komoditas sudah tercermin di multiple pasar, bukan di EBIT historis.
+    ev_ebitda_fv = None
+    try:
+        _ebitda_self = None
+        _eb = (audited_fy or {}).get("ebit_bn")
+        _da = (audited_fy or {}).get("depreciation_amortization_bn")
+        if _eb is not None:
+            _ebitda_self = _eb + abs(_da or 0)
+        if _ebitda_self and _ebitda_self > 0 and _sector_ev_ebitda and shares_m and curr_p:
+            _nd = ((debt_bn or 0) - (cash_bn or 0))
+            _eq_val = (_ebitda_self * _sector_ev_ebitda) - _nd
+            _ev_fv = (_eq_val * 1e9) / (shares_m * 1e6)
+            if _ev_fv > 0:
+                ev_ebitda_fv = _ev_fv
+    except Exception:
+        ev_ebitda_fv = None
 
     # Blended Target Price — bobot dinormalisasi dari komponen yang TERSEDIA.
     # Jangan pernah menghasilkan target dari komponen yang tidak ada.
@@ -415,18 +468,24 @@ def build_research_model_from_context(
                              "enterprise value (equity value negatif)")
 
     _dcf_ok, _exit_ok, _rel_ok = _plausible(dcf_fv), _plausible(exit_fv), _plausible(rel_fv)
+    _ev_ok = _plausible(ev_ebitda_fv)
 
     # Bila DCF menyimpang >40% dari median metode lain, ia kemungkinan besar
     # artefak asumsi (ΔWC nol, D&A tidak dilaporkan). Turunkan bobotnya alih-alih
     # membuangnya, agar blended target tidak ditarik ke satu ekstrem.
-    _others = [v for v, ok in ((exit_fv, _exit_ok), (rel_fv, _rel_ok)) if ok]
+    _others = [v for v, ok in ((exit_fv, _exit_ok), (rel_fv, _rel_ok),
+                               (ev_ebitda_fv, _ev_ok)) if ok]
     if _dcf_ok and _others:
         _med = sorted(_others)[len(_others) // 2]
         if _med > 0 and abs(dcf_fv - _med) / _med > 0.40:
             dcf_fv = (dcf_fv + _med) / 2.0
-    _parts = [(0.40, dcf_fv if _dcf_ok else None),
-              (0.35, exit_fv if _exit_ok else None),
-              (0.25, rel_fv if _rel_ok else None)]
+    # Bobot: DCF 30%, Exit PE 25%, EV/EBITDA 25%, Relative PBV 20%.
+    # DCF diturunkan dari 40% karena EBIT historis lemah untuk siklikal;
+    # EV/EBITDA masuk justru untuk mengoreksi bias itu.
+    _parts = [(0.30, dcf_fv if _dcf_ok else None),
+              (0.25, exit_fv if _exit_ok else None),
+              (0.25, ev_ebitda_fv if _ev_ok else None),
+              (0.20, rel_fv if _rel_ok else None)]
     target_price = None
     upside_pct = None
     _avail = [(w, v) for w, v in _parts if v is not None and v > 0]
@@ -443,7 +502,7 @@ def build_research_model_from_context(
         _wsum = sum(w for w, _ in _avail)
         target_price = sum(w * v for w, v in _avail) / _wsum
         upside_pct = ((target_price - curr_p) / curr_p) * 100.0
-        _basis = f"{len(_avail)} dari 3 metode tersedia"
+        _basis = f"{len(_avail)} dari 4 metode tersedia"
         # Upside ekstrem (>75%) hampir selalu karena harga pasar sudah turun
         # jauh dari rata-rata historis yang dipakai model, bukan karena
         # emiten benar-benar 2x undervalued. Nyatakan apa adanya.

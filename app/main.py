@@ -598,8 +598,12 @@ async def get_monte_carlo_json(ticker: str, session: Session = Depends(get_sessi
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} belum ada di cache.")
     
     # Ambil harga terkini jika ada
-    ql = session.get(QuoteLatest, ticker.upper())
-    ref_p = float(ql.price) if (ql and ql.price) else 5000.0
+    # ZERO-FAKE: dulu fallback Rp5.000 (harga karangan) untuk emiten tanpa
+    # quote -> simulasi Monte Carlo dari harga fiktif. Sekarang N/A.
+    ref_p = _latest_price(session, ticker.upper())
+    if not ref_p:
+        raise HTTPException(status_code=404,
+                            detail=f"Harga {ticker.upper()} tidak tersedia — simulasi tidak dijalankan.")
 
     result = run_monte_carlo_gbm(
         current_price=ref_p,
@@ -617,8 +621,7 @@ async def get_risk_json(ticker: str, session: Session = Depends(get_session)):
     if not curr_stmt:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} belum ada di cache.")
     
-    ql = session.get(QuoteLatest, ticker.upper())
-    ref_p = float(ql.price) if (ql and ql.price) else 5000.0
+    ref_p = _latest_price(session, ticker.upper())
 
     # RISK METRICS: JANGAN gunakan data sintetis - hanya hitung dari data pasar real
     risk_m = None
@@ -809,14 +812,10 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
     _sh_raw = _shares_from_stmt(curr_stmt)
     shares_m = (_sh_raw / 1e6) if _sh_raw > 0 else None
 
-    current_price = None
-    try:
-        ql = session.get(QuoteLatest, ticker_upper)
-        if ql and ql.price and ql.price > 0:
-            current_price = ql.price
-    except Exception:
-        pass
-        
+    # Harga: QuoteLatest, fallback ke bar historis terakhir (PTBA/ITMG tidak
+    # punya baris QuoteLatest padahal punya 1.403 bar histori).
+    current_price = _latest_price(session, ticker_upper)
+
     dcf_res = None
     try:
         # PARAMETER RIIL, bukan default: beta dari regresi vs IHSG (fallback 1,0
@@ -1282,6 +1281,31 @@ async def api_post_peer_matrix(ticker: str, req: dict = None):
         return result
     except Exception as e:
         return {"error": str(e)}
+
+
+def _latest_price(session, ticker: str):
+    """Harga terakhir: QuoteLatest, fallback ke bar historis terakhir.
+
+    PTBA/ITMG punya 1.403 baris QuoteHistoryDaily tapi TIDAK ada baris
+    QuoteLatest -> seluruh valuasi jadi N/A padahal datanya ada.
+    """
+    try:
+        ql = session.get(QuoteLatest, ticker)
+        if ql and ql.price and ql.price > 0:
+            return float(ql.price)
+    except Exception:
+        pass
+    try:
+        from sqlmodel import select as _sel
+        from app.db.models import QuoteHistoryDaily as _Q
+        row = session.exec(
+            _sel(_Q).where(_Q.ticker == ticker).order_by(_Q.date.desc())
+        ).first()
+        if row and row.close and row.close > 0:
+            return float(row.close)
+    except Exception:
+        pass
+    return None
 
 
 def _shares_from_stmt(stmt) -> float:
