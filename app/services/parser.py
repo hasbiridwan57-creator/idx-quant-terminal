@@ -334,8 +334,22 @@ def sync_audited_to_statement_cache(session: Session) -> int:
                 interest_expense=_f("interest_expense_bn"),
                 tax_provision=_f("tax_provision_bn"),
                 shares_outstanding=_f("shares_outstanding"),
-                interest_bearing_debt=_f("total_loans_bn"),
+                # Utang berbunga dari SUM komponen riil (jangka pendek +
+                # jatuh tempo + obligasi + sewa). Sebelumnya hanya tag bank
+                # `total_loans` -> kolom ini 0% untuk semua non-bank dan WACC
+                # memakai total liabilitas sebagai "utang" (ASII 216.554 B
+                # padahal utang berbunga 69.114 B).
+                interest_bearing_debt=_f("interest_bearing_debt_bn"),
                 eps=fy.get("eps"),
+                # Detail modal kerja & arus kas (sebelumnya tidak dipetakan ->
+                # CCC, DPR, dan AQI Beneish kehilangan komponen).
+                inventories=_f("inventories_bn"),
+                trade_receivables=_f("trade_receivables_bn"),
+                trade_payables=_f("trade_payables_bn"),
+                finance_costs=_f("finance_costs_bn"),
+                dividends_paid=_f("dividends_paid_bn"),
+                retained_earnings=_f("retained_earnings_bn"),
+                loans_gross=_f("loans_gross_bn"),
             )
 
             if rec:

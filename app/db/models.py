@@ -44,6 +44,19 @@ class FinancialStatementCache(SQLModel, table=True):
     minority_interest: Optional[float] = Field(default=None)
     eps: Optional[float] = Field(default=None)
 
+    # ── Working capital & cash-flow detail ─────────────────────────────
+    # Field ini SELALU ada di JSONL XBRL (inventories 3.211 record,
+    # trade_receivables 3.663, trade_payables 3.638, dividends_paid 2.180,
+    # retained_earnings 4.156, finance_costs 3.538) tetapi tidak pernah
+    # dipetakan ke DB -> CCC, DPR, dan Beneish AQI kehilangan komponen.
+    inventories: Optional[float] = Field(default=None)
+    trade_receivables: Optional[float] = Field(default=None)
+    trade_payables: Optional[float] = Field(default=None)
+    finance_costs: Optional[float] = Field(default=None)
+    loans_gross: Optional[float] = Field(default=None)   # bank: kredit bruto
+    dividends_paid: Optional[float] = Field(default=None)
+    retained_earnings: Optional[float] = Field(default=None)
+
     # ── Extended metadata ──────────────────────────────────────────────
     pe_trailing: Optional[float] = Field(default=None)
     pb_ratio: Optional[float] = Field(default=None)

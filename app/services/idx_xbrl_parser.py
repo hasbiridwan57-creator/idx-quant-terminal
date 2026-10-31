@@ -48,8 +48,12 @@ CONCEPTS = {
     "assets": ["Assets"],
     "liabilities": ["Liabilities"],
     "equity_total": ["Equity"],
-    "equity_parent": ["EquityAttributableToEquityOwnersOfParentEntity"],
-    "cash": ["CashAndCashEquivalents"],
+    "equity_parent": ["EquityAttributableToEquityOwnersOfParentEntity",
+                      "EquityAttributableToParentEntity"],
+    # Bank melaporkan `Cash` (bukan CashAndCashEquivalents).
+    # 258 dari 281 record bank kehilangan kas karena tag ini tidak dipetakan
+    # -> net cash N/A dan net debt salah di seluruh valuasi bank.
+    "cash": ["CashAndCashEquivalents", "Cash"],
     # Neraca terklasifikasi (non-bank) — untuk Altman Z'' dan Invested Capital presisi
     "current_assets": ["CurrentAssets"],
     "current_liabilities": ["CurrentLiabilities"],

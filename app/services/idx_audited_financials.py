@@ -90,6 +90,43 @@ def get_row(ticker: str, year: int) -> Optional[dict]:
     return None
 
 
+def current_usdidr(default: float = 16000.0) -> float:
+    """Kurs USD/IDR TUNGGAL untuk seluruh aplikasi.
+
+    Sebelumnya DB diisi dengan default 16.000 sementara engine valuasi memakai
+    kurs live (~18.120) -> angka emiten USD (ADMR, ITMG, ADRO) berbeda ~13%
+    antara tabel histori di UI dan DB/PDF. Satu sumber kurs menghilangkan
+    ketidakcocokan itu.
+    """
+    try:
+        from app.services.real_data_registry import get_macro_indicators
+        _v = (get_macro_indicators() or {}).get("usd_idr")
+        if isinstance(_v, (int, float)) and _v > 0:
+            return float(_v)
+    except Exception:
+        pass
+    return default
+
+
+def _ibd(r: dict, currency: str, usdidr: float) -> Optional[float]:
+    """Total utang berbunga = jumlah komponen yang dilaporkan filing.
+
+    Murni penjumlahan tag, tanpa asumsi. `total_loans` (tag bank) dipakai bila
+    ada; kalau tidak, jumlahkan komponen jatuh tempo/jangka pendek/obligasi/sewa.
+    Return None bila tidak satu pun tersedia (UI menampilkan N/A).
+    """
+    parts = [
+        r.get("short_term_bank_loans"),
+        r.get("current_maturities_bank_loans"),
+        r.get("current_maturities_bonds"),
+        r.get("current_maturities_lease"),
+    ]
+    vals = [v for v in parts if isinstance(v, (int, float))]
+    if vals:
+        return _bn(sum(vals), currency, usdidr)
+    return _bn(r.get("total_loans"), currency, usdidr)
+
+
 def _bn(v: Optional[float], currency: str, usdidr: float) -> Optional[float]:
     """Rupiah penuh -> miliar IDR. USD penuh -> miliar IDR via kurs."""
     if v is None:
@@ -99,11 +136,13 @@ def _bn(v: Optional[float], currency: str, usdidr: float) -> Optional[float]:
     return v / 1e9
 
 
-def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
+def series(ticker: str, usdidr: Optional[float] = None) -> List[dict]:
     """
     Seri 5 tahun siap pakai untuk tabel & DuPont.
     Hanya field yang ada; nilai hilang = None (UI wajib render N/A).
     """
+    if usdidr is None:
+        usdidr = current_usdidr()
     out = []
     for r in _load().get(ticker.upper(), []):
         cur = r.get("currency", "IDR")
@@ -170,6 +209,12 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
             "cost_of_sales_bn": _bn(r.get("cost_of_sales"), cur, usdidr),
             "loans_gross_bn": _bn(r.get("loans_gross"), cur, usdidr),
             "total_loans_bn": _bn(r.get("total_loans"), cur, usdidr),
+            # Utang berbunga: SUM komponen yang benar-benar dilaporkan
+            # (jangka pendek + jatuh tempo + obligasi + sewa). Sebelumnya
+            # hanya `total_loans` (tag bank, cakupan 6%) sehingga kolom ini
+            # 0% untuk seluruh non-bank. Tidak ada estimasi/proxy di sini:
+            # bila emiten tidak melaporkan komponen apa pun -> None.
+            "interest_bearing_debt_bn": _ibd(r, cur, usdidr),
             "allowance_impairment_loans_bn": _bn(r.get("allowance_impairment_loans"), cur, usdidr),
             "other_operating_expenses_bn": _bn(r.get("other_operating_expenses"), cur, usdidr),
             "other_operating_income_bn": _bn(r.get("other_operating_income"), cur, usdidr),
@@ -209,9 +254,27 @@ def series(ticker: str, usdidr: float = 16000.0) -> List[dict]:
         elif _gp is not None:
             out[-1]["ebit_bn"] = _gp - (_se or 0.0) - (_ga or 0.0)
             out[-1]["ebit_method"] = "Top-Down (Gross Profit - S&M - G&A)"
-        elif out[-1].get("profit_before_tax_bn") is not None and out[-1].get("finance_costs_bn") is not None:
-            out[-1]["ebit_bn"] = out[-1]["profit_before_tax_bn"] + out[-1]["finance_costs_bn"]
-            out[-1]["ebit_method"] = "Bottom-Up (PBT + Finance Costs)"
+        elif out[-1].get("profit_before_tax_bn") is not None:
+            # Asuransi (ABDA, AHAP) tidak melaporkan Gross Profit maupun Beban
+            # Keuangan, jadi dua cabang di atas gagal dan EBIT=None -> seluruh
+            # baris dibuang dari DB padahal revenue/aset/ekuitas/laba lengkap.
+            # Tanpa baris beban keuangan, PBT == EBIT secara akuntansi.
+            # Standar CFA bottom-up EBIT = EBT + Beban Keuangan Bersih
+            # (finance costs - finance income). Sebelumnya finance income tidak
+            # dikurangkan sehingga angka DB berbeda dari engine (TLKM 36.308 vs
+            # 34.647). Kedua jalur sekarang memakai definisi yang sama.
+            _fc = out[-1].get("finance_costs_bn")
+            _fi = out[-1].get("finance_income_bn") or 0.0
+            out[-1]["ebit_bn"] = out[-1]["profit_before_tax_bn"] + (_fc or 0.0) - _fi
+            if _fc is not None:
+                out[-1]["ebit_method"] = (
+                    "Bottom-Up (PBT + Finance Costs - Finance Income)"
+                    if _fi else "Bottom-Up (PBT + Finance Costs)"
+                )
+            else:
+                out[-1]["ebit_method"] = (
+                    "Bottom-Up (PBT; emiten tidak melaporkan beban keuangan)"
+                )
         else:
             out[-1]["ebit_bn"] = None
             out[-1]["ebit_method"] = "N/A (insufficient XBRL components)"
@@ -282,7 +345,7 @@ def _norm_eps(r: dict, cur: str, usdidr: float):
     return raw
 
 
-def five_year_table(ticker: str, usdidr: float = 16000.0) -> List[dict]:
+def five_year_table(ticker: str, usdidr: Optional[float] = None) -> List[dict]:
     rows = series(ticker, usdidr)
     prof = get_issuer_profile(ticker)
     for r in rows:

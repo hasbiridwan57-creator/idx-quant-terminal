@@ -177,16 +177,10 @@ def build_research_model_from_context(
     try:
         from app.services import idx_audited_financials as _AFX
         if _AFX.available() and _AFX.has_ticker(ticker):
-            _fxh = 16000.0
-            try:
-                from app.services.real_data_registry import get_macro_indicators as _gm
-                _mx = _gm() or {}
-                _vx = _mx.get("usd_idr")
-                if isinstance(_vx, (int, float)) and _vx > 0:
-                    _fxh = float(_vx)
-            except Exception:
-                pass
-            _tbl = _AFX.five_year_table(ticker, usdidr=_fxh)
+            # Kurs TUNGGAL dari helper — sebelumnya hardcode 16.000 di sini
+            # sementara blok lain memakai kurs live, membuat angka emiten USD
+            # berbeda antar bagian aplikasi.
+            _tbl = _AFX.five_year_table(ticker, usdidr=_AFX.current_usdidr())
             if _tbl:
                 audited_fy = _tbl[-1]
                 if audited_fy.get("revenue_bn") is not None:
@@ -1050,15 +1044,7 @@ def build_research_model_from_context(
     hist_source = None
     try:
         from app.services import idx_audited_financials as _AF
-        _fx = 16000.0
-        try:
-            from app.services.real_data_registry import get_macro_indicators as _gmi
-            _m = _gmi() or {}
-            _v = _m.get("usd_idr")
-            if isinstance(_v, (int, float)) and _v > 0:
-                _fx = float(_v)
-        except Exception:
-            pass
+        _fx = _AF.current_usdidr()
         if _AF.available() and _AF.has_ticker(ticker):
             for _r in _AF.five_year_table(ticker, usdidr=_fx):
                 _rt = _r.get("ratios") or {}
@@ -1092,12 +1078,17 @@ def build_research_model_from_context(
                         _ebit = round(_gp - _ga, 1)
                         _ebit_method = "TOP_DOWN_NO_SELL"
                 else:
-                    # PPOP asli bank dari XBRL
+                    # PPOP asli bank dari XBRL. BUG lama: `_ppop` dihitung
+                    # tetapi tidak pernah ditugaskan ke `_ebit`, sehingga
+                    # `ebit_bn` SELALU None untuk semua bank dan tabel histori
+                    # menampilkan N/A padahal PPOP tersedia di filing.
                     _ppop_raw = _r.get("ppop_bn")
                     if _ppop_raw is not None:
                         _ppop = round(_ppop_raw, 1)
                     elif _pbt is not None:
                         _ppop = round(_pbt, 1)
+                    _ebit = _ppop
+                    _ebit_method = "PPOP"
 
                 _ebit_margin = round((_ebit / _rev) * 100.0, 1) if (_ebit is not None and _rev and _rev > 0) else None
 

@@ -40,6 +40,15 @@ def _migrate_schema_add_columns(engine_ref) -> None:
         ("pe_trailing",             "REAL"),
         ("pb_ratio",                "REAL"),
         ("dividend_yield",          "REAL"),
+        # Detail modal kerja & arus kas — field ini selalu ada di JSONL XBRL
+        # tetapi lama tidak dipetakan, membuat CCC/DPR/AQI kehilangan input.
+        ("inventories",             "REAL"),
+        ("trade_receivables",       "REAL"),
+        ("trade_payables",          "REAL"),
+        ("finance_costs",           "REAL"),
+        ("dividends_paid",          "REAL"),
+        ("retained_earnings",       "REAL"),
+        ("loans_gross",             "REAL"),
     ]
 
     with engine_ref.connect() as conn:

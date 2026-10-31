@@ -252,6 +252,9 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
     #       + 0.115·DEPI - 0.172·SGAI + 4.037·TATA - 0.327·LVGI
     # CATATAN: LVGI koefisiennya NEGATIF 0.327. Versi lama memakai +0.0327
     # (tanda salah DAN orde besaran salah 10x).
+    # CATATAN: koefisien TATA resmi Beneish (1999) adalah 4.679, bukan 4.037.
+    # Kesalahan ini menggeser M-score sebesar 0.642 x TATA (UNTR: -2.71 vs
+    # -2.75 yang benar) dan bisa membalik klasifikasi di batas -1.78.
     m_score = (
         -4.84
         + 0.920 * dsri
@@ -260,7 +263,7 @@ def compute_beneish_m_score(current_stmt: Dict[str, Any],
         + 0.892 * sgi
         + 0.115 * depi
         - 0.172 * sgai
-        + 4.037 * tata
+        + 4.679 * tata
         - 0.327 * lvgi
     )
 
