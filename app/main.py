@@ -7,7 +7,7 @@ import dataclasses
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request
+from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, Response, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -64,7 +64,7 @@ from app.services.parser import (
     generate_idx_excel_template_bytes,
 )
 from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request
+from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, Response, FileResponse, StreamingResponse
 from sqlmodel import Session, select
 from app.db.database import init_db, get_session, engine
@@ -338,6 +338,26 @@ async def dashboard_home(
             )
             if isinstance(dcf_result, dict):
                 dcf_result.setdefault("terminal_growth_rate", 0.025)
+                # Simpan input apa adanya supaya slider sensitivitas di tab
+                # Valuation dapat MENGHITUNG ULANG DCF, bukan mengira-ngira
+                # dengan koefisien linear seperti versi lama.
+                dcf_result["raw_inputs"] = {
+                    "risk_free_rate": float(RISK_FREE_PCT),
+                    "market_risk_premium": 6.5,
+                    "levered_beta": float(_beta),
+                    "cost_of_debt_pre_tax": float(_kd * 100.0),
+                    "tax_rate": float(_etr),
+                    "target_debt_ratio": float(_wd),
+                    "ebit": float(_ebit_norm_bn),
+                    "depreciation": float(dep_bn or 0.0),
+                    "capex": float(capex_bn or 0.0),
+                    "wc_change": float(_dwc or 0.0),
+                    "fcf_growth_rate": float(_g),
+                    "terminal_growth_rate": 0.025,
+                    "total_debt": float(_debt or 0.0),
+                    "cash": float(cash_bn or 0.0),
+                    "shares_outstanding_m": float(shares_m or 0.0),
+                }
         except Exception as exc:
             print(f"DCF Error [{curr_stmt.ticker}]: {type(exc).__name__}: {exc}")
             dcf_result = None
@@ -866,6 +886,142 @@ async def get_risk_json(ticker: str, risk_free: float = 6.0,
     }
 
 # ── FASE 3.4 Bonds Calculator Endpoint ─────────────────────────
+def _build_dcf_raw_inputs(tk: str, session) -> dict | None:
+    """Susun input DCF dari cache audited — cermin blok DCF halaman utama.
+
+    Dipisah ke fungsi supaya slider sensitivitas dan valuasi utama memakai
+    asumsi yang identik. Mengembalikan None bila komponen inti tidak lengkap
+    (lebih baik N/A daripada DCF dari asumsi karangan).
+    """
+    from app.services.equity_research_helpers import build_wacc_components as _bwc
+    curr_stmt, _prev = load_ticker_pair(session, tk)
+    if not curr_stmt:
+        return None
+    raw_scale = (curr_stmt.unit_multiplier or 1.0)
+    factor_to_bn = 1.0 if curr_stmt.revenue < 1e9 else (raw_scale / 1e9)
+    rev_bn = (curr_stmt.revenue or 0) * factor_to_bn
+    ebit_bn = (curr_stmt.ebit or 0) * factor_to_bn
+    ta_bn = (curr_stmt.total_assets or 0) * factor_to_bn
+    tl_bn = (curr_stmt.total_liabilities or 0) * factor_to_bn
+    te_bn = (curr_stmt.total_equity_parent or 0) * factor_to_bn
+    debt_bn = (curr_stmt.interest_bearing_debt * factor_to_bn) if curr_stmt.interest_bearing_debt else None
+    cash_bn = (curr_stmt.cash_and_equivalents * factor_to_bn) if curr_stmt.cash_and_equivalents else None
+    _sh_raw = _shares_from_stmt(curr_stmt)
+    shares_m = (_sh_raw / 1e6) if _sh_raw > 0 else None
+    if not (ebit_bn and shares_m and shares_m > 0):
+        return None
+    dep_bn = (getattr(curr_stmt, "depreciation", None) or 0.0) * factor_to_bn
+    capex_bn = (getattr(curr_stmt, "capex", None) or 0.0) * factor_to_bn
+    _tbl = []
+    try:
+        # Nama modul yang benar: idx_audited_financials. Versi sebelumnya
+        # mengimpor `app.services.audited_financials` (tidak ada) sehingga
+        # CAGR revenue selalu gagal -> fcf_growth_rate jatuh ke 5% dan DCF
+        # di slider berbeda dari grid/sensitivitas untuk emiten yang sama.
+        from app.services.idx_audited_financials import five_year_table as _AFD_tbl
+        _tbl = _AFD_tbl(tk) or []
+    except Exception as _e_tbl:
+        print(f"[DCF] {tk}: tabel 5 tahun tidak tersedia ({type(_e_tbl).__name__})")
+        _tbl = []
+    _g = 0.05
+    _revs = [x.get("revenue_bn") for x in _tbl if x.get("revenue_bn")]
+    if len(_revs) >= 2:
+        _n = len(_revs) - 1
+        _g = max(-0.10, min(0.12, (_revs[-1] / _revs[0]) ** (1.0 / _n) - 1.0))
+    _wb = _bwc(financials=_tbl, beta_raw=None, current_price=_latest_price(session, tk),
+               shares_bn=shares_m, is_bank=False, ticker=tk)
+    _debt = debt_bn
+    if _debt is None:
+        _debt = min(tl_bn, te_bn) if (tl_bn and te_bn) else tl_bn
+    return {
+        "risk_free_rate": float(RISK_FREE_PCT),
+        "market_risk_premium": 6.5,
+        "levered_beta": float(_wb.get("beta") or 1.0),
+        "cost_of_debt_pre_tax": float((_wb.get("cod_pre_tax_pct") or 7.5)),
+        "tax_rate": float((_wb.get("etr_pct") or 22.0)) / 100.0,
+        "target_debt_ratio": float((_wb.get("wd_pct") or 30.0)) / 100.0,
+        "ebit": float(ebit_bn),
+        "depreciation": float(dep_bn),
+        "capex": float(capex_bn),
+        "wc_change": 0.0,
+        "fcf_growth_rate": float(_g),
+        "terminal_growth_rate": 0.025,
+        "total_debt": float(_debt or 0.0),
+        "cash": float(cash_bn or 0.0),
+        "shares_bn": float(shares_m / 1000.0),
+    }
+
+
+@app.get("/api/valuation/{ticker}/dcf-revalue")
+async def revalue_dcf(
+    ticker: str,
+    wacc_pct: float = Query(..., description="WACC dalam persen, mis. 10.5"),
+    terminal_growth_pct: float = Query(..., description="Terminal growth dalam persen"),
+    session: Session = Depends(get_session),
+):
+    """Hitung ULANG DCF dengan WACC & terminal growth pilihan pengguna.
+
+    Tab Valuation punya slider WACC/pertumbuhan. Versi lama menghitung target
+    harga dengan `factor = 1 - (wacc-w0)*0.08 + (g-g0)*0.04 + (tg-tg0)*0.05`
+    — koefisien tanpa dasar, dan `max(50, ...)` memaksa harga minimum Rp50.
+    Endpoint ini menjalankan model DCF yang sama dengan valuasi utama, sehingga
+    setiap titik slider benar-benar hasil model.
+    """
+    tk = ticker.upper().strip()
+    if not (-20.0 <= terminal_growth_pct <= 15.0):
+        raise HTTPException(status_code=422,
+                            detail=f"Terminal growth {terminal_growth_pct}% di luar batas wajar (-20%..15%).")
+    if not (0.5 <= wacc_pct <= 60.0):
+        raise HTTPException(status_code=422,
+                            detail=f"WACC {wacc_pct}% di luar batas wajar (0.5%..60%).")
+    if wacc_pct <= terminal_growth_pct:
+        raise HTTPException(status_code=422,
+                            detail=(f"WACC ({wacc_pct}%) harus lebih besar dari terminal growth "
+                                    f"({terminal_growth_pct}%). Dengan WACC <= g, nilai terminal "
+                                    f"tidak terdefinisi."))
+
+    curr_stmt, _ = load_ticker_pair(session, tk)
+    if not curr_stmt:
+        raise HTTPException(status_code=404, detail=f"Ticker {tk} belum ada di cache.")
+
+    # Bank tidak dinilai dengan DCF (struktur neraca & FCFF tidak berlaku:
+    # utang adalah bahan baku, bukan pendanaan). Nilai wajar bank = BVPS x
+    # Justified PBV di jalur valuasi utama. Menjalankan DCF di sini
+    # menghasilkan equity negatif (BBCA -100 T) yang tidak bermakna.
+    from app.services.idx_audited_financials import get_issuer_profile as _gip
+    _prof_v = _gip(tk) or {}
+    _sect_v = str(_prof_v.get("sector") or "").lower()
+    if "bank" in _sect_v or tk in {"BBCA","BMRI","BBRI","BBNI","BNGA","BBTN","BRIS","BTPS","BJBR","BJTM","BNII","BNLI","MEGA","NISP","AGRS","BACA","BBHI","BCAP"}:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"{tk} adalah bank — dinilai dengan Justified PBV (ROE/Ke/g), "
+                    f"bukan DCF. Revaluasi DCF tidak berlaku."))
+
+    raw = _build_dcf_raw_inputs(tk, session)
+    if not raw:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"Model DCF untuk {tk} tidak tersedia (komponen laporan keuangan "
+                    f"tidak lengkap) — revaluasi tidak dijalankan."))
+
+    from app.services.dcf_grid import dcf_price_at
+    _res = dcf_price_at(raw, wacc_pct, terminal_growth_pct)
+    if not _res:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"DCF {tk} tidak dapat dihitung pada WACC {wacc_pct}% / "
+                    f"g {terminal_growth_pct}%."))
+    return {
+        "ticker": tk,
+        "wacc_pct": round(wacc_pct, 2),
+        "terminal_growth_pct": round(terminal_growth_pct, 2),
+        "enterprise_value_trn": round(_res["ev_bn"] / 1000.0, 2),
+        "equity_value_trn": round(_res["equity_bn"] / 1000.0, 2),
+        "price_per_share": _res["price"],
+        "basis": "DCF dihitung dengan model yang sama seperti valuasi utama dan grid sensitivitas",
+    }
+
+
 @app.get("/api/bonds/calculate")
 async def get_bond_calc_json(
     face_value: float = 1_000_000,

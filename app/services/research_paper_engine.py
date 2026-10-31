@@ -710,42 +710,80 @@ def build_research_model_from_context(
         "valuasi (DCF/multiple) tidak tersedia — tidak dikarang."
     ]
     
-    bull_catalysts = [
-        "Ekspansi margin usaha didorong penurunan biaya operasional dan efisiensi rantai pasok.",
-        "Pertumbuhan pesanan baru dan kontrak berulang (repeat orders) dari mitra strategis.",
-        "Peluang re-rating valuasi seiring pelonggaran suku bunga acuan dan likuiditas pasar."
-    ]
-    
-    bear_risks = [
-        "Volatilitas harga bahan baku dan tekanan inflasi upah kerja.",
-        "Keterlambatan pembayaran termin piutang pelanggan atau peningkatan DSO.",
-        "Risiko makroekonomi suku bunga tinggi yang memperlambat ekspansi belanja modal."
-    ]
-    
-    # 5 Risk Matrix Items (Heatmap 5x5)
-    risks = [
-        {"code": "R1", "name": "Kolektibilitas Piutang & Retensi", "prob": "Tinggi", "impact": "Tinggi", "score": "Kritis", "color": "#ef4444"},
-        {"code": "R2", "name": "Tekanan Margin & Inflasi Material", "prob": "Sedang", "impact": "Tinggi", "score": "Tinggi", "color": "#f97316"},
-        {"code": "R3", "name": "Konsentrasi Pelanggan Utama", "prob": "Sedang", "impact": "Sedang", "score": "Moderat", "color": "#eab308"},
-        {"code": "R4", "name": "Modal Kerja & Likuiditas Jangka Pendek", "prob": "Rendah", "impact": "Sedang", "score": "Terkendali", "color": "#3b82f6"},
-        {"code": "R5", "name": "Eksposur Kurs & Suku Bunga", "prob": "Rendah", "impact": "Rendah", "score": "Rendah", "color": "#10b981"},
-    ]
-    
     # Sensitivity Grid (WACC vs Terminal Growth) — hanya bila DCF tersedia.
     # Versi lama crash bila `wacc`/`tg`/`dcf_fv` None (TypeError None - float).
+    # Sensitivitas DCF: SATU model dengan valuasi utama (app/services/dcf_grid.py).
+    # Versi lama mengalikan satu nilai dcf_fv dengan faktor linear; versi kedua
+    # memakai DCFInputs dengan asumsi sendiri sehingga ASII menghasilkan
+    # Rp12.373 di grid vs Rp5.149 di slider pada WACC yang sama.
+    # Pertumbuhan FCF untuk grid: CAGR revenue historis (sama seperti valuasi
+    # utama), bukan konstanta.
+    _g_grid = 0.05
+    try:
+        from app.services.idx_audited_financials import five_year_table as _fyt_g
+        _revs_g = [r.get("revenue_bn") for r in (_fyt_g(ticker) or [])
+                   if r.get("revenue_bn")]
+        if len(_revs_g) >= 2:
+            _n_g = len(_revs_g) - 1
+            _g_grid = max(-0.10, min(0.12,
+                          (_revs_g[-1] / _revs_g[0]) ** (1.0 / _n_g) - 1.0))
+    except Exception:
+        _g_grid = 0.05
+
     sens_matrix = []
-    if (dcf_fv is not None and wacc is not None and tg is not None):
-        wacc_steps = [wacc - 1.0, wacc, wacc + 1.0]
-        tg_steps = [tg - 0.5, tg, tg + 0.5]
+    # Guard TIDAK mensyaratkan dcf_fv: beberapa emiten (ANTM) punya DCF yang
+    # dapat dihitung tetapi nilai per sahamnya di luar sanity gate sehingga
+    # `dcf_fv` diset None — grid tetap bermakna dan harus tampil.
+    if (wacc is not None and tg is not None
+            and rev_bn and ebit_bn and shares_m):
+        from app.services.dcf_grid import dcf_price_at as _dcf_at
+        wacc_steps = [round(wacc - 1.0, 2), round(wacc, 2), round(wacc + 1.0, 2)]
+        tg_steps = [round(tg - 0.5, 2), round(tg, 2), round(tg + 0.5, 2)]
+        # Tarif pajak HARUS sama dengan valuasi utama (ETR efektif emiten dari
+        # build_wacc_components), bukan 22% hardcode. Beda 22% vs 18,43% membuat
+        # ASII bernilai Rp6.019 di grid tetapi Rp6.667 di slider.
+        _tax_grid = 0.22
+        try:
+            from app.services.equity_research_helpers import build_wacc_components as _bwc_g
+            from app.services.idx_audited_financials import (
+                five_year_table as _fyt_t, current_usdidr as _fx_t)
+            # `financials` WAJIB berisi tabel 5 tahun: dengan list kosong,
+            # build_wacc_components mengembalikan etr_pct=0.0 (bukan tarif
+            # efektif emiten), sehingga grid jatuh ke 22% dan berbeda dari
+            # slider yang memakai ETR riil 18,43%.
+            _fin_g = []
+            try:
+                _fin_g = _fyt_t(ticker, usdidr=_fx_t()) or []
+            except Exception:
+                _fin_g = []
+            _wb_g = _bwc_g(financials=_fin_g, beta_raw=None, current_price=curr_p,
+                           shares_bn=(shares_m or 0.0), is_bank=is_bank, ticker=ticker)
+            _etr_g = _wb_g.get("etr_pct")
+            if isinstance(_etr_g, (int, float)) and 0 < _etr_g < 100:
+                _tax_grid = float(_etr_g) / 100.0
+        except Exception:
+            _tax_grid = 0.22
+        _raw_grid = {
+            "ticker": ticker,
+            "ebit": float(ebit_bn or 0.0),
+            "tax_rate": _tax_grid,
+            "depreciation": float((audited_fy or {}).get("depreciation_amortization_bn") or 0.0),
+            "capex": float((audited_fy or {}).get("capex_bn") or 0.0),
+            "wc_change": 0.0,
+            "fcf_growth_rate": _g_grid,
+            "total_debt": float(debt_bn or 0.0),
+            "cash": float(cash_bn or 0.0),
+            "shares_bn": float(shares_m / 1000.0),
+        }
         for w in wacc_steps:
             row = []
             for g in tg_steps:
-                val = dcf_fv * (1.0 + (g - tg) * 0.06 - (w - wacc) * 0.08)
-                row.append(round(val))
+                _res = _dcf_at(_raw_grid, w, g)
+                row.append(_res["price"] if _res else None)
             sens_matrix.append(row)
     else:
         wacc_steps, tg_steps = [], []
-        
+
     sensitivity_grid = {
         "wacc_labels": [f"{w:.1f}%" for w in wacc_steps],
         "tg_labels": [f"{g:.1f}%" for g in tg_steps],
@@ -919,6 +957,318 @@ def build_research_model_from_context(
                 pass
     except Exception:
         pass
+    # Sensitivity Grid (WACC vs Terminal Growth) — hanya bila DCF tersedia.
+    # Versi lama crash bila `wacc`/`tg`/`dcf_fv` None (TypeError None - float).
+    # Nama & sektor dari profil resmi 964 emiten (data/idx_profiles.json),
+    # BUKAN "{TICKER} Corporation Tbk" untuk semua emiten. Hardcode 4 ticker
+    # (ASII/BBCA/TLKM/TOTL) versi lama juga dihapus.
+    try:
+        from app.services.idx_audited_financials import get_issuer_profile
+        _prof = get_issuer_profile(ticker) or {}
+    except Exception:
+        _prof = {}
+    company_name = (_prof.get("company_name")
+                    or getattr(c, "company_name", None)
+                    or f"{ticker}")
+    sector = (_prof.get("sector")
+              or getattr(c, "sector", None)
+              or "N/A")
+
+    # 5-Year Financial Forecast Model (2026F - 2030F)
+    forecast_5yr = []
+    base_year = int(getattr(c, "year", 2025) or 2025)
+    g_rev = 0.075
+    proj_rev = rev_bn
+    proj_ebit = ebit_bn
+    proj_ni = ni_bn
+    proj_eq = te_bn
+    proj_cash = cash_bn
+
+    # Asumsi proyeksi DARI DATA RIIL, bukan konstanta karangan:
+    #   g_rev   = CAGR revenue historis (dibatasi -10%..25%)
+    #   margin  = margin EBIT aktual, bukan 12%
+    #   tax     = tax burden aktual, bukan 0,78
+    #   interest= interest burden aktual, bukan 0,95
+    #   dpr     = payout ratio dari dividen riil, bukan 55%
+    def _cagr_rev():
+        try:
+            from app.services.idx_audited_financials import five_year_table as _fyt
+            _h = _fyt(ticker) or []
+        except Exception:
+            _h = []
+        revs = [r.get("revenue_bn") for r in _h]
+        revs = [x for x in revs if x and x > 0]
+        if len(revs) < 2:
+            return None, _h
+        n = len(revs) - 1
+        return ((revs[-1] / revs[0]) ** (1.0 / n) - 1.0), _h
+
+    _g_real, _hist_all = _cagr_rev()
+    g_rev = max(-0.10, min(0.25, _g_real)) if _g_real is not None else 0.05
+
+    _last_fy_f = (_hist_all[-1] if _hist_all else {})
+    _ni_f = _last_fy_f.get("net_income_parent_bn")
+    _div_f = _last_fy_f.get("dividends_paid_bn")
+    if _ni_f and _ni_f > 0 and _div_f is not None:
+        dpr = max(0.0, min(1.0, abs(_div_f) / _ni_f))
+    else:
+        dpr = 0.30   # konservatif bila dividen tidak dilaporkan (disclosed asumsi)
+
+    _ebit_m = c.ebit_margin if (c.ebit_margin and c.ebit_margin > 0) else None
+    _tax_b = c.tax_burden if (c.tax_burden and c.tax_burden > 0) else None
+    _int_b = c.interest_burden if (c.interest_burden and c.interest_burden > 0) else None
+
+    for yr_idx in range(1, 6):
+        proj_rev = proj_rev * (1.0 + g_rev)
+        # Margin & burden: pakai aktual bila ada; bila tidak, proyeksi datar
+        # (tanpa asumsi margin karangan). Nilai None berarti model tidak bisa
+        # memproyeksikan laba -> dibiarkan N/A jujur.
+        proj_ebit = (proj_rev * _ebit_m) if _ebit_m else None
+        if proj_ebit is not None and _tax_b and _int_b:
+            proj_ni = proj_ebit * _tax_b * _int_b
+        else:
+            proj_ni = None
+        retained = (proj_ni * (1.0 - dpr)) if proj_ni is not None else None
+        proj_eq = (proj_eq + retained) if (proj_eq is not None and retained is not None) else proj_eq
+        proj_cash = (proj_cash + (proj_ni * 0.45)) if (proj_cash is not None and proj_ni is not None) else proj_cash
+        forecast_5yr.append({
+            "year": f"{base_year + yr_idx}F",
+            "revenue": round(proj_rev, 1) if proj_rev is not None else None,
+            "ebit": round(proj_ebit, 1) if proj_ebit is not None else None,
+            "net_income": round(proj_ni, 1) if proj_ni is not None else None,
+            "total_equity": round(proj_eq, 1) if proj_eq is not None else None,
+            "cash": round(proj_cash, 1) if proj_cash is not None else None,
+            "dps": round((proj_ni * dpr * 1e9) / max(1.0, (shares_m or 1.0) * 1e6), 1) if proj_ni is not None else None,
+            "roe": round((proj_ni / proj_eq) * 100, 1) if (proj_ni is not None and proj_eq) else None,
+        })
+
+    # Rasio historis per tahun audited (dipakai chart ROE & EBIT margin).
+    _hist_ratios = []
+    try:
+        for _h in (_hist_all or []):
+            _rev = _h.get("revenue_bn")
+            _eb = _h.get("ebit_bn")
+            _ni = _h.get("net_income_parent_bn")
+            _eq = _h.get("equity_parent_bn") or _h.get("equity_total_bn")
+            _yr = _h.get("year")
+            if not _yr:
+                continue
+            _hist_ratios.append({
+                "year": int(_yr),
+                "revenue_bn": round(_rev, 1) if _rev is not None else None,
+                "ebit_margin_pct": round((_eb / _rev) * 100, 2) if (_eb is not None and _rev) else None,
+                "roe_pct": round((_ni / _eq) * 100, 2) if (_ni is not None and _eq) else None,
+                "net_income_bn": round(_ni, 1) if _ni is not None else None,
+            })
+    except Exception:
+        _hist_ratios = []
+
+    # Peer Benchmarking Matrix — null-safe (pe/pbv/roe bisa None)
+    peer_benchmark = [
+        {"ticker": ticker.upper(),
+         "name": (company_name or ticker)[:18],
+         "npm": round(c.net_profit_margin * 100, 1) if c.net_profit_margin is not None else None,
+         "roe": round(roe_val, 1) if roe_val is not None else None,
+         "pe": round(pe, 1) if pe is not None else None,
+         "pbv": round(pbv, 2) if pbv is not None else None,
+         "net_gearing": ("Net Cash" if net_cash_bn > 0
+                         else f"{(debt_bn / te_bn):.2f}x")
+                        if (net_cash_bn is not None and debt_bn is not None and te_bn) else "N/A"},
+    ]
+    # Ambil kompetitor riil dari DB jika ada, jangan gunakan pengali palsu x0.85/x0.65
+    real_peer_tickers = get_peers(ticker)
+    from app.db.database import get_session
+    from app.services.parser import load_ticker_pair
+    try:
+        session_gen = get_session()
+        db_sess = next(session_gen)
+        for p_t in real_peer_tickers[:3]:
+            try:
+                p_curr, _ = load_ticker_pair(db_sess, p_t)
+                if p_curr:
+                    p_ni = to_bn(p_curr.net_income_parent or 0, p_curr.unit_multiplier)
+                    p_te = to_bn(p_curr.total_equity_parent or 0, p_curr.unit_multiplier)
+                    p_rev = to_bn(p_curr.revenue or 0, p_curr.unit_multiplier)
+                    p_npm = (p_ni / p_rev * 100) if p_rev > 0 else 0
+                    p_roe = (p_ni / p_te * 100) if p_te > 0 else 0
+                    peer_benchmark.append({
+                        "ticker": p_t,
+                        "name": f"PT {p_t} Tbk",
+                        "npm": round(p_npm, 1),
+                        "roe": round(p_roe, 1),
+                        "pe": round(p_curr.pe_ratio or 15.0, 1) if hasattr(p_curr, "pe_ratio") else "N/A",
+                        "pbv": round(p_curr.pbv_ratio or 1.5, 2) if hasattr(p_curr, "pbv_ratio") else "N/A",
+                        "net_gearing": "Reported",
+                    })
+                    continue
+            except Exception:
+                pass
+            # FALLBACK: peer tidak ada di DB lama -> pakai XBRL audited (jangan karang)
+            try:
+                from app.services import idx_audited_financials as _AFP
+                if _AFP.available() and _AFP.has_ticker(p_t):
+                    _pt = _AFP.five_year_table(p_t)
+                    if _pt:
+                        _pl = _pt[-1]
+                        _pni = _pl.get("net_income_parent_bn") or 0.0
+                        _pte = _pl.get("equity_parent_bn") or 0.0
+                        _prev = _pl.get("revenue_bn") or 0.0
+                        peer_benchmark.append({
+                            "ticker": p_t,
+                            "name": f"PT {p_t} Tbk",
+                            "npm": round(_pni / _prev * 100, 1) if _prev > 0 else None,
+                            "roe": round(_pni / _pte * 100, 1) if _pte > 0 else None,
+                            "pe": None,
+                            "pbv": None,
+                            "net_gearing": "Reported",
+                        })
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # ── Katalis & risiko DITURUNKAN DARI DATA EMITEN ─────────────────────────
+    # Versi sebelumnya memakai tiga kalimat sama untuk SEMUA emiten ("ekspansi
+    # margin", "repeat order", "re-rating"), dan risk matrix identik termasuk
+    # "Kolektibilitas Piutang" untuk bank. Itu template, bukan analisis: tidak
+    # ada satu pun angka emiten yang memengaruhinya.
+    bull_catalysts, bear_risks = [], []
+
+    # 1. Margin: bandingkan margin terbaru dengan tahun sebelumnya.
+    _margins = [h.get("ebit_margin_pct") for h in _hist_ratios
+                if isinstance(h, dict) and h.get("ebit_margin_pct") is not None]
+    if len(_margins) >= 2:
+        _d_margin = _margins[-1] - _margins[-2]
+        # Perbaikan margin pada level yang MASIH NEGATIF bukan katalis positif:
+        # GOTO naik +12 pp tapi marginnya -2,1% (masih rugi operasi).
+        if _d_margin > 1.0 and _margins[-1] > 0:
+            bull_catalysts.append(
+                f"Margin operasi naik {_d_margin:+.1f} pp menjadi {_margins[-1]:.1f}% — "
+                f"efisiensi biaya sudah terlihat di laporan, bukan asumsi.")
+        elif _d_margin > 1.0 and _margins[-1] <= 0:
+            bull_catalysts.append(
+                f"Margin operasi membaik {_d_margin:+.1f} pp (kini {_margins[-1]:.1f}%) — "
+                f"perbaikan arah, tetapi usaha belum mencetak laba operasi.")
+        elif _d_margin < -1.0:
+            bear_risks.append(
+                f"Margin operasi turun {_d_margin:+.1f} pp menjadi {_margins[-1]:.1f}% — "
+                f"tekanan biaya berlanjut bila tren ini tidak dibalik.")
+
+    # 2. Utang: rasio terhadap ekuitas.
+    if debt_bn is not None and te_bn:
+        _der = debt_bn / te_bn
+        if _der > 1.0:
+            bear_risks.append(
+                f"Utang berbunga Rp{debt_bn:,.1f} miliar = {_der:.2f}x ekuitas — "
+                f"beban bunga dan refinancing jadi risiko utama.")
+        elif _der < 0.3:
+            bull_catalysts.append(
+                f"Utang berbunga hanya {_der:.2f}x ekuitas — ruang ekspansi tanpa "
+                f"menekan neraca.")
+
+    # 3. Kas bersih.
+    if net_cash_bn is not None and net_cash_bn > 0 and ta_bn:
+        _pct_kas = net_cash_bn / ta_bn * 100.0
+        if _pct_kas > 10.0:
+            bull_catalysts.append(
+                f"Kas bersih Rp{net_cash_bn:,.1f} miliar ({_pct_kas:.1f}% total aset) — "
+                f"bantalan untuk akuisisi atau dividen.")
+
+    # 4. Profitabilitas.
+    if roe_val is not None:
+        if roe_val < 0:
+            bear_risks.append(
+                f"ROE {roe_val:.2f}% (negatif) — emiten membukukan kerugian; "
+                f"valuasi berbasis laba tidak berlaku.")
+        elif roe_val > 18:
+            bull_catalysts.append(
+                f"ROE {roe_val:.2f}% di atas biaya ekuitas — penciptaan nilai "
+                f"ekonomis positif bila berlanjut.")
+
+    # 5. Likuiditas/working capital — hanya untuk non-bank (bank tidak punya CCC).
+    # CCC dihitung di sini (bukan menunggu variabel yang dibuat belakangan).
+    # Bank tidak punya siklus kas dagang -> None (bukan nol).
+    _ccc = None
+    if not is_bank:
+        try:
+            from app.services.working_capital import compute_working_capital as _cwc
+            _wc_e = _cwc(audited_fy or _bfy or {}, bank=False)
+            if isinstance(_wc_e, dict):
+                _ccc = _wc_e.get("ccc_days")
+        except Exception:
+            _ccc = None
+    if _ccc is not None:
+        if _ccc > 120:
+            bear_risks.append(
+                f"Siklus kas {_ccc:.0f} hari — modal kerja terikat lama, "
+                f"rentan bila penjualan melambat.")
+        elif _ccc < 0:
+            bull_catalysts.append(
+                f"Siklus kas {_ccc:.0f} hari (negatif) — pemasok membiayai operasi, "
+                f"kebutuhan modal kerja rendah.")
+
+    # 6. Konsentrasi sektor (dari profil resmi, bukan karangan).
+    if sector and sector != "N/A":
+        bear_risks.append(
+            f"Konsentrasi pada sektor {sector} — kinerja terikat siklus sektornya, "
+            f"bukan hanya eksekusi perusahaan.")
+
+    # Jangan biarkan daftar kosong tampil sebagai bagian kosong di PDF.
+    if not bull_catalysts:
+        bull_catalysts.append(
+            "Tidak ada katalis positif yang dapat diturunkan dari laporan keuangan "
+            "terbaru (margin, utang, kas, dan profitabilitas tidak menunjukkan perbaikan).")
+    if not bear_risks:
+        bear_risks.append(
+            "Tidak ada risiko material yang terdeteksi dari rasio keuangan terbaru; "
+            "risiko tetap ada pada faktor di luar laporan (regulasi, pasar).")
+
+    # ── Risk Matrix: kategori & skor dihitung dari rasio, bukan daftar tetap ──
+    risks = []
+    _rr = []      # (nama, probabilitas 1-5, dampak 1-5, dasar)
+
+    # Bank: utang (DPK) adalah bahan baku usaha, bukan leverage. Menilai
+    # "Struktur Modal" dari DER membuat BBCA tampil berisiko tinggi padahal
+    # DER 3,45x itu simpanan nasabah. Bank dinilai dari permodalan & kualitas
+    # aset, yang datanya (NPL/CAR) sering tidak tersedia di XBRL -> None.
+    if not is_bank and debt_bn is not None and te_bn:
+        _der_v = debt_bn / te_bn
+        _p = 5 if _der_v > 2 else 4 if _der_v > 1 else 3 if _der_v > 0.5 else 2
+        _rr.append(("Struktur Modal & Beban Bunga", _p, min(5, _p + 1),
+                    f"DER {_der_v:.2f}x"))
+    # Kas bersih bank tidak bermakna sebagai risiko: kas adalah posisi
+    # likuiditas wajib, dan "utang" bank adalah DPK nasabah. Hanya non-bank.
+    _ncf = net_cash_bn
+    if not is_bank and _ncf is not None:
+        _p = 5 if _ncf < 0 and ta_bn and abs(_ncf) > 0.2 * ta_bn else 3 if _ncf < 0 else 1
+        _rr.append(("Likuiditas & Kas Bersih", _p, 4 if _p >= 3 else 2,
+                    f"kas bersih Rp{_ncf:,.1f} miliar"))
+    if _margins:
+        _mv = _margins[-1]
+        _p = 5 if _mv < 0 else 4 if _mv < 5 else 2 if _mv < 15 else 1
+        _rr.append(("Tekanan Margin Operasi", _p, 4 if _p >= 4 else 3,
+                    f"EBIT margin {_mv:.1f}%"))
+    if _ccc is not None:
+        _p = 5 if _ccc > 180 else 4 if _ccc > 120 else 2 if _ccc > 60 else 1
+        _rr.append(("Perputaran Modal Kerja", _p, 3, f"CCC {_ccc:.0f} hari"))
+    if roe_val is not None:
+        _p = 5 if roe_val < 0 else 3 if roe_val < 8 else 1
+        _rr.append(("Profitabilitas Ekuitas", _p, 4 if _p >= 3 else 2,
+                    f"ROE {roe_val:.2f}%"))
+    _rr.append(("Faktor Eksternal (regulasi, kurs, harga komoditas)", 3, 4,
+                "tidak terukur dari laporan keuangan"))
+
+    _label = {1: "Rendah", 2: "Rendah", 3: "Sedang", 4: "Tinggi", 5: "Tinggi"}
+    _color = {1: "#10b981", 2: "#10b981", 3: "#eab308", 4: "#f97316", 5: "#ef4444"}
+    for _i, (_nm, _pr, _im, _basis) in enumerate(_rr[:5], 1):
+        _sc = _pr * _im
+        risks.append({
+            "code": f"R{_i}", "name": _nm,
+            "prob": _label[_pr], "impact": _label[_im],
+            "score": "Kritis" if _sc >= 20 else "Tinggi" if _sc >= 12 else "Moderat" if _sc >= 6 else "Rendah",
+            "color": _color[max(_pr, _im)],
+            "basis": _basis,
+        })
+
 
     # Segment Breakdown (HANYA DARI CALK RIIL, None jika tidak ada di registri)
     real_segs = get_segments(ticker)
@@ -1696,6 +2046,55 @@ def _fy(v, fmt=",.0f", prefix="Rp", fallback="N/A"):
         return fallback
 
 
+def _summary_tail(model) -> str:
+    """Kalimat penutup ringkasan eksekutif, diturunkan dari rasio emiten.
+
+    Versi lama selalu menulis "didukung fundamental earnings quality yang solid
+    ... serta neraca defensif yang steril dari leverage agresif" untuk SEMUA
+    emiten, termasuk yang ROE negatif atau DER di atas 2x. Klaim seperti itu
+    tidak dapat dipertanggungjawabkan.
+    """
+    parts = []
+    roe = getattr(model, "roe_pct", None)
+    if roe is None:
+        parts.append("profitabilitas ekuitas tidak dapat dihitung dari data tersedia")
+    elif roe < 0:
+        parts.append(f"emiten masih membukukan ROE negatif ({roe:.1f}%), sehingga "
+                     f"valuasi berbasis laba belum dapat diterapkan")
+    elif roe < 8:
+        parts.append(f"ROE {roe:.1f}% tergolong rendah - di bawah biaya ekuitas, "
+                     f"sehingga penciptaan nilai ekonomis belum terjadi")
+    elif roe < 15:
+        parts.append(f"ROE {roe:.1f}% berada di kisaran moderat")
+    else:
+        parts.append(f"ROE {roe:.1f}% menunjukkan profitabilitas di atas rata-rata")
+
+    # Model tidak menyimpan DER; turunkan dari field yang ada.
+    # Bank tidak dinilai dari DER (utang = DPK, bahan baku usaha).
+    _is_bank_m = bool(getattr(model, "is_bank", False))
+    _td = getattr(model, "total_debt_bn", None)
+    _te = getattr(model, "total_equity_bn", None)
+    der = None if _is_bank_m else (
+        (_td / _te) if (_td is not None and _te not in (None, 0)) else None)
+    if _is_bank_m:
+        ke = getattr(model, "cost_of_equity_pct", None)
+        return ("Tesis investasi kami didukung oleh "
+                + "; ".join(parts)
+                + (f"; nilai wajar diukur dengan Justified PBV (Ke {ke:.2f}%) "
+                   f"karena DCF tidak berlaku untuk bank." if ke is not None
+                   else "; nilai wajar diukur dengan Justified PBV karena DCF tidak berlaku untuk bank."))
+    if der is None:
+        parts.append("komposisi utang tidak dapat diukur dari laporan tersedia")
+    elif der > 2.0:
+        parts.append(f"namun leverage tinggi (DER {der:.2f}x) menjadikan beban "
+                     f"bunga dan refinancing sebagai risiko utama")
+    elif der > 1.0:
+        parts.append(f"dengan leverage moderat-tinggi (DER {der:.2f}x)")
+    else:
+        parts.append(f"dengan leverage terkendali (DER {der:.2f}x)")
+    return ("Tesis investasi kami didukung oleh " + "; ".join(parts) + ".")
+
+
 def _f(v, dec=1, suffix=""):
     """Format angka dengan jumlah desimal tetap; None/NaN -> 'N/A'.
 
@@ -1918,25 +2317,41 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
         Paragraph(
             f"Kami menetapkan rekomendasi <b>{model.recommendation}</b> untuk saham <b>{model.ticker}</b> dengan target harga 12-bulan sebesar <b>{_fy(model.target_price)}</b>, "
             f"mencerminkan potensi apresiasi nilai (upside) sebesar <b>{_fp(model.upside_pct, '+.1f')}</b> dari harga pasar saat ini {_fy(model.current_price)}. "
-            f"Tesis investasi kami didukung oleh kombinasi fundamental earnings quality yang solid, rasio pengembalian ekuitas (ROE) sebesar {_fp(model.roe_pct, '.1f')}, serta neraca defensif yang steril dari leverage agresif.",
+            # Kalimat penutup diturunkan dari rasio, bukan klaim tetap: versi
+            # lama menulis "neraca defensif yang steril dari leverage agresif"
+            # untuk SEMUA emiten, termasuk yang DER-nya di atas 2x.
+            + _summary_tail(model),
             body_style
         ),
         Spacer(1, 8),
-        Paragraph("<b>TIGA PILAR TESIS INVESTASI (CORE PILLARS)</b>", h1_style),
-        Paragraph(f"<b>1. {model.investment_thesis[0]}</b>", bullet_style),
-        Paragraph(f"<b>2. {model.investment_thesis[1]}</b>", bullet_style),
-        Paragraph(f"<b>3. {model.investment_thesis[2]}</b>", bullet_style),
+        Paragraph("<b>PILAR TESIS INVESTASI (CORE PILLARS)</b>", h1_style),
+    ]
+    # Daftar thesis/katalis/risiko kini BERVARIASI panjangnya mengikuti data
+    # emiten. Versi lama mengindeks [0],[1],[2] langsung sehingga PDF 500
+    # (IndexError) untuk emiten yang hanya punya 1-2 butir, dan memaksa
+    # "TIGA PILAR" padahal jumlahnya bisa lain.
+    for _i_t, _th in enumerate(model.investment_thesis or [], 1):
+        narrative_p1.append(Paragraph(f"<b>{_i_t}. {_th}</b>", bullet_style))
+    if not model.investment_thesis:
+        narrative_p1.append(Paragraph("<b>Tesis tidak dapat dibentuk dari data tersedia.</b>", bullet_style))
+
+    narrative_p1 += [
         Spacer(1, 8),
         Paragraph("<b>FAKTOR KATALIS PERTUMBUHAN (BULL CASE)</b>", h1_style),
-        Paragraph(f"• {model.bull_catalysts[0]}", bullet_style),
-        Paragraph(f"• {model.bull_catalysts[1]}", bullet_style),
-        Paragraph(f"• {model.bull_catalysts[2]}", bullet_style),
+    ]
+    for _c in (model.bull_catalysts or []):
+        narrative_p1.append(Paragraph(f"• {_c}", bullet_style))
+    if not model.bull_catalysts:
+        narrative_p1.append(Paragraph("• Tidak ada katalis yang dapat diturunkan dari data.", bullet_style))
+
+    narrative_p1 += [
         Spacer(1, 8),
         Paragraph("<b>RISIKO UTAMA & MITIGASI (BEAR CASE)</b>", h1_style),
-        Paragraph(f"• {model.bear_risks[0]}", bullet_style),
-        Paragraph(f"• {model.bear_risks[1]}", bullet_style),
-        Paragraph(f"• {model.bear_risks[2]}", bullet_style),
     ]
+    for _r in (model.bear_risks or []):
+        narrative_p1.append(Paragraph(f"• {_r}", bullet_style))
+    if not model.bear_risks:
+        narrative_p1.append(Paragraph("• Tidak ada risiko yang dapat diturunkan dari data.", bullet_style))
 
     p1_layout = Table([[t_tear, narrative_p1]], colWidths=[195, 328])
     p1_layout.setStyle(TableStyle([

@@ -232,21 +232,22 @@
             <span class="text-slate-400">Cost of Capital (WACC):</span>
             <span class="font-semibold text-sky-400" x-text="simWacc + '%'"></span>
           </div>
-          <input type="range" min="6.0" max="16.0" step="0.25" x-model.number="simWacc" class="w-full accent-sky-400">
+          <input type="range" min="6.0" max="16.0" step="0.25" x-model.number="simWacc" @change="recalcSim()" class="w-full accent-sky-400">
         </div>
         <div>
           <div class="flex justify-between mb-1.5">
-            <span class="text-slate-400">FCF Growth Rate:</span>
-            <span class="font-semibold text-sky-400" x-text="simGrowth + '%'"></span>
+            <span class="text-slate-400">FCF Growth (historis, tetap):</span>
+            <span class="font-semibold text-slate-500" x-text="simGrowth + '%'"></span>
           </div>
-          <input type="range" min="0.0" max="15.0" step="0.5" x-model.number="simGrowth" class="w-full accent-sky-400">
+          <input type="range" min="0.0" max="15.0" step="0.5" x-model.number="simGrowth"
+                 disabled class="w-full accent-slate-600 opacity-40 cursor-not-allowed">
         </div>
         <div>
           <div class="flex justify-between mb-1.5">
             <span class="text-slate-400">Terminal Growth (TG):</span>
             <span class="font-semibold text-sky-400" x-text="simTg + '%'"></span>
           </div>
-          <input type="range" min="1.0" max="5.0" step="0.25" x-model.number="simTg" class="w-full accent-sky-400">
+          <input type="range" min="1.0" max="5.0" step="0.25" x-model.number="simTg" @change="recalcSim()" class="w-full accent-sky-400">
         </div>
       </div>
 
@@ -261,9 +262,18 @@
         </div>
         <div>
           <span class="text-xs text-slate-400 block font-sans">Simulated Fair Price</span>
-          <span class="text-xl font-semibold text-emerald-400 mt-1 block">Rp <span x-text="simTargetPrice.toLocaleString()"></span></span>
+          <span class="text-xl font-semibold text-emerald-400 mt-1 block"
+                x-text="simTargetPrice != null ? 'Rp ' + simTargetPrice.toLocaleString() : 'N/A'"></span>
         </div>
       </div>
+      <p class="text-[11px] text-slate-500 font-sans mt-2"
+         x-show="simLoading" x-cloak>Menghitung ulang DCF…</p>
+      <p class="text-[11px] text-amber-400 font-sans mt-2" x-show="simError" x-cloak
+         x-text="'DCF tidak dihitung: ' + simError"></p>
+      <p class="text-[11px] text-slate-500 font-sans mt-2"
+         x-show="!simResult && !simError && !simLoading" x-cloak>
+        Simulasi tidak tersedia untuk emiten ini (komponen DCF tidak lengkap atau emiten bank).
+      </p>
     </div>
   </div>
   {% endif %}

@@ -36,6 +36,9 @@
     ::-webkit-scrollbar-track { background: #080C14; }
     ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 9999px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    /* Elemen dengan x-cloak disembunyikan sampai Alpine siap; tanpa aturan ini
+       teks "menghitung ulang..." berkedip di semua halaman. */
+    [x-cloak] { display: none !important; }
   </style>
 </head>
 
@@ -796,6 +799,11 @@
         baseEV: 0,
         baseEq: 0,
         basePrice: 0,
+        // Hasil DCF dari server untuk kombinasi slider saat ini. Bila null,
+        // kartu menampilkan N/A — bukan angka hasil koefisien karangan.
+        simResult: null,
+        simLoading: false,
+        simError: '',
         bondForm: { face: 1000000, coupon: 7.25, ytm: 6.75, tenor: 5.0, freq: 2 },
         bondResult: {},
         bondError: null,
@@ -1165,16 +1173,48 @@
         sortBy(col) { if (this.sortCol === col) { this.sortAsc = !this.sortAsc; } else { this.sortCol = col; this.sortAsc = false; } },
         get t1Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker1) || {}; },
         get t2Data() { return (this.allRows || []).find(r => r.ticker === this.compareTicker2) || {}; },
-        get dcfFactor() {
-          let waccDiff = (this.simWacc - this.baseWacc) * 0.08;
-          let gDiff = (this.simGrowth - this.baseGrowth) * 0.04;
-          let tgDiff = (this.simTg - this.baseTg) * 0.05;
-          return Math.max(0.2, 1.0 - waccDiff + gDiff + tgDiff);
+        // Target harga simulasi: hasil DCF server (model penuh). Tidak ada
+        // lagi faktor linear (wacc*0.08 + g*0.04 + tg*0.05) maupun lantai
+        // harga Rp50 — keduanya angka yang tidak berasal dari model.
+        get simEV() {
+          const r = this.simResult;
+          return (r && r.enterprise_value_trn != null) ? r.enterprise_value_trn.toFixed(2) : 'N/A';
         },
-        get simEV() { return (this.baseEV * this.dcfFactor).toFixed(1); },
-        get simEq() { return (this.baseEq * this.dcfFactor).toFixed(1); },
-        get simTargetPrice() { return Math.max(50, Math.round(this.basePrice * this.dcfFactor)); },
-        resetDcfSliders() { this.simWacc = this.baseWacc; this.simGrowth = this.baseGrowth; this.simTg = this.baseTg; },
+        get simEq() {
+          const r = this.simResult;
+          return (r && r.equity_value_trn != null) ? r.equity_value_trn.toFixed(2) : 'N/A';
+        },
+        get simTargetPrice() {
+          const r = this.simResult;
+          return (r && r.price_per_share != null) ? r.price_per_share : null;
+        },
+        async recalcSim() {
+          if (!this.baseWacc) { this.simResult = null; return; }
+          this.simLoading = true;
+          this.simError = '';
+          try {
+            const url = `/api/valuation/{{ bundle.current.ticker }}/dcf-revalue?wacc_pct=${this.simWacc}&terminal_growth_pct=${this.simTg}`;
+            const res = await fetch(url);
+            if (res.ok) {
+              this.simResult = await res.json();
+            } else {
+              // Reset state + alasan: jangan biarkan angka lama menempel saat
+              // parameter baru tidak dapat dihitung (mis. WACC <= g).
+              this.simResult = null;
+              const j = await res.json().catch(() => ({}));
+              this.simError = j.detail || `DCF tidak dapat dihitung (HTTP ${res.status}).`;
+            }
+          } catch (e) {
+            this.simResult = null;
+            this.simError = 'Gagal menghubungi server: ' + e.message;
+          } finally {
+            this.simLoading = false;
+          }
+        },
+        resetDcfSliders() {
+          this.simWacc = this.baseWacc; this.simGrowth = this.baseGrowth; this.simTg = this.baseTg;
+          this.recalcSim();
+        },
         async calcBond() {
           try {
             let url = `/api/bonds/calculate?face_value=${this.bondForm.face}&coupon_pct=${this.bondForm.coupon}&ytm_pct=${this.bondForm.ytm}&years=${this.bondForm.tenor}&freq=${this.bondForm.freq}`;
