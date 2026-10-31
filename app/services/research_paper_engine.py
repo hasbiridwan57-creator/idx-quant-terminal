@@ -51,6 +51,19 @@ class EquityResearchModel:
     ev_ebitda_fair_value: Optional[float] = None
     valuation_basis: str = ""
     valuation_weights: dict = field(default_factory=dict)
+    # Label parameter yang BENAR dipakai per metode. Versi lama mengarang di
+    # template: PDF menulis "Exit Target P/E 3.0x" dan "Median multiple peer"
+    # untuk semua emiten, sementara engine memakai multiple lain, dan baris
+    # Justified PBV memakai dcf_fair_value tanpa menunjukkan Ke/g sehingga
+    # pembaca tidak bisa mereproduksi angkanya.
+    dcf_param_label: str = ""
+    exit_pe_used: Optional[float] = None
+    pbv_multiple_used: Optional[float] = None
+    ev_ebitda_multiple_used: Optional[float] = None
+    bank_ke_pct: Optional[float] = None
+    bank_g_pct: Optional[float] = None
+    bank_roe_pct: Optional[float] = None
+    bank_bvps: Optional[float] = None
     
     # 3 Investment Pillars
     investment_thesis: List[str] = field(default_factory=list)
@@ -260,6 +273,33 @@ def build_research_model_from_context(
     _bfy = audited_fy or {}
     _bank_valuation = {}
     if is_bank:
+        # Ke riil (beta regresi vs IHSG) + sustainable growth WAJIB dihitung
+        # SEBELUM Justified PBV. Jalur halaman utama (app/main.py) sudah
+        # mengirim keduanya; jalur PDF ini dulu tidak, sehingga Justified PBV
+        # memakai konstanta KE=10,5% / G=5,0% sementara label di PDF menulis
+        # Ke riil 14,4% -- dua angka berbeda untuk emiten yang sama dan
+        # pembaca tidak bisa mereproduksi target.
+        _ke_bank = None
+        _g_bank = None
+        try:
+            from app.services.cost_of_capital import (
+                compute_wacc as _cw_b, compute_sustainable_growth as _csg_b,
+            )
+            from app.services import idx_audited_financials as _AFb2
+            if _AFb2.available() and _AFb2.has_ticker(ticker.upper()):
+                _hist_bank = _AFb2.five_year_table(ticker.upper())
+                _fy_bank = _hist_bank[-1] if _hist_bank else _bfy
+                from app.db.database import get_session as _gs_b
+                _sess_b = next(_gs_b())
+                try:
+                    _w_bank = _cw_b(_sess_b, ticker.upper(), _fy_bank)
+                finally:
+                    _sess_b.close()
+                if _w_bank.get("available") and _w_bank.get("cost_equity_pct"):
+                    _ke_bank = _w_bank["cost_equity_pct"]
+                _g_bank, _ = _csg_b(_hist_bank)
+        except Exception:
+            _ke_bank = _g_bank = None
         try:
             from app.services.banking_engine import calculate_banking_ratios
             _bk = calculate_banking_ratios({
@@ -276,11 +316,17 @@ def build_research_model_from_context(
                 "interest_expense": (_bfy.get("interest_expense_bn") or 0) * 1e9,
                 "eps": _bfy.get("eps"),
                 "shares_outstanding": (shares_m * 1e6) if shares_m else None,
+                "cost_of_equity_pct": _ke_bank,
+                "sustainable_growth_pct": _g_bank,
             })
             _bank_valuation = {
                 "justified_pbv": getattr(_bk, "justified_pbv", None),
                 "bvps": getattr(_bk, "bvps", None),
                 "fair_value_per_share": getattr(_bk, "fair_value_per_share", None),
+                "ke_pct": _ke_bank,
+                "g_pct": _g_bank,
+                "roe_pct": (getattr(_bk, "return_on_equity", None) or 0) * 100.0
+                            if getattr(_bk, "return_on_equity", None) is not None else None,
             }
         except Exception as _bk_exc:
             import sys as _s2
@@ -1518,6 +1564,14 @@ def build_research_model_from_context(
         ev_ebitda_fair_value=ev_ebitda_fv,
         valuation_basis=valuation_basis or "",
         valuation_weights=_weights_used,
+        exit_pe_used=(float(_pe_ref) if isinstance(_pe_ref, (int, float)) and _pe_ref > 0 else None),
+        pbv_multiple_used=(float(_pbv_just) if isinstance(_pbv_just, (int, float)) and _pbv_just > 0 else None),
+        bank_ke_pct=((_bank_valuation.get("ke_pct") or 10.5) if is_bank and _bank_valuation else None),
+        bank_g_pct=((_bank_valuation.get("g_pct") if _bank_valuation.get("g_pct") is not None else 5.0)
+                    if is_bank and _bank_valuation else None),
+        bank_roe_pct=(_bank_valuation.get("roe_pct") if is_bank and _bank_valuation else None),
+        bank_bvps=(_bank_valuation.get("bvps") if is_bank and _bank_valuation else None),
+        ev_ebitda_multiple_used=(float(_sector_ev_ebitda) if isinstance(_sector_ev_ebitda, (int, float)) and _sector_ev_ebitda > 0 else None),
         investment_thesis=thesis,
         bull_catalysts=bull_catalysts,
         bear_risks=bear_risks,
@@ -1959,24 +2013,30 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     def _wt(name):
         return f"{_pctmap[name]}%" if name in _pctmap else "—"
 
+    _is_bank_model = "Justified" in (model.valuation_basis or "")
+    _bv_ke, _bv_g = model.bank_ke_pct, model.bank_g_pct
+    _bv_roe, _bv_bvps = model.bank_roe_pct, model.bank_bvps
     val_summary_data = [
         ["Metodologi Valuasi", "Bobot", "Parameter Kunci", "Nilai Wajar per Saham", "Implikasi vs Market"],
         ["Discounted Cash Flow (FCFF)", _wt("DCF"),
          f"WACC {_fp(model.wacc_pct, '.1f')}, g={_fp(model.terminal_growth_pct, '.1f')}",
-         _fy(model.dcf_fair_value), _imp(model.dcf_fair_value)],
+         _fy(None if _is_bank_model else model.dcf_fair_value),
+         _imp(None if _is_bank_model else model.dcf_fair_value)],
         ["Exit Multiple P/E", _wt("Exit P/E"),
-         f"Exit Target P/E {_fy(model.pe_ratio*1.05 if model.pe_ratio is not None else None, '.1f', '', 'N/A')}x",
+         f"Median P/E sektor {_fy(model.exit_pe_used, '.1f', '', 'N/A')}x x EPS",
          _fy(model.exit_multiple_fair_value), _imp(model.exit_multiple_fair_value)],
         ["EV/EBITDA Sektor", _wt("EV/EBITDA"),
-         "Median multiple peer sebanding",
+         f"Median EV/EBITDA peer {_fy(model.ev_ebitda_multiple_used, '.1f', '', 'N/A')}x",
          _fy(model.ev_ebitda_fair_value), _imp(model.ev_ebitda_fair_value)],
         ["Relative Valuation Peer Comps", _wt("Relative PBV"),
-         f"P/BV Multiple {_fy(model.pbv_ratio*1.02 if model.pbv_ratio is not None else None, '.2f', '', 'N/A')}x",
+         f"P/BV wajar {_fy(model.pbv_multiple_used, '.2f', '', 'N/A')}x vs aktual {_fy(model.pbv_ratio, '.2f', '', 'N/A')}x",
          _fy(model.relative_fair_value), _imp(model.relative_fair_value)],
         ["Justified PBV (bank)", _wt("Justified PBV"),
-         "Metodologi khusus lembaga keuangan",
-         _fy(model.dcf_fair_value if "Justified" in (model.valuation_basis or "") else None),
-         _imp(model.dcf_fair_value if "Justified" in (model.valuation_basis or "") else None)],
+         (f"(ROE {_fp(_bv_roe, '.1f')} - g {_fp(_bv_g, '.1f')}) / "
+          f"(Ke {_fp(_bv_ke, '.1f')} - g) x BVPS Rp{_fy(_bv_bvps, ',.0f', '', 'N/A')}"
+          if _is_bank_model else "Metodologi khusus lembaga keuangan"),
+         _fy(model.dcf_fair_value if _is_bank_model else None),
+         _imp(model.dcf_fair_value if _is_bank_model else None)],
         ["KONSENSUS BLENDED TARGET", "100%", "Weighted Linear Combination",
          _fy(model.target_price),
          (f"{_fp(model.upside_pct, '+.1f')}"
