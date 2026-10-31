@@ -349,6 +349,23 @@ def quick_dcf_valuation(
     # Convert shares: juta → miliar = bagi 1000
     shares_in_bn = shares_outstanding_m / 1000.0
 
+    # ── SANITY GATE TERPUSAT ───────────────────────────────────────────────
+    # Semua jalur (halaman utama, PDF, endpoint) lewat fungsi ini, jadi guard
+    # ditaruh di sini agar tidak ada jalur yang lolos:
+    #   * EBIT <= 0  -> FCF negatif, DCF tidak bermakna (EXCL: EBIT -1.345).
+    #   * FCF awal <= 0 -> arus kas tidak menopang nilai (ADRO: -2.131).
+    #   * g >= WACC  -> terminal value tak terdefinisi (UNTR: 12% vs 11,74%).
+    # Mengembalikan None membuat pemanggil menampilkan N/A, bukan angka palsu.
+    _fcf_base = model.calculate_free_cash_flow(
+        ebit or 0.0, tax_rate, depreciation or 0.0,
+        capex or 0.0, wc_change or 0.0)
+    _wacc_eff = (wacc_override / 100.0) if wacc_override else None
+    if (ebit is None or ebit <= 0
+            or _fcf_base is None or _fcf_base <= 0
+            or not shares_outstanding_m or shares_outstanding_m <= 0
+            or (_wacc_eff is not None and fcf_growth_rate >= _wacc_eff)):
+        return None
+
     result = model.comprehensive_dcf(
         wacc_inputs, fcf_inp, term_inp, bs, shares_in_bn, projection_years
     )

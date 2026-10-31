@@ -96,7 +96,31 @@
     </div>
   </div>
 
-  {% elif dcf %}
+  {% elif not dcf %}
+  {#- DCF tidak tersedia: nyatakan sebabnya, jangan tampilkan tab kosong.
+      Sebelumnya `{% elif dcf %}` membuat seluruh tab Valuasi hilang tanpa
+      penjelasan. Komentar HTML bocor ke DOM sehingga ikut terbaca tes. -#}
+  <div class="bg-[#0E1525] border border-amber-500/20 rounded-2xl p-6">
+    <div class="flex items-start gap-3">
+      <span class="text-amber-400 text-lg leading-none mt-0.5">⚠</span>
+      <div>
+        <h4 class="text-sm font-semibold text-slate-100">DCF tidak disajikan untuk emiten ini</h4>
+        <p class="text-xs text-slate-400 mt-1.5 leading-relaxed">
+          {{ dcf_reason or 'Model DCF tidak dapat dihitung secara wajar dari laporan keuangan yang tersedia.' }}
+        </p>
+        <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+          Nilai wajar tetap tersedia dari metode lain di tab <b>Research</b>
+          ({{ research_payload.valuation_basis if research_payload and research_payload.valuation_basis else 'EV/EBITDA & PBV relatif' }}):
+          {% if research_payload and research_payload.target_price %}
+          <span class="font-mono text-slate-300">Rp {{ "{:,.0f}".format(research_payload.target_price) }}</span>
+          ({{ "%+.1f"|format(research_payload.upside_pct) if research_payload.upside_pct is not none else 'N/A' }}%)
+          {% else %}N/A{% endif %}
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {% else %}
   <!-- EMITEN NON-BANK: Institutional DCF Suite -->
   <div class="space-y-6">
 
@@ -131,9 +155,20 @@
         <span class="text-2xl font-semibold font-mono tabular-nums tracking-tight text-emerald-400 block my-1">
           Rp {{ "{:,.0f}".format(dcf.price_per_share) }}
         </span>
+        {# Label metode WAJIB disebut: angka ini murni DCF, sedangkan target
+           gabungan (DCF + Exit P/E + EV/EBITDA + Relative) ada di tab Research.
+           Untuk PTBA keduanya BERLAWANAN TANDA: DCF +57,5% vs gabungan -18,1%.
+           Tanpa label, pembaca mengira kartu ini kesimpulan akhir. #}
         <span class="text-xs font-mono {{ 'text-emerald-400' if (dcf.upside_pct if dcf.upside_pct is defined and dcf.upside_pct is not none else 0) >= 0 else 'text-rose-400' }}">
-          {{ dcf.valuation_status if dcf.valuation_status is defined else 'FAIR' }} ({{ "%+.1f"|format(dcf.upside_pct) if dcf.upside_pct is defined and dcf.upside_pct is not none else '+0.0' }}%)
+          DCF saja: {{ dcf.valuation_status if dcf.valuation_status is defined else 'FAIR' }} ({{ "%+.1f"|format(dcf.upside_pct) if dcf.upside_pct is defined and dcf.upside_pct is not none else 'N/A' }}%)
         </span>
+        {% if research_payload and research_payload.target_price %}
+        <span class="text-[10px] text-slate-500 font-mono block mt-1">
+          Target gabungan {{ research_payload.valuation_basis or 'multi-metode' }}:
+          Rp {{ "{:,.0f}".format(research_payload.target_price) }}
+          ({{ "%+.1f"|format(research_payload.upside_pct) if research_payload.upside_pct is not none else 'N/A' }}%)
+        </span>
+        {% endif %}
       </div>
     </div>
 

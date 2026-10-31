@@ -208,23 +208,53 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
         capex_bn = (curr_in.capex * factor_to_bn) if curr_in.capex else (ebit_bn * 0.35)
 
         # Banking check first
+        # ── SATUAN HARUS SERAGAM ────────────────────────────────────────────
+        # Versi lama mengirim `net_income` apa adanya (miliar) tetapi
+        # `total_equity` dikali 1e9 (rupiah penuh). ROE = NI/Equity menjadi
+        # ~0,0002 -> Justified PBV = (ROE-g)/(Ke-g) NEGATIF (-0,9091) dan
+        # nilai wajar bank -Rp2.083. Sekarang SEMUA nominal dalam rupiah penuh,
+        # konsisten dengan `calculate_banking_ratios` yang mengharapkan rupiah.
+        _f_full = 1.0 if (curr_in.revenue or 0) >= 1e9 else (factor_to_bn * 1e9)
+        _ni_full = ((curr_in.net_income_parent or 0) * _f_full) if curr_in.net_income_parent else None
+        _eq_full = ((curr_in.total_equity_parent or 0) * _f_full) if curr_in.total_equity_parent else None
+        _ta_full = ((curr_in.total_assets or 0) * _f_full) if curr_in.total_assets else None
+        # Ke & g riil: tanpa ini engine memakai default 10,5% / 5,0% yang
+        # menghasilkan Justified PBV berbeda dari halaman utama.
+        _ke_q = None
+        _g_q = None
+        try:
+            from app.services.cost_of_capital import (
+                compute_wacc as _cw_q, compute_sustainable_growth as _csg_q)
+            from app.services import idx_audited_financials as _AFq
+            if _AFq.available() and _AFq.has_ticker(curr_in.ticker):
+                _h_q = _AFq.five_year_table(curr_in.ticker)
+                if _h_q:
+                    _wq = _cw_q(session, curr_in.ticker, _h_q[-1])
+                    if _wq.get("available"):
+                        _ke_q = _wq.get("cost_equity_pct")
+                    _gq = _csg_q(_h_q)
+                    _g_q = _gq[0] if isinstance(_gq, tuple) else _gq
+        except Exception:
+            _ke_q = _g_q = None
         banking_data = {
             "ticker": curr_in.ticker,
             "sector": curr_in.sector,
-            "revenue": curr_in.revenue,
-            "net_income": curr_in.net_income_parent,
-            "total_assets": curr_in.total_assets,
-            "total_equity": curr_in.total_equity_parent * (factor_to_bn * 1e9 if curr_in.revenue < 1e9 else 1.0),
-            "total_debt": curr_in.total_liabilities,
-            "ebit": curr_in.ebit,
-            "ebt": curr_in.ebt,
-            "interest_income": curr_in.interest_income or 0.0,
-            "interest_expense": curr_in.interest_expense or 0.0,
-            "tax_provision": curr_in.tax_provision or 0.0,
-            "pretax_income": curr_in.ebt or 0.0,
+            "revenue": (curr_in.revenue or 0) * _f_full,
+            "net_income": _ni_full,
+            "total_assets": _ta_full,
+            "total_equity": _eq_full,
+            "total_debt": (curr_in.total_liabilities or 0) * _f_full,
+            "ebit": (curr_in.ebit or 0) * _f_full if curr_in.ebit else None,
+            "ebt": (curr_in.ebt or 0) * _f_full if curr_in.ebt else None,
+            "interest_income": (curr_in.interest_income or 0.0) * _f_full,
+            "interest_expense": (curr_in.interest_expense or 0.0) * _f_full,
+            "tax_provision": (curr_in.tax_provision or 0.0) * _f_full,
+            "pretax_income": (curr_in.ebt or 0.0) * _f_full,
             "shares_outstanding": curr_in.shares_outstanding or 0.0,
             "period": curr_in.year,
             "eps": getattr(curr_in, "eps", None),
+            "cost_of_equity_pct": _ke_q,
+            "sustainable_growth_pct": _g_q,
         }
         b_ratios = calculate_banking_ratios(banking_data)
 
@@ -248,7 +278,10 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             fair_val = round(b_ratios.fair_value_per_share, 0)
         else:
             shares_out = curr_in.shares_outstanding or 0.0
-            shares_m = (shares_out / 1e6) if shares_out > 0 else max(100.0, te_bn * 1e9 / 5000 / 1e6)
+            # ZERO-FAKE: dulu fallback `max(100.0, ekuitas/5000/1e6)` = jumlah
+            # saham karangan (asumsi harga Rp5.000), membuat nilai wajar per
+            # saham di screener tidak berhubungan dengan emitennya.
+            shares_m = (shares_out / 1e6) if shares_out and shares_out > 0 else None
             try:
                 dcf_res = quick_dcf_valuation(
                     ticker=curr_in.ticker,

@@ -106,7 +106,16 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
     # XBRL BEI mencatat beban pajak NEGATIF -> pakai nilai absolut.
     pbt = latest.get("pretax_bn", latest.get("profit_before_tax_bn")) or 0.0
     tax = abs(latest.get("tax_provision_bn") or 0.0)
-    etr = min(max(tax / pbt, 0.0), 0.50) if pbt > 0 else 0.0
+    # ETR 0% tidak boleh dipakai hanya karena EBT tidak tersedia atau pajak
+    # negatif (manfaat pajak). BSDE: EBT None, tax -27 B -> ETR 0% membuat
+    # DCF memakai laba tanpa pajak (FCF digelembungkan). Bila EBT tak ada,
+    # pakai tarif korporasi Indonesia 22% sebagai default eksplisit.
+    if pbt is not None and pbt > 0:
+        etr = min(max(tax / pbt, 0.0), 0.50)
+        if etr < 0.05:            # <5% hampir selalu data cacat/manfaat pajak
+            etr = 0.22
+    else:
+        etr = 0.22
     kd_post_tax = (cod_pre_tax * (1.0 - etr)) if cod_pre_tax is not None else None
 
     if is_bank:
@@ -123,7 +132,26 @@ def build_wacc_components(financials, beta_raw, current_price, shares_bn, is_ban
     justified_pbv_note = None
     if is_bank:
         ni = latest.get("net_income_parent_bn")
-        g = 0.04  # asumsi pertumbuhan abadi bank = 4% (di bawah nominal PDB)
+        # g = pertumbuhan berkelanjutan (ROE x retention), BUKAN 4% untuk semua
+        # bank. Hardcode 4% menghasilkan Justified PBV yang berbeda dari jalur
+        # valuasi utama (BBCA g riil 7,09%, BMRI 1,18%).
+        g = None
+        try:
+            from app.services.cost_of_capital import compute_sustainable_growth as _csg
+            if financials:
+                # Fungsi ini mengembalikan TUPLE (g_persen, catatan) dan sudah
+                # membatasi g ke 0-8%. Versi saya sebelumnya hanya menangkap
+                # elemen pertamanya sebagai angka sehingga g menjadi tuple ->
+                # perbandingan `ke > g` crash -> justified_pbv null untuk
+                # SEMUA bank.
+                _res_g = _csg(financials)
+                _g_val = _res_g[0] if isinstance(_res_g, tuple) else _res_g
+                if _g_val is not None and 0.0 <= float(_g_val) <= 15.0:
+                    g = float(_g_val) / 100.0
+        except Exception:
+            g = None
+        if g is None:
+            g = 0.025      # fallback konservatif, sama dengan terminal growth DCF
         if ni is not None and equity_bn and equity_bn > 0:
             roe_dec = ni / equity_bn
             if ke > g:

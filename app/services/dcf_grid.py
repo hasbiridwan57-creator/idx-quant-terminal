@@ -35,6 +35,14 @@ def dcf_price_at(raw: Dict[str, float], wacc_pct: float,
     # Kembalikan None supaya UI menampilkan N/A dengan alasan, bukan angka palsu.
     if (raw.get("ebit") or 0) <= 0:
         return None
+    # FCF operasi harus positif. ADRO: EBIT 8.464 B tapi capex 10.846 B dan
+    # depresiasi 406 B -> FCF -1.976 B. DCF dari arus kas negatif menghasilkan
+    # EV negatif dan "harga" Rp195 yang tidak bermakna.
+    _fcf0 = ((raw.get("ebit") or 0.0) * (1.0 - (raw.get("tax_rate") or 0.0))
+             + (raw.get("depreciation") or 0.0) - (raw.get("capex") or 0.0)
+             - (raw.get("wc_change") or 0.0))
+    if _fcf0 <= 0:
+        return None
     # Pertumbuhan abadi harus di bawah WACC; bila CAGR historis melampaui
     # WACC, model menilai perusahaan selamanya tumbuh lebih cepat dari biaya
     # modalnya — asumsi yang tidak dapat dipertahankan.

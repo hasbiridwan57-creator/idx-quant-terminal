@@ -64,6 +64,7 @@ class EquityResearchModel:
     bank_g_pct: Optional[float] = None
     bank_roe_pct: Optional[float] = None
     bank_bvps: Optional[float] = None
+    bank_justified_pbv: Optional[float] = None
     
     # 3 Investment Pillars
     investment_thesis: List[str] = field(default_factory=list)
@@ -580,7 +581,12 @@ def build_research_model_from_context(
     # membuangnya, agar blended target tidak ditarik ke satu ekstrem.
     _others = [v for v, ok in ((exit_fv, _exit_ok), (rel_fv, _rel_ok),
                                (ev_ebitda_fv, _ev_ok)) if ok]
-    if _dcf_ok and _others:
+    # BANK: JANGAN didampen. Justified PBV adalah satu-satunya metode sah untuk
+    # bank; membandingkannya dengan median Exit P/E / relatif / EV-EBITDA
+    # (yang berbasis laba & EBITDA korporat) lalu dirata-ratakan membuat target
+    # BBCA turun dari Rp4.532 (BVPS x PBV) ke Rp3.714 — angka yang tidak dapat
+    # direproduksi dari komponen mana pun yang disajikan.
+    if _dcf_ok and _others and not is_bank:
         _med = sorted(_others)[len(_others) // 2]
         if _med > 0 and abs(dcf_fv - _med) / _med > 0.40:
             dcf_fv = (dcf_fv + _med) / 2.0
@@ -2010,11 +2016,14 @@ def build_research_model_from_context(
         valuation_weights=_weights_used,
         exit_pe_used=(float(_pe_ref) if isinstance(_pe_ref, (int, float)) and _pe_ref > 0 else None),
         pbv_multiple_used=(float(_pbv_just) if isinstance(_pbv_just, (int, float)) and _pbv_just > 0 else None),
-        bank_ke_pct=((_bank_valuation.get("ke_pct") or 10.5) if is_bank and _bank_valuation else None),
-        bank_g_pct=((_bank_valuation.get("g_pct") if _bank_valuation.get("g_pct") is not None else 5.0)
-                    if is_bank and _bank_valuation else None),
+        # ZERO-FAKE: dulu `or 10.5` untuk Ke dan `else 5.0` untuk g. Itu
+        # konstanta cadangan yang muncul di PDF sebagai angka analis padahal
+        # bukan hasil hitungan emiten. Sekarang N/A bila engine tidak memberi.
+        bank_ke_pct=(_bank_valuation.get("ke_pct") if (is_bank and _bank_valuation) else None),
+        bank_g_pct=(_bank_valuation.get("g_pct") if (is_bank and _bank_valuation) else None),
         bank_roe_pct=(_bank_valuation.get("roe_pct") if is_bank and _bank_valuation else None),
         bank_bvps=(_bank_valuation.get("bvps") if is_bank and _bank_valuation else None),
+        bank_justified_pbv=(_bank_valuation.get("justified_pbv") if is_bank and _bank_valuation else None),
         ev_ebitda_multiple_used=(float(_sector_ev_ebitda) if isinstance(_sector_ev_ebitda, (int, float)) and _sector_ev_ebitda > 0 else None),
         investment_thesis=thesis,
         bull_catalysts=bull_catalysts,
