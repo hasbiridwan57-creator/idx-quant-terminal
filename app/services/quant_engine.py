@@ -275,38 +275,101 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
 
         fair_val: Optional[float] = None
         if b_ratios is not None and getattr(b_ratios, "fair_value_per_share", None):
-            fair_val = round(b_ratios.fair_value_per_share, 0)
+            # Nilai wajar NEGATIF mustahil: harga saham tidak bisa < 0.
+            # Muncul saat Justified PBV = (ROE - g)/(Ke - g) negatif karena
+            # ROE < g atau Ke < g (SDRA -Rp1.803, BMAS -Rp2.594). Itu tanda
+            # asumsi tidak berlaku untuk emiten tersebut, bukan angka sah.
+            _bv = float(b_ratios.fair_value_per_share)
+            if _bv > 0:
+                fair_val = round(_bv, 0)
         else:
             shares_out = curr_in.shares_outstanding or 0.0
             # ZERO-FAKE: dulu fallback `max(100.0, ekuitas/5000/1e6)` = jumlah
             # saham karangan (asumsi harga Rp5.000), membuat nilai wajar per
             # saham di screener tidak berhubungan dengan emitennya.
             shares_m = (shares_out / 1e6) if shares_out and shares_out > 0 else None
+            # ── SCREENER WAJIB MEMAKAI SUMBER YANG SAMA DENGAN HALAMAN ─────
+            # Versi lama mengarang empat input: beta 1,0; pajak 22%;
+            # ΔWC = EBIT x 5% (bukan neraca riil); g 5%; dan menghitung WACC
+            # sendiri (bukan compute_wacc). Akibatnya nilai wajar emiten yang
+            # sama berbeda antara tab Screener dan tab Research — dua angka
+            # untuk satu emiten, tanpa cara memilih mana yang benar.
+            _tbl_q: list = []
+            try:
+                from app.services.idx_audited_financials import five_year_table as _fyt_q
+                _tbl_q = _fyt_q(curr_in.ticker) or []
+            except Exception:
+                _tbl_q = []
+            _last_q = _tbl_q[-1] if _tbl_q else {}
+            _etr_q = 0.22
+            try:
+                _tax_q, _pbt_q = _last_q.get("tax_provision_bn"), _last_q.get("ebt_bn")
+                if _pbt_q and _pbt_q > 0 and _tax_q is not None:
+                    _etr_q = min(max(_tax_q / _pbt_q, 0.05), 0.50)
+            except Exception:
+                _etr_q = 0.22
+            _g_q2 = 0.05
+            _revs_q = [x.get("revenue_bn") for x in _tbl_q
+                       if x.get("revenue_bn") and x.get("revenue_bn") > 0]
+            if len(_revs_q) >= 2:
+                _g_q2 = max(-0.10, min(0.08, (_revs_q[-1] / _revs_q[0])
+                                       ** (1.0 / (len(_revs_q) - 1)) - 1.0))
+            _wacc_q = None
+            _beta_q = 1.0
+            _kd_q = 7.5
+            _wd_q = 0.30
+            try:
+                from app.services.cost_of_capital import compute_wacc as _cw_q2
+                _wr_q = _cw_q2(session, curr_in.ticker, _last_q)
+                if _wr_q.get("available"):
+                    _wacc_q = float(_wr_q["wacc_pct"])
+                    _kd_q = float(_wr_q.get("cost_of_debt_pretax_pct") or 7.5)
+                    _wd_q = float(_wr_q.get("wd_pct") or 30.0) / 100.0
+            except Exception:
+                _wacc_q = None
+            _dwc_q = _last_q.get("change_in_working_capital_bn")
+            if _dwc_q is None:
+                _dwc_q = 0.0
             try:
                 dcf_res = quick_dcf_valuation(
                     ticker=curr_in.ticker,
-                    # Diselaraskan dengan RISK_FREE_PCT aplikasi (6,0%).
-                    # Dulu 6,85% -> WACC lebih tinggi -> nilai wajar lebih
-                    # rendah daripada halaman utama untuk emiten yang sama.
                     risk_free_rate=6.0,
                     market_risk_premium=6.5,
-                    levered_beta=1.0,
-                    cost_of_debt_pre_tax=7.5,
-                    tax_rate=0.22,
-                    target_debt_ratio=0.30,
+                    levered_beta=_beta_q,
+                    cost_of_debt_pre_tax=_kd_q,
+                    tax_rate=_etr_q,
+                    target_debt_ratio=_wd_q,
+                    wacc_override=_wacc_q,
                     ebit=ebit_bn,
                     depreciation=dep_bn,
                     capex=capex_bn,
-                    wc_change=ebit_bn * 0.05,
-                    fcf_growth_rate=0.05,
+                    wc_change=_dwc_q,
+                    fcf_growth_rate=_g_q2,
                     terminal_growth_rate=0.025,
                     total_assets=ta_bn,
                     total_debt=debt_bn,
                     cash=cash_bn,
                     shares_outstanding_m=shares_m,
                 )
-                if dcf_res and dcf_res.get("price_per_share"):
-                    fair_val = round(dcf_res["price_per_share"], 0)
+                # SANITY GATE yang sama dengan halaman utama: DCF di luar
+                # 0,25x-4x harga pasar menandakan asumsi rusak (UNVR FV
+                # Rp807 vs harga Rp1.390 = 0,58x masih wajar, tapi emiten
+                # seperti GGRM 0,17x dan JPFA 5,8x harus ditolak). Tanpa gate
+                # ini screener menyajikan nilai wajar yang ditolak halaman.
+                _fvq = dcf_res.get("price_per_share") if dcf_res else None
+                _cpq = None
+                try:
+                    from app.db.models import QuoteLatest as _QLg
+                    _qg = session.exec(
+                        select(_QLg).where(_QLg.ticker == curr_in.ticker)).first()
+                    if _qg and _qg.price and _qg.price > 0:
+                        _cpq = float(_qg.price)
+                except Exception:
+                    _cpq = None
+                if _fvq and _cpq and not (0.25 <= (_fvq / _cpq) <= 4.0):
+                    fair_val = None
+                elif _fvq:
+                    fair_val = round(_fvq, 0)
             except Exception:
                 fair_val = None
 
@@ -320,6 +383,20 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
         elif roe_val < 0.08:
             verdict = "Low Return"
 
+        # Harga pasar: tanpa ini "fair_value" tidak bisa ditafsirkan (mahal
+        # atau murah?). Diambil dari QuoteLatest yang sudah dipakai halaman.
+        _price_q = None
+        try:
+            from app.db.models import QuoteLatest as _QL_q
+            _qrow_q = session.exec(
+                select(_QL_q).where(_QL_q.ticker == curr_in.ticker)
+            ).first()
+            if _qrow_q and _qrow_q.price and _qrow_q.price > 0:
+                _price_q = float(_qrow_q.price)
+        except Exception:
+            _price_q = None
+        _upside_q = (round((fair_val / _price_q - 1.0) * 100.0, 1)
+                     if (fair_val and _price_q) else None)
         rows.append({
             "ticker": curr_in.ticker,
             "company_name": curr_in.company_name,
@@ -335,6 +412,8 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             "credit_grade": credit.credit_grade,
             "credit_score": credit.credit_score,
             "fair_value": fair_val,
+            "price": _price_q,
+            "upside_pct": _upside_q,
             "quality_verdict": verdict,
             "primary_driver": bundle.primary_driver.value,
         })

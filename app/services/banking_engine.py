@@ -157,8 +157,17 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
                 bvps = total_equity / shares_derived
 
     # Fair Value Bank = BVPS × Justified PBV
+    # HANYA bila hasilnya positif. Justified PBV menjadi negatif ketika
+    # ROE < g (laba tumbuh lebih lambat dari asumsi pertumbuhan) atau
+    # Ke < g; pada kondisi itu model Gordon Growth tidak berlaku dan
+    # "nilai wajar negatif" (SDRA -Rp1.803, BMAS -Rp2.594) adalah artefak,
+    # bukan valuasi. Dibiarkan None agar UI menampilkan N/A.
     if bvps is not None and justified_pbv is not None:
-        fair_value_per_share = bvps * justified_pbv
+        _fv_bank = bvps * justified_pbv
+        if _fv_bank > 0:
+            fair_value_per_share = _fv_bank
+        else:
+            justified_pbv = None      # multiple tidak bermakna bila negatif
 
     return BankingRatios(
         ticker=ticker or "BANK",
