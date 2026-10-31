@@ -116,6 +116,9 @@ class EquityResearchModel:
     variant_perception: Dict[str, Any] = field(default_factory=dict)
     earnings_quality: Dict[str, Any] = field(default_factory=dict)
     pe_band_history: Dict[str, Any] = field(default_factory=dict)
+    # Rasio historis per tahun audited (untuk chart ROE & margin). Tanpa ini
+    # frontend mengarang titik 2023A/2024A dari base x 0.92 / x 0.96.
+    historical_ratios: List[Dict[str, Any]] = field(default_factory=list)
 
     # LLM Executive Synthesis (9Router VPS)
     llm_executive_summary: Optional[str] = None
@@ -831,6 +834,27 @@ def build_research_model_from_context(
             "dps": round((proj_ni * dpr * 1e9) / max(1.0, (shares_m or 1.0) * 1e6), 1) if proj_ni is not None else None,
             "roe": round((proj_ni / proj_eq) * 100, 1) if (proj_ni is not None and proj_eq) else None,
         })
+
+    # Rasio historis per tahun audited (dipakai chart ROE & EBIT margin).
+    _hist_ratios = []
+    try:
+        for _h in (_hist_all or []):
+            _rev = _h.get("revenue_bn")
+            _eb = _h.get("ebit_bn")
+            _ni = _h.get("net_income_parent_bn")
+            _eq = _h.get("equity_parent_bn") or _h.get("equity_total_bn")
+            _yr = _h.get("year")
+            if not _yr:
+                continue
+            _hist_ratios.append({
+                "year": int(_yr),
+                "revenue_bn": round(_rev, 1) if _rev is not None else None,
+                "ebit_margin_pct": round((_eb / _rev) * 100, 2) if (_eb is not None and _rev) else None,
+                "roe_pct": round((_ni / _eq) * 100, 2) if (_ni is not None and _eq) else None,
+                "net_income_bn": round(_ni, 1) if _ni is not None else None,
+            })
+    except Exception:
+        _hist_ratios = []
 
     # Peer Benchmarking Matrix — null-safe (pe/pbv/roe bisa None)
     peer_benchmark = [
@@ -1593,11 +1617,16 @@ def build_research_model_from_context(
         investment_thesis=thesis,
         bull_catalysts=bull_catalysts,
         bear_risks=bear_risks,
-        tax_burden=getattr(c, "tax_burden", 0.78) or 0.78,
-        interest_burden=getattr(c, "interest_burden", 0.95) or 0.95,
-        ebit_margin=getattr(c, "ebit_margin", 0.12) or 0.12,
-        asset_turnover=getattr(c, "asset_turnover", 0.85) or 0.85,
-        equity_multiplier=getattr(c, "equity_multiplier", 1.65) or 1.65,
+        # JANGAN beri nilai default 0.78/0.95/0.12/0.85/1.65. Nilai itu
+        # dipakai SEBELUMNYA untuk semua emiten yang komponennya tidak dapat
+        # dihitung, lalu radar DuPont dan narasi kualitas laba menggambarnya
+        # sebagai hasil analisis. None = komponen tidak tersedia -> chart
+        # menampilkan "tidak ada data", narasi menulis N/A.
+        tax_burden=getattr(c, "tax_burden", None),
+        interest_burden=getattr(c, "interest_burden", None),
+        ebit_margin=getattr(c, "ebit_margin", None),
+        asset_turnover=getattr(c, "asset_turnover", None),
+        equity_multiplier=getattr(c, "equity_multiplier", None),
         revenue_bn=rev_bn,
         ebit_bn=ebit_bn,
         net_income_bn=ni_bn,
@@ -1612,6 +1641,7 @@ def build_research_model_from_context(
         hurst_exponent=hurst,
         risk_factors=risks,
         sensitivity_grid=sensitivity_grid,
+        historical_ratios=_hist_ratios,
         forecast_5yr=forecast_5yr,
         peer_benchmark=peer_benchmark,
         segment_breakdown=segment_breakdown,
@@ -1664,6 +1694,24 @@ def _fy(v, fmt=",.0f", prefix="Rp", fallback="N/A"):
         return f"{prefix}{v:{fmt}}" if prefix else f"{v:{fmt}}"
     except (TypeError, ValueError):
         return fallback
+
+
+def _f(v, dec=1, suffix=""):
+    """Format angka dengan jumlah desimal tetap; None/NaN -> 'N/A'.
+
+    Helper tingkat modul supaya blok PDF dapat memakainya. Versi sebelumnya
+    hanya ada sebagai closure di dalam fungsi lain, sehingga pemakaian di
+    generate_equity_research_pdf_bytes melempar NameError.
+    """
+    if v is None:
+        return "N/A"
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    if fv != fv:  # NaN
+        return "N/A"
+    return f"{fv:.{dec}f}{suffix}"
 
 
 def _fp(v, fmt="+.1f", suffix="%"):
@@ -1907,9 +1955,9 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
     elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0f172a"), spaceBefore=4, spaceAfter=12))
 
     dupont_summary_p = Paragraph(
-        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({_fp(model.roe_pct, '.1f')}). Dekomposisi matematis membuktikan bahwa rasio profitabilitas didorong secara sehat oleh efisiensi operasi (EBIT Margin {_fp((model.ebit_margin*100) if model.ebit_margin is not None else None, '.1f')}) "
-        f"dan perputaran aset (Asset Turnover {model.asset_turnover:.2f}x), dengan beban bunga yang terkendali (Interest Burden {model.interest_burden*100:.1f}%) serta beban pajak normal (Tax Burden {model.tax_burden*100:.1f}%). "
-        f"Struktur ini mengindikasikan laba berkualitas tinggi (high quality of earnings) tanpa manipulasi financial leverage berlebihan (Equity Multiplier {model.equity_multiplier:.2f}x).",
+        f"Analisis DuPont 5-Tahap membedah sumber profitabilitas ROE ({_fp(model.roe_pct, '.1f')}). Dekomposisi matematis: efisiensi operasi (EBIT Margin {_fp((model.ebit_margin*100) if model.ebit_margin is not None else None, '.1f')}) "
+        f"dan perputaran aset ({_f(model.asset_turnover, 2)}x), dengan beban bunga {_f((model.interest_burden*100) if model.interest_burden is not None else None, 1)}% serta beban pajak {_f((model.tax_burden*100) if model.tax_burden is not None else None, 1)}%. "
+        f"Financial leverage {_f(model.equity_multiplier, 2)}x. Komponen bertanda N/A berarti tidak dapat dihitung dari data audited emiten ini, bukan nol.",
         body_style
     )
     elements.append(dupont_summary_p)
@@ -1917,11 +1965,11 @@ def generate_equity_research_pdf_bytes(model: EquityResearchModel) -> bytes:
 
     dupont_table_data = [
         ["Komponen DuPont 5-Tahap", "Formula Matematis", "Nilai Realisasi", "Evaluasi Kualitas"],
-        ["1. Tax Burden", "Net Income / EBT", f"{model.tax_burden*100:.1f}%", "Beban pajak efektif normal"],
-        ["2. Interest Burden", "EBT / EBIT", f"{model.interest_burden*100:.1f}%", "Beban bunga non-signifikan"],
-        ["3. Operating Margin", "EBIT / Revenue", f"{model.ebit_margin*100:.1f}%", "Operating efficiency tinggi"],
-        ["4. Asset Turnover", "Revenue / Total Assets", f"{model.asset_turnover:.2f}x", "Produktivitas aset prima"],
-        ["5. Equity Multiplier", "Total Assets / Total Equity", f"{model.equity_multiplier:.2f}x", "Leverage konservatif/sehat"],
+        ["1. Tax Burden", "Net Income / EBT", _f((model.tax_burden*100) if model.tax_burden is not None else None, 1, "%"), "Beban pajak efektif"],
+        ["2. Interest Burden", "EBT / EBIT", _f((model.interest_burden*100) if model.interest_burden is not None else None, 1, "%"), "Beban bunga terhadap laba operasi"],
+        ["3. Operating Margin", "EBIT / Revenue", _f((model.ebit_margin*100) if model.ebit_margin is not None else None, 1, "%"), "Margin operasi"],
+        ["4. Asset Turnover", "Revenue / Total Assets", _f(model.asset_turnover, 2, "x"), "Perputaran aset"],
+        ["5. Equity Multiplier", "Total Assets / Total Equity", _f(model.equity_multiplier, 2, "x"), "Leverage neraca"],
         ["Total ROE Terurai", "1 x 2 x 3 x 4 x 5", _fp(model.roe_pct, ".1f"), "Return on Equity"],
     ]
     t_dp = Table(dupont_table_data, colWidths=[120, 140, 100, 163])

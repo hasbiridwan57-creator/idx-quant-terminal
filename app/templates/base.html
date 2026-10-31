@@ -975,22 +975,22 @@
           if (ffCanvas) {
             if (window._ffChartInstance) { window._ffChartInstance.destroy(); }
             const ctx = ffCanvas.getContext('2d');
-            const dcf = Number(this.researchData.dcf_fair_value || 0);
-            const exitP = Number(this.researchData.exit_multiple_fair_value || 0);
-            const relP = Number(this.researchData.relative_fair_value || 0);
-            const currP = Number(this.researchData.current_price || 0);
-            const targetP = Number(this.researchData.target_price || 0);
+            // null-safe: nilai kosong JANGAN jadi 0 lalu digambar sebagai
+            // batang "Rentang: Rp 0 - Rp 0". null = metode tidak tersedia.
+            const _n = (v) => (v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
+            const dcf = _n(this.researchData.dcf_fair_value);
+            const exitP = _n(this.researchData.exit_multiple_fair_value);
+            const relP = _n(this.researchData.relative_fair_value);
+            const currP = _n(this.researchData.current_price);
+            const evEbitda = _n(this.researchData.ev_ebitda_fair_value);
+            const targetP = _n(this.researchData.target_price);
+            const _range = (v) => (v === null || currP === null) ? null : [Math.min(currP, v), Math.max(currP, v)];
             window._ffChartInstance = new Chart(ctx, {
               type: 'bar', data: {
-                labels: ['Relative Comps', 'Exit Multiple', 'DCF Model', 'Blended Target'],
+                labels: ['Relative Comps', 'Exit Multiple', 'EV/EBITDA', 'DCF Model', 'Blended Target'],
                 datasets: [{
                   label: 'Base to Fair Value Range',
-                  data: [
-                    [Math.min(currP, relP), Math.max(currP, relP)],
-                    [Math.min(currP, exitP), Math.max(currP, exitP)],
-                    [Math.min(currP, dcf), Math.max(currP, dcf)],
-                    [Math.min(currP, targetP), Math.max(currP, targetP)],
-                  ],
+                  data: [_range(relP), _range(exitP), _range(evEbitda), _range(dcf), _range(targetP)],
                   backgroundColor: ['#6366f1', '#a855f7', '#0ea5e9', '#10b981'], borderRadius: 4,
                 }]
               },
@@ -1008,11 +1008,20 @@
           if (dpCanvas) {
             if (window._dpRadarInstance) { window._dpRadarInstance.destroy(); }
             const ctx2 = dpCanvas.getContext('2d');
-            const tb = (this.researchData.tax_burden || 0.78) * 100;
-            const ib = (this.researchData.interest_burden || 0.95) * 100;
-            const om = (this.researchData.ebit_margin || 0.12) * 100;
-            const at = (this.researchData.asset_turnover || 0.85) * 50;
-            const em = Math.min(100, (this.researchData.equity_multiplier || 1.6) * 35);
+            // Tanpa default 0.78/0.95/0.12/0.85/1.6: komponen yang tidak
+            // dapat dihitung harus null (Chart.js memutus garis), bukan
+            // digambar sebagai nilai hasil analisis.
+            const _p = (v, k) => (v === null || v === undefined || isNaN(Number(v))) ? null : Number(v) * k;
+            const tb = _p(this.researchData.tax_burden, 100);
+            const ib = _p(this.researchData.interest_burden, 100);
+            const om = _p(this.researchData.ebit_margin, 250);
+            const at = _p(this.researchData.asset_turnover, 50);
+            const emRaw = _p(this.researchData.equity_multiplier, 35);
+            const em = emRaw === null ? null : Math.min(100, emRaw);
+            const _radarEmpty = [tb, ib, om, at, em].every(v => v === null);
+            if (_radarEmpty) {
+              if (window._dpRadarInstance) { window._dpRadarInstance.destroy(); window._dpRadarInstance = null; }
+            } else {
             window._dpRadarInstance = new Chart(ctx2, {
               type: 'radar', data: {
                 labels: ['Tax Burden', 'Interest Burden', 'EBIT Margin', 'Asset Turnover', 'Financial Leverage'],
@@ -1026,6 +1035,7 @@
                 scales: { r: { angleLines: { color: 'rgba(255,255,255,0.08)' }, grid: { color: 'rgba(255,255,255,0.06)' }, pointLabels: { color: '#94a3b8', font: { size: 9 } }, ticks: { display: false, maxTicksLimit: 4 } } }
               }
             });
+            }
           }
 
           // 3. Revenue Segment Doughnut Chart (Figure BD 2)
@@ -1049,11 +1059,22 @@
           if (marginCanvas && this.researchData.forecast_5yr) {
             if (window._marginChartInstance) { window._marginChartInstance.destroy(); }
             const ctx4 = marginCanvas.getContext('2d');
-            const labels = ['2023A', '2024A', '2025A', ...this.researchData.forecast_5yr.map(f => f.year)];
-            const baseEbit = (this.researchData.ebit_margin || 0.12) * 100;
-            const baseRoe = (this.researchData.roe_pct || this.researchData.roe || 15);
-            const ebitData = [baseEbit * 0.92, baseEbit * 0.96, baseEbit, ...this.researchData.forecast_5yr.map((f, i) => Number((baseEbit * (1 + 0.015 * (i+1))).toFixed(1)))];
-            const roeData = [baseRoe * 0.9, baseRoe * 0.95, baseRoe, ...this.researchData.forecast_5yr.map(f => f.roe || baseRoe)];
+            // Angka historis 2023A/2024A HARUS dari data, bukan base x 0.92 /
+            // x 0.96 yang dikarang. Bila riwayat tidak dikirim, chart hanya
+            // menampilkan tahun proyeksi (tidak mengarang titik historis).
+            const fc = this.researchData.forecast_5yr || [];
+            const hist = this.researchData.historical_ratios || [];
+            const hLabels = hist.map(h => h.year + 'A');
+            const hRoe = hist.map(h => (h.roe_pct === null || h.roe_pct === undefined) ? null : h.roe_pct);
+            const hEbit = hist.map(h => (h.ebit_margin_pct === null || h.ebit_margin_pct === undefined) ? null : h.ebit_margin_pct);
+            const labels = [...hLabels, ...fc.map(f => f.year)];
+            const baseEbit = (this.researchData.ebit_margin || 0) * 100;
+            const baseRoe = (this.researchData.roe_pct || this.researchData.roe || null);
+            const roeData = [...hRoe, ...fc.map(f => f.roe === null || f.roe === undefined ? null : f.roe)];
+            const ebitData = [...hEbit, ...fc.map(f => {
+              if (!f.ebit || !f.revenue) return null;
+              return Number(((f.ebit / f.revenue) * 100).toFixed(1));
+            })];
             window._marginChartInstance = new Chart(ctx4, {
               type: 'line', data: {
                 labels: labels,
@@ -1072,17 +1093,24 @@
             if (window._peBandInstance) { window._peBandInstance.destroy(); }
             const ctx5 = peCanvas.getContext('2d');
             const peData = this.researchData.pe_band_history;
-            const peLabels = ['3Y Ago', '2.5Y', '2Y', '1.5Y', '1Y', '6M', 'Current'];
-            const histPe = [peData.mean * 0.94, peData.mean * 1.08, peData.mean * 1.15, peData.mean * 0.98, peData.mean * 0.88, peData.mean * 0.92, peData.current_pe];
-            window._peBandInstance = new Chart(ctx5, {
+            // Tanpa riwayat PE riil, band tidak boleh digambar: enam titik
+            // "historis" sebelumnya adalah mean x 0.88..1.15 (dikarang).
+            // Band hanya bermakna bila plus/minus SD tersedia.
+            const _peEmpty = !peData || peData.mean === null || peData.mean === undefined
+                || peData.plus_1sd === null || peData.plus_1sd === undefined;
+            if (_peEmpty && window._peBandInstance) { window._peBandInstance.destroy(); window._peBandInstance = null; }
+            const peLabels = ['Mean', 'Current'];
+            const histPe = [null, peData.current_pe];
+            const _fill = (v) => [v, null];
+            if (!_peEmpty) window._peBandInstance = new Chart(ctx5, {
               type: 'line', data: {
                 labels: peLabels,
                 datasets: [
-                  { label: '+2 SD', data: Array(7).fill(peData.plus_2sd), borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
-                  { label: '+1 SD', data: Array(7).fill(peData.plus_1sd), borderColor: 'rgba(249,115,22,0.4)', borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false },
-                  { label: 'Mean', data: Array(7).fill(peData.mean), borderColor: '#a855f7', borderWidth: 1.5, pointRadius: 0, fill: false },
-                  { label: '-1 SD', data: Array(7).fill(peData.minus_1sd), borderColor: 'rgba(16,185,129,0.4)', borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false },
-                  { label: '-2 SD', data: Array(7).fill(peData.minus_2sd), borderColor: 'rgba(239,68,68,0.3)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
+                  { label: '+2 SD', data: _fill(peData.plus_2sd), borderColor: 'rgba(239,68,68,0.4)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
+                  { label: '+1 SD', data: _fill(peData.plus_1sd), borderColor: 'rgba(249,115,22,0.4)', borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false },
+                  { label: 'Mean', data: _fill(peData.mean), borderColor: '#a855f7', borderWidth: 1.5, pointRadius: 0, fill: false },
+                  { label: '-1 SD', data: _fill(peData.minus_1sd), borderColor: 'rgba(16,185,129,0.4)', borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false },
+                  { label: '-2 SD', data: _fill(peData.minus_2sd), borderColor: 'rgba(239,68,68,0.3)', borderWidth: 1, borderDash: [5, 5], pointRadius: 0, fill: false },
                   { label: 'Current P/E', data: histPe, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.2)', borderWidth: 2.5, tension: 0.2, fill: true, pointRadius: 3, pointBackgroundColor: '#10b981' }
                 ]
               },

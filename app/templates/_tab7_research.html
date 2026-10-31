@@ -349,6 +349,22 @@ Sumber: researchData (engine compute). Metrik tak tersedia = N/A (tidak dikarang
           </div>
           <div class="relative h-44 w-full flex items-center justify-center"><canvas id="peBandCanvas"></canvas></div>
         </div>
+        <!-- ROE & EBIT Margin: canvas ini sebelumnya TIDAK ADA di template,
+             padahal JS-nya sudah dibuat. Chart tidak pernah tampil dan tidak
+             ada yang menyadarinya. Kini panelnya ada dan datanya dari
+             historical_ratios + forecast_5yr (bukan base x 0.92). -->
+        <div class="bg-[#0E1525] border border-white/[0.08] rounded-xl p-5 shadow-sm space-y-3 md:col-span-2">
+          <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+            <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">ROE &amp; EBIT Margin — Historis &amp; Proyeksi</span>
+            <span class="text-[10px] font-mono text-emerald-400">AUDITED → FORECAST</span>
+          </div>
+          <div class="relative h-48 w-full"><canvas id="marginTrendCanvas"></canvas></div>
+          <p class="text-[10px] text-slate-500 leading-relaxed">
+            Tahun berakhiran <span class="font-mono text-slate-400">A</span> = laporan audited (XBRL BEI).
+            Tahun <span class="font-mono text-slate-400">F</span> = proyeksi engine dari CAGR revenue historis,
+            margin aktual, dan payout riil. Metrik yang tidak dapat dihitung ditampilkan sebagai garis terputus, bukan nol.
+          </p>
+        </div>
       </div>
     </div>
 
