@@ -135,6 +135,36 @@ _CURRENT_TERMINAL_STATE: TerminalPayload = TerminalPayload(
     sr_matrix=[],
 )
 
+def _index_market_cap_trn() -> float:
+    """Total kapitalisasi pasar emiten tersimpan, dalam triliun rupiah.
+
+    Dipakai sebagai penyebut kontribusi poin IHSG. Dihitung dari harga terakhir
+    x jumlah saham (keduanya ada untuk 891 dari 914 emiten). Bila tidak dapat
+    dihitung, kembalikan 0.0 agar pemanggil menulis N/A alih-alih mengarang.
+    """
+    try:
+        from app.db.database import get_session as _gs
+        sess = next(_gs())
+        try:
+            from sqlalchemy import text as _sqltext
+            rows = sess.execute(_sqltext(
+                """
+                SELECT q.price, f.shares_outstanding
+                FROM quotelatest q
+                JOIN financialstatementcache f ON f.ticker = q.ticker
+                 AND f.year = (SELECT MAX(year) FROM financialstatementcache f2
+                               WHERE f2.ticker = q.ticker)
+                WHERE q.price > 0 AND f.shares_outstanding > 0
+                """
+            )).fetchall()
+        finally:
+            sess.close()
+        total = sum(float(px) * float(sh) for px, sh in rows if px and sh)
+        return total / 1e12
+    except Exception:
+        return 0.0
+
+
 def get_terminal_snapshot() -> TerminalPayload:
     """
     Mengembalikan TerminalPayload live dari market overview provider jika tersedia,
@@ -185,6 +215,24 @@ def get_terminal_snapshot() -> TerminalPayload:
             except Exception:
                 pass
 
+            # Peta jumlah saham per emiten (untuk market cap & point impact).
+            _shares_map = {}
+            try:
+                from sqlalchemy import text as _sqlt2
+                from app.db.database import get_session as _gs_sh
+                _ssh = next(_gs_sh())
+                try:
+                    for _r in _ssh.execute(_sqlt2(
+                        "SELECT ticker, shares_outstanding FROM financialstatementcache f "
+                        "WHERE year = (SELECT MAX(year) FROM financialstatementcache f2 "
+                        "WHERE f2.ticker = f.ticker) AND shares_outstanding > 0"
+                    )).fetchall():
+                        _shares_map[_r[0]] = float(_r[1])
+                finally:
+                    _ssh.close()
+            except Exception:
+                pass
+
             # Build live movers from heavyweights / gainers
             live_movers: List[BigCapMoverItem] = []
             for item in ov.get("heavyweights", [])[:4]:
@@ -193,12 +241,25 @@ def get_terminal_snapshot() -> TerminalPayload:
                 cp = float(item.get("change_pct", 0.0))
                 mcap_t = float(item.get("market_cap", 0.0) or 0.0) / 1e12
                 vol_lot = int(item.get("volume", 0)) // 100
+                # Provider jarang mengirim market_cap (56 dari 914 terisi).
+                # Hitung dari harga x saham tersimpan agar kontribusi indeks
+                # punya penyebut dan pembilang dari basis data yang sama.
+                if mcap_t <= 0 and px > 0:
+                    _sh = _shares_map.get(sym.upper())
+                    if _sh:
+                        mcap_t = (px * _sh) / 1e12
                 # Dampak poin IHSG: sumbangan relatif emiten = perubahan harga
                 # dikali bobot market cap-nya terhadap kapitalisasi IHSG.
                 # Versi lama memakai change_pct x 0.15 (konstanta tanpa dasar).
                 impact = None
                 try:
                     _idx_mcap_t = float((idx_data.get("market_cap") or 0)) / 1e12
+                    if _idx_mcap_t <= 0:
+                        # Provider tidak mengirim kapitalisasi indeks. Hitung
+                        # dari harga x jumlah saham yang tersimpan (891 dari
+                        # 914 emiten punya keduanya), jangan biarkan N/A
+                        # padahal datanya ada.
+                        _idx_mcap_t = _index_market_cap_trn()
                     if _idx_mcap_t > 0 and mcap_t > 0:
                         impact = round(ihsg_last * (mcap_t / _idx_mcap_t) * (cp / 100.0), 2)
                 except Exception:
