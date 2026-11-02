@@ -10,3 +10,5 @@ python-multipart>=0.0.9
 httpx>=0.27.0
 pytest>=8.1.0
 yfinance>=0.2.0
+# Driver Postgres untuk deploy (Railway/Neon). SQLite tetap dipakai lokal.
+psycopg[binary]>=3.1

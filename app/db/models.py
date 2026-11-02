@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import BigInteger, Column, UniqueConstraint
 from sqlmodel import SQLModel, Field
 
 # ── Legacy Model (v2.2) ────────────────────────────────────────────────
@@ -112,7 +112,11 @@ class QuoteHistoryDaily(SQLModel, table=True):
     high: float
     low: float
     close: float
-    volume: int
+    # BIGINT, bukan INTEGER. Volume saham IDX bisa ratusan miliar per hari
+    # (BBCA/GOTO tercatat hingga 97,5 M). Di SQLite aman karena tipenya
+    # longgar, tapi INTEGER Postgres mentok 2.147.483.647 — 1.354 baris
+    # riil akan gagal insert atau terpotong saat migrasi ke Neon.
+    volume: int = Field(sa_column=Column(BigInteger))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
