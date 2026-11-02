@@ -483,14 +483,28 @@ def build_research_model_from_context(
                             _bvps = (_row.total_equity_parent * 1e9) / _sh
                             if _bvps > 0:
                                 _pbvs.append(_q.price / _bvps)
-            def _med(v, lo=0.0, hi=500.0):
+            def _med(v, lo=0.0, hi=500.0, min_n=3):
                 # Filter outlier: PBV/PE ekstrem (emiten ekuitas tipis, laba
                 # hampir nol) akan menyeret median dan menghasilkan nilai wajar
                 # mustahil (MYOR rel_fv Rp9.763 = 7x harga).
                 v = sorted(x for x in v if x and lo < x < hi)
-                if not v:
+                # Minimal 3 sampel. Median 4 peer batubara (ADRO 5,94 PTBA 10,92
+                # BUMI 25,55 HRUM 10,89) menghasilkan 10,89 hanya karena dua
+                # angka kebetulan berdekatan — dan itu dipakai untuk menilai
+                # ITMG yang EBITDA-nya sudah jatuh 5,8x dari puncak 2022.
+                if len(v) < min_n:
                     return None
+                # IQR fence (Tukey): buang angka di luar Q1-1,5xIQR..Q3+1,5xIQR
+                # SEBELUM dihitung median. BUMI 25,6x (EV ditekan utang, EBITDA
+                # jatuh) adalah outlier struktural, bukan harga pasar normal.
                 n = len(v)
+                if n >= 4:
+                    q1, q3 = v[(n - 1) // 4], v[(3 * (n - 1)) // 4]
+                    iqr = q3 - q1
+                    v = [x for x in v if (q1 - 1.5 * iqr) <= x <= (q3 + 1.5 * iqr)]
+                    n = len(v)
+                    if n < 2:
+                        return None
                 return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2.0
             # EV/EBITDA sektor — metode yang paling tahan siklus komoditas:
             # EBIT historis membuat ANTM -73% / ADRO +105% karena harga
@@ -506,11 +520,21 @@ def build_research_model_from_context(
                 _pebitda = ((_prow.ebit or 0) + abs(_prow.depreciation or 0)) if _prow.ebit else None
                 if not (_psh and _psh > 0 and _pebitda and _pebitda > 0):
                     continue
+                # Buang peer yang EBITDA-nya tipis relatif terhadap revenue.
+                # EV/EBITDA dengan EBITDA hampir nol menghasilkan multiple
+                # ratusan (BUMI: EV 74.358 / EBITDA 2.911 = 25,6x karena
+                # utang besar, bukan karena pasar menghargai 25x laba
+                # operasinya). Peer seperti ini menyeret median sektor.
+                _prev_p = _prow.revenue or 0
+                if _prev_p and (_pebitda / _prev_p) < 0.05:
+                    continue
                 _pmcap = (_pq.price * _psh) / 1e9
                 _pnet = (_prow.total_liabilities or 0) - (_prow.cash_and_equivalents or 0)
                 if _pmcap + _pnet > 0:
                     _evs.append((_pmcap + _pnet) / _pebitda)
             _sector_pe, _sector_pbv = _med(_pes, 2.0, 60.0), _med(_pbvs, 0.2, 15.0)
+            # PE dengan 2 sampel juga rapuh: dua angka mirip langsung jadi
+            # "median sektor" dan dipakai mengalikan EPS seluruh emiten.
             _sector_ev_ebitda = _med(_evs, 2.0, 20.0)
             _peer_n = max(len(_pes), len(_pbvs), len(_evs))
     except Exception:
@@ -637,7 +661,25 @@ def build_research_model_from_context(
                   f"({len(_cyc_avail)} dari 2 metode; DCF & exit PE dikecualikan "
                   "karena berbasis laba historis)")
         if abs(upside_pct) > 75.0:
+            # Nyatakan SEBABNYA, bukan hanya "ekstrem". ITMG: EV/EBITDA
+            # emiten 4,04x vs median peer 10,89x, jadi model menilai ulang
+            # ke level peer. Bisa berarti pasar menilai batubara akan turun
+            # (rasional) atau pasar salah harga (peluang) — pembaca harus
+            # tahu mana angkanya, bukan menebak.
+            _own_mult = None
+            try:
+                _ebd_own = ((audited_fy or {}).get("ebit_bn") or 0) + abs(
+                    (audited_fy or {}).get("depreciation_amortization_bn") or 0)
+                _mc_own = ((curr_p * shares_m) / 1e3) if (shares_m and curr_p) else None
+                if _ebd_own > 0 and _mc_own:
+                    _ev_own = _mc_own + ((debt_bn or 0) - (cash_bn or 0))
+                    _own_mult = _ev_own / _ebd_own
+            except Exception:
+                _own_mult = None
             _basis += " — SINYAL EKSTREM: verifikasi asumsi siklus"
+            if _own_mult and _sector_ev_ebitda:
+                _basis += (f" ({_own_mult:.1f}x EV/EBITDA emiten vs "
+                           f"{_sector_ev_ebitda:.1f}x median peer)")
         valuation_basis = _basis
         _csum = sum(w for w, _ in _cyc_avail) or 1.0
         _weights_used = {("EV/EBITDA" if w == 0.60 else "Relative PBV"): w / _csum
