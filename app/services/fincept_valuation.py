@@ -346,14 +346,15 @@ def quick_dcf_valuation(
         minority_interest=0,
     )
 
-    # Convert shares: juta → miliar = bagi 1000
-    shares_in_bn = shares_outstanding_m / 1000.0
-
     # ── SANITY GATE TERPUSAT ───────────────────────────────────────────────
     # Semua jalur (halaman utama, PDF, endpoint) lewat fungsi ini, jadi guard
     # ditaruh di sini agar tidak ada jalur yang lolos:
     #   * EBIT <= 0  -> FCF negatif, DCF tidak bermakna (EXCL: EBIT -1.345).
     #   * FCF awal <= 0 -> arus kas tidak menopang nilai (ADRO: -2.131).
+    #   * saham tidak ada -> ZERO-FAKE: tanpa jumlah saham, harga per saham
+    #     tidak bisa dihitung (dulu fallback `max(100, ekuitas/5000/1e6)`).
+    #     Guard ini WAJIB sebelum konversi shares_in_bn; menaruhnya setelah
+    #     `shares_outstanding_m / 1000.0` membuat None melempar TypeError.
     # CATATAN METODOLOGI: g (pertumbuhan FCF 5 tahun) BOLEH melebihi WACC.
     # Terminal value memakai terminal_growth_rate (2,5%), bukan g; yang
     # membuat penyebut nol adalah terminal_growth_rate >= WACC, dan itu
@@ -367,6 +368,9 @@ def quick_dcf_valuation(
             or _fcf_base is None or _fcf_base <= 0
             or not shares_outstanding_m or shares_outstanding_m <= 0):
         return None
+
+    # Convert shares: juta → miliar = bagi 1000 (setelah guard, lihat atas)
+    shares_in_bn = shares_outstanding_m / 1000.0
 
     result = model.comprehensive_dcf(
         wacc_inputs, fcf_inp, term_inp, bs, shares_in_bn, projection_years
