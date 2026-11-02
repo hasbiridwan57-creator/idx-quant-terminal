@@ -74,7 +74,7 @@
       <div>
         <span class="text-slate-400 block font-sans">Justified PBV Multiple</span>
         <span class="text-lg font-semibold text-sky-400 mt-1 block">
-          {{ "%.2f"|format(banking.justified_pbv) if banking.justified_pbv else '—' }}x
+          {% if banking.justified_pbv is not none %}{{ "%.2f"|format(banking.justified_pbv) }}x{% else %}N/A{% endif %}
         </span>
         <span class="text-[11px] text-slate-500">(ROE - g) / (Ke - g)</span>
       </div>
@@ -91,9 +91,31 @@
         <span class="text-lg font-semibold text-emerald-400 mt-1 block">
           Rp {{ "{:,.0f}".format(banking.fair_value_per_share) if banking.fair_value_per_share else '—' }}
         </span>
-        <span class="text-[11px] text-slate-500">BVPS &times; Justified PBV</span>
+        {# Label metode harus jujur: bila Justified PBV tidak berlaku (ROE<=g),
+           nilai wajar memakai P/BV median sektor — bukan Justified PBV. #}
+        <span class="text-[11px] text-slate-500">
+          {% if banking.justified_pbv is not none %}BVPS &times; Justified PBV
+          {% else %}BVPS &times; P/BV median (0,721){% endif %}
+        </span>
       </div>
     </div>
+
+    {# Bank dengan ROE negatif: Justified PBV (ROE-g)/(Ke-g) tidak terdefinisi
+       secara ekonomi, jadi nilai wajar memakai P/BV median bank sektor.
+       Metode WAJIB dinyatakan agar angka tidak disalahartikan sebagai
+       hasil model laba. #}
+    {% if banking.justified_pbv is none and banking.fair_value_per_share %}
+    <div class="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
+      <p class="text-xs text-amber-300/90 leading-relaxed">
+        <b>Metode: P/BV median sektor.</b> ROE emiten ini
+        ({{ "%.2f"|format(banking.return_on_equity) ~ '%' if banking.return_on_equity is not none else 'N/A' }})
+        {{ 'negatif' if banking.return_on_equity is not none and banking.return_on_equity < 0 else 'di bawah asumsi pertumbuhan' }},
+        sehingga Justified PBV = (ROE &minus; g) / (Ke &minus; g) tidak berlaku
+        (Gordon Growth mensyaratkan ROE &gt; g). Nilai wajar dihitung
+        BVPS &times; 0,721 (median P/BV 17 bank terdaftar), bukan dari laba emiten.
+      </p>
+    </div>
+    {% endif %}
   </div>
 
   {% elif not dcf %}

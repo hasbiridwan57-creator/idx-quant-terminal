@@ -401,6 +401,30 @@ def compute_sustainable_growth(hist: list) -> tuple[Optional[float], str]:
         return None, "N/A (ekuitas awal tidak valid)"
     cagr = (end / start) ** (1.0 / n) - 1.0
     g = max(0.0, min(0.08, cagr))
+
+    # ── BATAS ATAS: g TIDAK BOLEH MELEBIHI ROE ──────────────────────────
+    # Identitas fundamental: g = ROE x retention. Karena retention <= 1,
+    # g <= ROE SELALU. Jalur CAGR ekuitas bisa melanggarnya ketika ekuitas
+    # tumbuh dari setoran modal (rights issue), bukan laba ditahan:
+    #   BMAS CAGR 48,66% -> dibatasi 8%, ROE hanya 0,49% -> g > ROE
+    #   BACA CAGR 33,56%, ROE 1,87%; BABP CAGR 12,21%, ROE 2,18%
+    # Akibatnya Justified PBV = (ROE-g)/(Ke-g) menjadi NEGATIF dan bank
+    # kecil kehilangan valuasi sama sekali. Di bawah ini g diturunkan ke
+    # tingkat yang benar-benar dapat dibiayai laba.
+    if ni_last is not None and eq_last and eq_last > 0 and ni_last > 0:
+        roe_last = ni_last / eq_last
+        if g > roe_last:
+            # g = 0, bukan g = ROE. Bila g disamakan dengan ROE, retensi
+            # menjadi 100% sehingga dividen = 0 dan Justified PBV = 0
+            # (model degenerasi). Dengan g = 0, PBV = ROE/Ke — valuasi
+            # tanpa pertumbuhan, sepenuhnya dapat direproduksi tanpa
+            # asumsi payout. Bank dengan ROE < Ke memang tidak diasumsikan
+            # tumbuh: pertumbuhan ekuitasnya berasal dari setoran modal.
+            return 0.0, (
+                f"COMPUTED (g = 0: CAGR ekuitas {cagr*100:.2f}% melebihi ROE "
+                f"{roe_last*100:.2f}%, jadi pertumbuhan berasal dari setoran "
+                f"modal bukan laba ditahan; bank diasumsikan tanpa pertumbuhan "
+                f"sehingga PBV wajar = ROE / Ke)")
     src = (f"COMPUTED (CAGR ekuitas buku {cagr*100:.2f}% dari {n} tahun "
            f"sebagai pengganti ROE x retention, dibatasi 0-8%)")
     return round(g * 100.0, 2), src

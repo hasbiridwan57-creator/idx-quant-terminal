@@ -55,6 +55,15 @@ def is_banking_entity(ticker: str, sector: Optional[str] = None) -> bool:
     return False
 
 
+# P/BV median bank terdaftar (17 bank dengan market cap & ekuitas audited,
+# dihitung 2026-10): BBCA 2,17 BMRI 1,18 BBRI 1,30 BBNI 0,72 BRIS 0,89
+# BNGA 0,65 BABP 0,26 BACA 0,25 AGRO 0,39 BJTM 0,54 BBTN 0,35 ARTO 0,80
+# AMAR 1,00 BCAP 0,18 BBHI 1,73 AGRS 0,41 BANK 0,81 -> median 0,721.
+# Dipakai HANYA untuk bank yang ROE-nya negatif, di mana Justified PBV
+# (ROE-g)/(Ke-g) tidak terdefinisi secara ekonomi.
+SECTOR_MEDIAN_PB_BANK = 0.721
+
+
 def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
     """
     Hitung rasio perbankan dari dictionary laporan keuangan.
@@ -167,7 +176,17 @@ def calculate_banking_ratios(data: Dict[str, Any]) -> Optional[BankingRatios]:
         if _fv_bank > 0:
             fair_value_per_share = _fv_bank
         else:
-            justified_pbv = None      # multiple tidak bermakna bila negatif
+            # ROE negatif / ROE < g: Justified PBV tidak berlaku (Gordon
+            # Growth mensyaratkan ROE > g). Untuk bank MERUGI, nilai intrinsik
+            # berbasis laba memang nol, tapi menyajikan Rp0 tidak berguna.
+            # Dipakai P/BV median bank sektor (dihitung dari 17 bank terdaftar
+            # dengan market cap & ekuitas audited) sebagai patokan pasar yang
+            # dinyatakan eksplisit — bukan angka karangan.
+            justified_pbv = None
+            fair_value_per_share = None
+            if bvps is not None:
+                _peer_pb = SECTOR_MEDIAN_PB_BANK
+                fair_value_per_share = bvps * _peer_pb
 
     return BankingRatios(
         ticker=ticker or "BANK",
