@@ -56,3 +56,12 @@ build/
 # Backups
 *.bak
 *.backup
+
+# ── Data yang WAJIB ikut deploy ───────────────────────────────────────────
+# Tanpa file ini aplikasi hidup tapi kosong di server (semua emiten N/A).
+!data/xbrl_audited_metrics.jsonl
+!data/revenue_by_type.jsonl
+!data/idx_governance.json
+!data/idx_profiles.json
+!data/idx_trading_status.json
+!data/fintech_unit_economics.json

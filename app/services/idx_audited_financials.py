@@ -14,7 +14,8 @@ import os
 from typing import Dict, List, Optional
 
 _CACHE: Optional[Dict[str, List[dict]]] = None
-_JSONL = "/Users/hasbi/laporan/bei_full/parsed/xbrl_audited_metrics.jsonl"
+from app.paths import xbrl_jsonl, repo_data
+_JSONL = xbrl_jsonl() or ""
 _PROFILES_CACHE: Optional[Dict[str, dict]] = None
 _GOVERNANCE_CACHE: Optional[Dict[str, dict]] = None
 
@@ -22,7 +23,7 @@ def get_governance(ticker: str) -> dict:
     """Board of directors, shareholders, subsidiaries dari scrape BEI resmi."""
     global _GOVERNANCE_CACHE
     if _GOVERNANCE_CACHE is None:
-        g_path = "/Users/hasbi/idx-quant-terminal/data/idx_governance.json"
+        g_path = repo_data("idx_governance.json") or ""
         if os.path.exists(g_path):
             try:
                 with open(g_path, "r", encoding="utf-8") as f:
@@ -36,7 +37,7 @@ def get_governance(ticker: str) -> dict:
 def get_issuer_profile(ticker: str) -> dict:
     global _PROFILES_CACHE
     if _PROFILES_CACHE is None:
-        p_path = "/Users/hasbi/idx-quant-terminal/data/idx_profiles.json"
+        p_path = repo_data("idx_profiles.json") or ""
         if os.path.exists(p_path):
             try:
                 with open(p_path, "r", encoding="utf-8") as f:

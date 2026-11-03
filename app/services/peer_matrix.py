@@ -2,8 +2,6 @@
 Sector Comparison Matrix — Institutional Peer Benchmark
 Supports Multi-Ticker Side-by-Side Comparison (up to 10 peers)
 """
-import sys
-sys.path.insert(0, "/Users/hasbi/idx-quant-terminal")
 
 from app.services.idx_audited_financials import five_year_table, _load, get_issuer_profile
 

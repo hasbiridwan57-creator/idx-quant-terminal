@@ -23,7 +23,8 @@ import os
 import threading
 from typing import Any, Dict, List, Optional
 
-_JSONL = "/Users/hasbi/laporan/bei_full/parsed/revenue_by_type.jsonl"
+from app.paths import segments_jsonl
+_JSONL = segments_jsonl() or ""
 
 _lock = threading.Lock()
 _cache: Optional[Dict[str, Dict[str, Any]]] = None

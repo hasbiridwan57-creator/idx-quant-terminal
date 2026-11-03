@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "description": "Status perdagangan emiten yang TIDAK punya data harga di yfinance. Terverifikasi dari pengumuman resmi BEI/IDX (suspensi, delisting, free float).",
+    "verified_sources": [
+      "IDX - Suspensi Lebih Dari 6 Bulan (idx.co.id/id/perusahaan-tercatat/suspensi-6-bulan/)",
+      "BEI Pengumuman Suspensi Peng-S-00020/BEI.PLP/06-2026",
+      "BEI Pengumuman Penyesuaian Suspensi Peng-UPT-00004/BEI.PP1/09-2026",
+      "Bareksa 2026-05-07 - Status Free Float 956 Emiten (force/voluntary delisting)"
+    ],
+    "note": "Emiten di sini TETAP punya laporan XBRL audited. Yang tidak ada hanya harga pasar. UI wajib menampilkan alasan, bukan N/A kosong."
+  },
+  "status": {
+    "BTEL": {"reason": "SUSPENDED", "since": "2019-05-27", "detail": "PT Bakrie Telecom Tbk — suspensi seluruh pasar, > 6 bulan (berpotensi delisting)"},
+    "CBMF": {"reason": "SUSPENDED", "since": "2023-02-16", "detail": "PT Cahaya Bintang Medan Tbk — suspensi seluruh pasar"},
+    "CPRI": {"reason": "SUSPENDED", "since": "2023-07-03", "detail": "PT Capri Nusa Satu Properti Tbk — suspensi pasar reguler & tunai"},
+    "ENVY": {"reason": "SUSPENDED", "since": null, "detail": "PT Envy Technologies Indonesia Tbk — suspensi seluruh pasar (telat laporan keuangan)"},
+    "GAMA": {"reason": "SUSPENDED", "since": "2023-07-03", "detail": "PT Aksara Global Development Tbk — suspensi pasar reguler & tunai"},
+    "HKMU": {"reason": "SUSPENDED", "since": "2023-07-03", "detail": "PT HK Metals Utama Tbk — suspensi seluruh pasar"},
+    "HOTL": {"reason": "SUSPENDED", "since": "2022-08-01", "detail": "PT Saraswati Griya Lestari Tbk — suspensi seluruh pasar"},
+    "IIKP": {"reason": "SUSPENDED", "since": "2024-02-16", "detail": "PT Inti Agri Resources Tbk — suspensi seluruh pasar"},
+    "JSKY": {"reason": "SUSPENDED", "since": "2022-08-01", "detail": "PT Sky Energy Indonesia Tbk — suspensi seluruh pasar"},
+    "MAGP": {"reason": "SUSPENDED", "since": "2022-07-18", "detail": "PT Miti Adiperkasa Plantation Tbk — suspensi pasar reguler & tunai"},
+    "META": {"reason": "DELISTED", "since": null, "detail": "Voluntary delisting menurut status free float BEI 2026 — saham tidak lagi diperdagangkan"},
+    "MTRA": {"reason": "SUSPENDED", "since": null, "detail": "PT Mitra Pemuda Tbk — suspensi seluruh pasar"},
+    "OCAP": {"reason": "DELISTED", "since": null, "detail": "PT Onix Capital Tbk — voluntary delisting menurut status free float BEI 2026"},
+    "POOL": {"reason": "SUSPENDED", "since": "2020-06-10", "detail": "PT Pool Advista Indonesia Tbk — suspensi seluruh pasar"},
+    "POSA": {"reason": "SUSPENDED", "since": "2020-11-24", "detail": "PT Bliss Properti Indonesia Tbk — suspensi seluruh pasar"},
+    "PURE": {"reason": "SUSPENDED", "since": "2022-08-01", "detail": "PT Trinitan Metals and Minerals Tbk — suspensi seluruh pasar"},
+    "SCPI": {"reason": "DELISTED", "since": null, "detail": "Voluntary delisting menurut status free float BEI 2026 — saham tidak lagi diperdagangkan"},
+    "SKYB": {"reason": "SUSPENDED", "since": "2025-10-30", "detail": "PT Northcliff Citranusa Indonesia Tbk — suspensi, telat LKTT 2025"},
+    "SMRU": {"reason": "SUSPENDED", "since": "2020-01-23", "detail": "PT SMR Utama Tbk — suspensi seluruh pasar"},
+    "SRIL": {"reason": "FORCE_DELISTING", "since": "2025-10-30", "detail": "PT Sri Rejeki Isman Tbk — force delisting (free float 0%), suspensi seluruh pasar"},
+    "TDPM": {"reason": "SUSPENDED", "since": "2025-10-30", "detail": "PT Tianrong Chemicals Industry Tbk — suspensi, telat LKTT 2025"},
+    "TECH": {"reason": "SUSPENDED", "since": "2023-08-07", "detail": "PT Indosterling Technomedia Tbk — suspensi seluruh pasar"},
+    "TRIO": {"reason": "SUSPENDED", "since": "2019-07-17", "detail": "PT Trikomsel Oke Tbk — suspensi seluruh pasar, > 6 tahun"},
+    "WSKT": {"reason": "SUSPENDED", "since": "2023-05-08", "detail": "PT Waskita Karya (Persero) Tbk — suspensi seluruh pasar sejak 8 Mei 2023, berpotensi delisting"}
+  }
+}

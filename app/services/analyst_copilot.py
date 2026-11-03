@@ -11,7 +11,8 @@ import urllib.error
 from typing import Dict, Any, List, Optional
 
 # Load .env fallback if not present in os.environ
-_ENV_PATH = "/Users/hasbi/idx-quant-terminal/.env"
+from app.paths import env_file
+_ENV_PATH = env_file() or ""
 if os.path.exists(_ENV_PATH):
     try:
         with open(_ENV_PATH) as _f:

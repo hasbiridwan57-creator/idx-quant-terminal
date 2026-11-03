@@ -1916,7 +1916,7 @@ async def api_get_trading_status(ticker: str):
     Sumber: pengumuman resmi BEI/IDX. Kosong = emiten aktif diperdagangkan.
     """
     import json, os
-    f_path = "/Users/hasbi/idx-quant-terminal/data/idx_trading_status.json"
+    f_path = repo_data("idx_trading_status.json") or ""
     if os.path.exists(f_path):
         try:
             with open(f_path, "r", encoding="utf-8") as f:
@@ -1936,7 +1936,7 @@ async def api_get_trading_status(ticker: str):
 @app.get("/api/fintech/{ticker}")
 async def api_get_fintech_metrics(ticker: str):
     import json, os
-    f_path = "/Users/hasbi/idx-quant-terminal/data/fintech_unit_economics.json"
+    f_path = repo_data("fintech_unit_economics.json") or ""
     if os.path.exists(f_path):
         try:
             with open(f_path, "r", encoding="utf-8") as f:

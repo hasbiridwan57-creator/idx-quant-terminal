@@ -57,6 +57,16 @@ def main() -> int:
     if src_url == dst_url:
         print("ERROR: sumber dan tujuan sama.", file=sys.stderr)
         return 2
+    # Neon: string -pooler memakai PgBouncer (transaction mode) yang tidak
+    # mendukung prepared statement / session state. Migrasi besar (1,15 juta
+    # baris) lewat pooled sering gagal dengan pesan yang TIDAK menyebut
+    # pooling sama sekali (mis. `prepared statement "s0" already exists`).
+    # Pakai DATABASE_URL_UNPOOLED untuk migrasi.
+    if "-pooler" in dst_url:
+        print("PERINGATAN: URL tujuan memakai -pooler (PgBouncer).", file=sys.stderr)
+        print("           Untuk migrasi, pakai connection string UNPOOLED.", file=sys.stderr)
+        print("           Neon menyimpannya sebagai DATABASE_URL_UNPOOLED.", file=sys.stderr)
+        return 6
 
     from sqlalchemy import MetaData, create_engine, inspect, select, text
     from sqlalchemy.exc import OperationalError

@@ -1,0 +1,370 @@
+{
+  "GOTO": {
+    "2024": {
+      "GTV_Total_Triliun": {
+        "value": 538.199,
+        "unit": "Rp Triliun",
+        "page": "145",
+        "definition": "Gross Transaction Value grup (revisi definisi)",
+        "citation": "our GTV declined by 11% to Rp538.2 trillion from Rp607.4 trillion in 2023"
+      },
+      "GTV_Core_Proforma_Triliun": {
+        "value": 519.8,
+        "unit": "Rp Triliun",
+        "page": "145",
+        "definition": "GTV inti proforma tanpa Tokopedia",
+        "citation": "our GTV increased by 29% to Rp519.8 trillion in 2024 from Rp402.1 trillion in 2023"
+      },
+      "GTV_Financial_Technology_Miliar": {
+        "value": 494590.217,
+        "unit": "Rp Miliar",
+        "page": "145",
+        "definition": "GTV segmen GoTo Financial",
+        "citation": "Financial technology: 494,590,217 (dalam jutaan)"
+      },
+      "GTV_On_Demand_Services_Miliar": {
+        "value": 63038.645,
+        "unit": "Rp Miliar",
+        "page": "145",
+        "definition": "GTV Gojek On-Demand (Mobility + Food + Logistics)",
+        "citation": "On-demand services: 63,038,645"
+      },
+      "Take_Rate_FinTech_Pct": {
+        "value": 0.7,
+        "unit": "%",
+        "page": "147",
+        "definition": "Take rate GoTo Financial",
+        "citation": "Our financial technology take rate improved from 0.5% in 2023 to 0.7% in 2024"
+      },
+      "Take_Rate_On_Demand_Pct": {
+        "value": 22.5,
+        "unit": "%",
+        "page": "148",
+        "definition": "Take rate Gojek On-Demand",
+        "citation": "segment's take rate improved from 21.8% in 2023 to 22.5% in 2024"
+      },
+      "MTU_Juta": {
+        "value": 20.2,
+        "unit": "Juta pengguna",
+        "page": "55",
+        "definition": "Monthly Transacting Users",
+        "citation": "Pengguna Bertransaksi Bulanan (MTU) mencapai 20,2 juta"
+      },
+      "Pinjaman_Fintech_Outstanding_Triliun": {
+        "value": 5.2,
+        "unit": "Rp Triliun",
+        "page": "146",
+        "definition": "Saldo pinjaman beredar GoTo Financial",
+        "citation": "loan outstanding balance is Rp5.2 trillion"
+      }
+    },
+    "2023": {
+      "GTV_Total_Triliun": {
+        "value": 607.36,
+        "unit": "Rp Triliun",
+        "page": "145",
+        "definition": "Gross Transaction Value grup",
+        "citation": "Rp607.4 trillion in 2023"
+      },
+      "GTV_Core_Proforma_Triliun": {
+        "value": 402.1,
+        "unit": "Rp Triliun",
+        "page": "145",
+        "definition": "GTV inti proforma 2023",
+        "citation": "from Rp402.1 trillion in 2023"
+      },
+      "GTV_Financial_Technology_Miliar": {
+        "value": 379738.694,
+        "unit": "Rp Miliar",
+        "page": "145",
+        "definition": "GTV segmen GoTo Financial 2023",
+        "citation": "Financial technology: 379,738,694 (dalam jutaan)"
+      },
+      "GTV_On_Demand_Services_Miliar": {
+        "value": 55635.825,
+        "unit": "Rp Miliar",
+        "page": "145",
+        "definition": "GTV Gojek On-Demand 2023",
+        "citation": "On-demand services: 55,635,825"
+      },
+      "Take_Rate_FinTech_Pct": {
+        "value": 0.5,
+        "unit": "%",
+        "page": "147",
+        "definition": "Take rate GoTo Financial 2023",
+        "citation": "from 0.5% in 2023"
+      },
+      "Take_Rate_On_Demand_Pct": {
+        "value": 21.8,
+        "unit": "%",
+        "page": "148",
+        "definition": "Take rate Gojek On-Demand 2023",
+        "citation": "from 21.8% in 2023"
+      }
+    }
+  },
+  "BUKA": {
+    "2023": {
+      "TPV_Total_Miliar": {
+        "value": 164380.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "Total Processing Value grup",
+        "citation": "Total TPV 164,380 (FY23)"
+      },
+      "TPV_O2O_Miliar": {
+        "value": 77540.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "TPV segmen O2O (Mitra/warung)",
+        "citation": "TPV O2O 77,540 (FY23)"
+      },
+      "TPV_Marketplace_Miliar": {
+        "value": 86840.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "TPV segmen Marketplace",
+        "citation": "TPV Marketplace 86,840 (FY23)"
+      },
+      "Take_Rate_Total_Pct": {
+        "value": 2.7,
+        "unit": "%",
+        "page": "14",
+        "definition": "Total take rate (revenue/TPV)",
+        "citation": "Total Take Rate 2,70% (FY23)"
+      },
+      "Revenue_Total_Miliar": {
+        "value": 4438.0,
+        "unit": "Rp Miliar",
+        "page": "14",
+        "definition": "Total pendapatan",
+        "citation": "Total Pendapatan 4,438 (FY23)"
+      },
+      "Mitra_Terdaftar_Juta": {
+        "value": 18.1,
+        "unit": "Juta mitra",
+        "page": "9",
+        "definition": "Jumlah mitra warung terdaftar",
+        "citation": "18.1 juta Jumlah Mitra terdaftar per Desember 2023"
+      },
+      "Adjusted_EBITDA_Miliar": {
+        "value": -475.0,
+        "unit": "Rp Miliar",
+        "page": "17",
+        "definition": "Adjusted EBITDA",
+        "citation": "EBITDA Yang Disesuaikan -475 (FY23)"
+      }
+    },
+    "2022": {
+      "TPV_Total_Miliar": {
+        "value": 153739.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "Total Processing Value grup",
+        "citation": "Total TPV 153,739 (FY22)"
+      },
+      "TPV_O2O_Miliar": {
+        "value": 73638.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "TPV segmen O2O",
+        "citation": "TPV O2O 73,638 (FY22)"
+      },
+      "TPV_Marketplace_Miliar": {
+        "value": 80101.0,
+        "unit": "Rp Miliar",
+        "page": "18",
+        "definition": "TPV segmen Marketplace",
+        "citation": "TPV Marketplace 80,101 (FY22)"
+      },
+      "Take_Rate_Total_Pct": {
+        "value": 2.35,
+        "unit": "%",
+        "page": "14",
+        "definition": "Total take rate",
+        "citation": "Total Take Rate 2,35% (FY22)"
+      },
+      "Revenue_Total_Miliar": {
+        "value": 3618.0,
+        "unit": "Rp Miliar",
+        "page": "14",
+        "definition": "Total pendapatan",
+        "citation": "Total Pendapatan 3,618 (FY22)"
+      }
+    }
+  },
+  "BELI": {
+    "2025": {
+      "TPV_Total_Miliar": {
+        "value": 83316.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "Jumlah TPV konsolidasi",
+        "citation": "Jumlah TPV FY25 83.316"
+      },
+      "TPV_Ritel_1P_Miliar": {
+        "value": 6413.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Ritel 1P",
+        "citation": "Ritel 1P FY25 6.413"
+      },
+      "TPV_Ritel_3P_Miliar": {
+        "value": 53187.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Ritel 3P (marketplace)",
+        "citation": "Ritel 3P FY25 53.187"
+      },
+      "TPV_Institusi_Miliar": {
+        "value": 15291.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV segmen Institusi (B2B)",
+        "citation": "Institusi FY25 15.291"
+      },
+      "TPV_Toko_Fisik_Miliar": {
+        "value": 8425.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Toko Fisik (offline retail)",
+        "citation": "Toko Fisik FY25 8.425"
+      },
+      "Take_Rate_Total_Pct": {
+        "value": 8.5,
+        "unit": "%",
+        "page": "2",
+        "definition": "Take Rate = GPBD / TPV",
+        "citation": "Take Rate FY25 8,5%"
+      },
+      "Revenue_Total_Miliar": {
+        "value": 22361.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "Jumlah Pendapatan Neto",
+        "citation": "Jumlah Pendapatan Neto FY25 22.361"
+      },
+      "GPBD_Miliar": {
+        "value": 7083.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "Laba Bruto Sebelum Diskon",
+        "citation": "Jumlah GPBD FY25 7.083"
+      },
+      "Transacting_Users_Juta": {
+        "value": 5.1,
+        "unit": "Juta pengguna",
+        "page": "2",
+        "definition": "Transacting Users",
+        "citation": "Transacting Users FY25 5,1 juta"
+      },
+      "AOV_Rp_Juta": {
+        "value": 1.72,
+        "unit": "Rp Juta",
+        "page": "2",
+        "definition": "Average Order Value",
+        "citation": "AOV FY25 1,72"
+      },
+      "Pelanggan_Institusi_Ribu": {
+        "value": 137.5,
+        "unit": "Ribu klien",
+        "page": "2",
+        "definition": "Jumlah Pelanggan Institusi",
+        "citation": "Jumlah Pelanggan Institusi FY25 137,5 ribu"
+      },
+      "EBITDA_Miliar": {
+        "value": -1726.0,
+        "unit": "Rp Miliar",
+        "page": "4",
+        "definition": "EBITDA",
+        "citation": "EBITDA FY25 (1.726)"
+      }
+    },
+    "2024": {
+      "TPV_Total_Miliar": {
+        "value": 77410.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "Jumlah TPV konsolidasi",
+        "citation": "Jumlah TPV FY24 77.410"
+      },
+      "TPV_Ritel_1P_Miliar": {
+        "value": 5301.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Ritel 1P",
+        "citation": "Ritel 1P FY24 5.301"
+      },
+      "TPV_Ritel_3P_Miliar": {
+        "value": 54210.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Ritel 3P",
+        "citation": "Ritel 3P FY24 54.210"
+      },
+      "TPV_Institusi_Miliar": {
+        "value": 11649.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Institusi",
+        "citation": "Institusi FY24 11.649"
+      },
+      "TPV_Toko_Fisik_Miliar": {
+        "value": 6250.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "TPV Toko Fisik",
+        "citation": "Toko Fisik FY24 6.250"
+      },
+      "Take_Rate_Total_Pct": {
+        "value": 6.9,
+        "unit": "%",
+        "page": "2",
+        "definition": "Take Rate",
+        "citation": "Take Rate FY24 6,9%"
+      },
+      "Revenue_Total_Miliar": {
+        "value": 16716.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "Jumlah Pendapatan Neto",
+        "citation": "Jumlah Pendapatan Neto FY24 16.716"
+      },
+      "GPBD_Miliar": {
+        "value": 5364.0,
+        "unit": "Rp Miliar",
+        "page": "2",
+        "definition": "GPBD",
+        "citation": "Jumlah GPBD FY24 5.364"
+      },
+      "Transacting_Users_Juta": {
+        "value": 4.5,
+        "unit": "Juta pengguna",
+        "page": "2",
+        "definition": "Transacting Users",
+        "citation": "Transacting Users FY24 4,5 juta"
+      },
+      "AOV_Rp_Juta": {
+        "value": 1.7,
+        "unit": "Rp Juta",
+        "page": "2",
+        "definition": "AOV",
+        "citation": "AOV FY24 1,70"
+      },
+      "Pelanggan_Institusi_Ribu": {
+        "value": 138.9,
+        "unit": "Ribu klien",
+        "page": "2",
+        "definition": "Jumlah Pelanggan Institusi",
+        "citation": "Jumlah Pelanggan Institusi FY24 138,9 ribu"
+      },
+      "EBITDA_Miliar": {
+        "value": -2113.0,
+        "unit": "Rp Miliar",
+        "page": "4",
+        "definition": "EBITDA",
+        "citation": "EBITDA FY24 (2.113)"
+      }
+    }
+  }
+}
