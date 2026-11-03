@@ -25,7 +25,7 @@ from __future__ import annotations
 import datetime as _dt
 import math
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlmodel import Session
@@ -46,19 +46,34 @@ def _fetch_all_prices(session: Session, tickers: List[str]) -> Dict[str, Dict[st
     if not tickers:
         return {}
     want = sorted({t.upper() for t in tickers} | {BENCH_TICKER})
-    # ANY(array) lebih cepat daripada IN (...) untuk 900+ nilai, dan
-    # parameternya tunggal sehingga tidak menabrak batas 32.767 parameter.
-    q = text(
-        "SELECT ticker, date, close FROM quotehistorydaily "
-        "WHERE ticker = ANY(:tk) AND close > 0 "
-        # Kolom `date` disimpan sebagai VARCHAR (campuran SQLite warisan),
-        # jadi perbandingan dilakukan sebagai string ISO: 'YYYY-MM-DD'.
-        # ASCII 'YYYY-MM-DD' terurut sama dengan urutan tanggal sebenarnya.
-        "AND date >= :cutoff "
-        "ORDER BY ticker, date"
-    )
+    # Kolom `date` disimpan sebagai VARCHAR (campuran SQLite warisan), jadi
+    # perbandingan dilakukan sebagai string ISO: 'YYYY-MM-DD'.
+    # ASCII 'YYYY-MM-DD' terurut sama dengan urutan tanggal sebenarnya.
     cutoff = (_dt.date.today() - _dt.timedelta(days=365 * LOOKBACK_YEARS)).isoformat()
-    rows = session.execute(q, {"tk": want, "cutoff": cutoff}).fetchall()
+
+    # ANY(array) hanya ada di Postgres. SQLite butuh IN (?,?,...). Keduanya
+    # didukung supaya app jalan sama cepat di lokal (SQLite) maupun di server
+    # (Neon/Postgres) — sebelumnya `ANY` membuat prefetch gagal senyap di
+    # SQLite dan screener lokal kembali lambat.
+    is_pg = session.get_bind().dialect.name in ("postgresql", "postgres")
+    if is_pg:
+        q = text(
+            "SELECT ticker, date, close FROM quotehistorydaily "
+            "WHERE ticker = ANY(:tk) AND close > 0 AND date >= :cutoff "
+            "ORDER BY ticker, date"
+        )
+        params: Dict[str, Any] = {"tk": want, "cutoff": cutoff}
+    else:
+        placeholders = ",".join(f":t{i}" for i in range(len(want)))
+        q = text(
+            "SELECT ticker, date, close FROM quotehistorydaily "
+            f"WHERE ticker IN ({placeholders}) AND close > 0 AND date >= :cutoff "
+            "ORDER BY ticker, date"
+        )
+        params = {f"t{i}": t for i, t in enumerate(want)}
+        params["cutoff"] = cutoff
+
+    rows = session.execute(q, params).fetchall()
     out: Dict[str, Dict[str, float]] = {}
     for tkr, dt, close in rows:
         if close is None:

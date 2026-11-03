@@ -16,10 +16,13 @@ from __future__ import annotations
 import sys
 import warnings
 from datetime import datetime
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, "/Users/hasbi/idx-quant-terminal")
+# Path repo ditambahkan relatif ke lokasi skrip ini, bukan hardcode: skrip
+# harus jalan di mesin siapa pun yang meng-clone repo.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yfinance as yf
 from sqlalchemy import text
