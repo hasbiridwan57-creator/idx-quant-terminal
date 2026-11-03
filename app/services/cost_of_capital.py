@@ -17,9 +17,16 @@ ZERO-FAKE: tidak ada nilai yang dipakai tanpa menyatakan asalnya.
 """
 from __future__ import annotations
 
+import os
+import time
 from typing import Any, Dict, Optional
 
 from sqlmodel import Session
+
+# Cache beta per ticker — lihat _get_beta: tanpa ini screener 937 emiten
+# memanggil regresi harga 937 kali dan request menggantung di Postgres remote.
+_BETA_CACHE: Dict[str, tuple] = {}
+_BETA_TTL_S = int(os.getenv("IDX_BETA_TTL_S", "3600"))
 
 DEFAULT_RF_PCT = 6.0          # yield SUN 10Y (dapat di-override)
 DEFAULT_ERP_PCT = 5.5         # Damodaran mature-market ERP (dapat di-override)
@@ -44,14 +51,29 @@ SECTOR_BETA = {
 
 def _get_beta(session: Optional[Session], ticker: str,
               sector: Optional[str]) -> tuple[Optional[float], str]:
-    """Beta dari regresi riil; fallback sektor bila data tidak cukup."""
+    """
+    Beta dari regresi riil; fallback sektor bila data tidak cukup.
+
+    DI-CACHE per ticker. compute_performance menarik data harga 5 tahun dan
+    diregresi terhadap IHSG — sekitar 20 ms di SQLite lokal, ~200 ms lewat
+    jaringan. Tanpa cache, screener 937 emiten memanggilnya 937 kali:
+    22 detik lokal, >400 detik ke Postgres remote (request menggantung).
+
+    Beta bergantung pada harga EOD yang berubah sekali sehari, jadi cache
+    satu jam aman. Kesalahan beta kecil; biaya tanpa cache fatal.
+    """
     if session is not None:
+        cached = _BETA_CACHE.get(ticker)
+        if cached and (time.time() - cached[0]) < _BETA_TTL_S:
+            return cached[1], cached[2]
         try:
             from app.services.performance_engine import compute_performance
             perf = compute_performance(session, ticker, benchmark="IHSG")
             b = perf.get("beta")
             if perf.get("available") and b is not None and b != 0:
-                return float(b), "MARKET (regresi return harian vs IHSG, 5 tahun)"
+                src = "MARKET (regresi return harian vs IHSG, 5 tahun)"
+                _BETA_CACHE[ticker] = (time.time(), float(b), src)
+                return float(b), src
         except Exception:
             pass
     if sector and sector in SECTOR_BETA:

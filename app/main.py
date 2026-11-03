@@ -71,6 +71,32 @@ from app.db.database import init_db, get_session, engine
 from app.db.models import FinancialStatementCache, Symbol
 from datetime import datetime, timezone
 
+_SCREENER_CACHE = None
+_SCREENER_TTL_S = int(os.getenv("IDX_SCREENER_TTL_S", "600"))  # 10 menit
+
+
+def _screener_cached(session):
+    """
+    Screener 937 emiten, di-cache di memori per proses.
+
+    KENAPA: build_peer_screener_rows memanggil compute_performance (beta dari
+    data harga) untuk SETIAP emiten. Tanpa cache itu 937 regresi per render:
+    22 detik di SQLite lokal, menit-menitan lewat jaringan ke Neon.
+
+    Screener hanya bergantung pada laporan keuangan audited + harga EOD yang
+    berubah sekali sehari, jadi cache 10 menit aman.
+    """
+    import time as _t
+    global _SCREENER_CACHE
+    now = _t.time()
+    hit = _SCREENER_CACHE
+    if hit and (now - hit[0]) < _SCREENER_TTL_S:
+        return hit[1]
+    rows = build_peer_screener_rows(session)
+    _SCREENER_CACHE = (now, rows)
+    return rows
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -92,6 +118,27 @@ async def lifespan(app: FastAPI):
             tpl_path.write_bytes(generate_idx_excel_template_bytes())
     except Exception as e:
         print(f"Template gen error: {e}")
+
+    # PRE-WARM screener di background. Pass pertama menghitung beta 937
+    # emiten (~10 s di SQLite, ~2 menit lewat jaringan ke Neon). Kalau
+    # dibiarkan malas, pengunjung pertama menunggu selama itu. Startup
+    # tidak memblokir: healthcheck tetap cepat, halaman memakai cache
+    # begitu siap.
+    try:
+        import threading
+
+        def _warm():
+            try:
+                with Session(engine) as _s:
+                    _screener_cached(_s)
+                print("[warm] screener siap")
+            except Exception as _e:
+                print(f"[warm] screener gagal: {_e}")
+
+        threading.Thread(target=_warm, daemon=True).start()
+    except Exception as e:
+        print(f"[warm] tidak bisa start: {e}")
+
     yield
 
 app = FastAPI(
@@ -120,32 +167,6 @@ RISK_FREE_PCT = 6.0
 # JANGAN pakai /api/health: endpoint itu memanggil Yahoo Finance, dan bila
 # upstream lambat healthcheck timeout -> Railway menganggap app mati padahal
 # sehat. Endpoint ini hanya menyentuh database lokal, tanpa jaringan.
-def _screener_cached(session):
-    """
-    Screener 937 emiten, di-cache di memori per proses.
-
-    KENAPA: build_peer_screener_rows memanggil compute_performance (beta dari
-    data harga) untuk SETIAP emiten, dan compute_wacc ikut query per emiten.
-    Itu ribuan query per render halaman — 13 detik di SQLite lokal, jauh lebih
-    lama di Postgres remote, dan membuat request menggantung.
-
-    Screener hanya bergantung pada laporan keuangan audited + harga EOD yang
-    berubah sekali sehari, jadi cache 10 menit aman. Setelah itu dihitung
-    ulang sekali, bukan di tiap request.
-    """
-    import time as _t
-    global _SCREENER_CACHE
-    now = _t.time()
-    hit = _SCREENER_CACHE
-    if hit and (now - hit[0]) < _SCREENER_TTL_S:
-        return hit[1]
-    rows = build_peer_screener_rows(session)
-    _SCREENER_CACHE = (now, rows)
-    return rows
-
-
-_SCREENER_CACHE = None
-_SCREENER_TTL_S = int(os.getenv("IDX_SCREENER_TTL_S", "600"))  # 10 menit
 
 @app.get("/health")
 def health_lite():
