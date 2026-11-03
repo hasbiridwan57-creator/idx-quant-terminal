@@ -176,17 +176,16 @@ def get_macro_indicators() -> Dict[str, Any]:
 
     try:
         import yfinance as yf
+        from app.services.market_data import _with_timeout as _wt, YF_TIMEOUT_S as _yft
 
         # USD/IDR spot rate
-        usd_idr = yf.Ticker("IDR=X")
-        fi = usd_idr.fast_info
+        fi = _wt(lambda: yf.Ticker("IDR=X").fast_info, _yft)
         if fi and fi.last_price:
             result["usd_idr"] = round(float(fi.last_price), 2)
 
         # SBN Yield 10Y
         try:
-            sbn10 = yf.Ticker("ID10YT=RR")
-            fi10 = sbn10.fast_info
+            fi10 = _wt(lambda: yf.Ticker("ID10YT=RR").fast_info, _yft)
             if fi10 and fi10.last_price:
                 result["sbn_yield_10y"] = round(float(fi10.last_price), 3)
         except Exception:
@@ -194,8 +193,7 @@ def get_macro_indicators() -> Dict[str, Any]:
 
         # SBN Yield 5Y
         try:
-            sbn5 = yf.Ticker("ID5YT=RR")
-            fi5 = sbn5.fast_info
+            fi5 = _wt(lambda: yf.Ticker("ID5YT=RR").fast_info, _yft)
             if fi5 and fi5.last_price:
                 result["sbn_yield_5y"] = round(float(fi5.last_price), 3)
         except Exception:
@@ -203,8 +201,7 @@ def get_macro_indicators() -> Dict[str, Any]:
 
         # IHSG level
         try:
-            jkse = yf.Ticker("^JKSE")
-            fij = jkse.fast_info
+            fij = _wt(lambda: yf.Ticker("^JKSE").fast_info, _yft)
             if fij and fij.last_price:
                 result["ihsg_level"] = round(float(fij.last_price), 2)
         except Exception:
