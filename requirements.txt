@@ -12,3 +12,9 @@ pytest>=8.1.0
 yfinance>=0.2.0
 # Driver Postgres untuk deploy (Railway/Neon). SQLite tetap dipakai lokal.
 psycopg[binary]>=3.1
+
+# Diimpor di level modul oleh research_paper_engine.py (jalur halaman utama).
+# Tanpa ini container gagal dengan ModuleNotFoundError: reportlab.
+reportlab>=4.0.0
+# numpy dipakai langsung di quant_engine (bukan sekadar dependensi pandas).
+numpy>=1.26.0
