@@ -7,12 +7,46 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional, Tuple, List, Dict, Any
 import math
+import os
 import yfinance as yf
 from sqlmodel import Session, select
 from app.db.models import QuoteLatest, QuoteHistoryDaily
 
-QUOTE_TTL_S = 300  # 5 menit cache quote
+QUOTE_TTL_S = int(os.getenv("IDX_QUOTE_TTL_S", "3600"))  # 1 jam cache quote
+# 5 menit terlalu pendek untuk production: setiap render halaman memanggil
+# Yahoo Finance sinkron, dan request akan menggantung kalau jaringan lambat
+# atau Yahoo membatasi (429). Harga EOD tidak berubah dalam satu jam, jadi
+# TTL 1 jam aman dan menghapus ketergantungan jaringan dari jalur render.
 MIN_BARS = 60      # Minimal baris harga untuk kalkulasi risiko yang valid
+YF_TIMEOUT_S = float(os.getenv("IDX_YF_TIMEOUT_S", "8"))
+
+
+def _with_timeout(fn, seconds: float):
+    """
+    Jalankan fn() dengan batas waktu.
+
+    yfinance memakai requests tanpa timeout default: kalau Yahoo lambat atau
+    memblokir, request HTTP kita menggantung sampai koneksi diputus jaringan
+    (bisa menit). Di production itu berarti halaman tidak pernah selesai.
+    Thread daemon ditinggalkan kalau lewat — aman karena hanya membaca.
+    """
+    import threading
+    box: dict = {}
+
+    def _run():
+        try:
+            box["v"] = fn()
+        except BaseException as e:  # noqa: BLE001
+            box["e"] = e
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise TimeoutError(f"yfinance > {seconds}s")
+    if "e" in box:
+        raise box["e"]
+    return box.get("v")
 
 class InsufficientData(Exception):
     pass
@@ -38,8 +72,8 @@ def get_quote(session: Session, ticker: str, force: bool = False) -> Tuple[Optio
     try:
         sym = yf_symbol(clean_t)
         t_obj = yf.Ticker(sym)
-        fi = t_obj.fast_info
-        
+        fi = _with_timeout(lambda: t_obj.fast_info, YF_TIMEOUT_S)
+
         price = float(fi.last_price) if getattr(fi, "last_price", None) else None
         prev = float(fi.previous_close) if getattr(fi, "previous_close", None) else None
         
