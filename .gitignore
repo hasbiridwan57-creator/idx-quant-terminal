@@ -65,3 +65,7 @@ build/
 !data/idx_profiles.json
 !data/idx_trading_status.json
 !data/fintech_unit_economics.json
+
+# Kredensial deploy — JANGAN pernah di-commit
+.env.deploy
+.env.neon
