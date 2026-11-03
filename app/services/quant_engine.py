@@ -167,19 +167,32 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
     """
     Ambil seluruh emiten unik dari FinancialStatementCache, ambil 2 tahun terbaru per emiten,
     hitung DuPont bundle, Credit Grade, dan Fair Value.
+
+    SATU query untuk semua emiten, bukan N+1. Versi lama menjalankan satu
+    SELECT per emiten (937 putaran). Di SQLite lokal itu ~9 detik; di
+    Postgres remote (Neon) 937 round-trip x ~50 ms latensi = ~47 detik per
+    render halaman, dan bisa menggantung kalau jaringan lambat. Satu query
+    membawa semuanya, lalu grouping dilakukan di memori.
     """
-    tickers = [str(t) for t in session.exec(select(FinancialStatementCache.ticker).distinct()).all()]
-    if not tickers:
+    all_stmts = session.exec(
+        select(FinancialStatementCache).order_by(
+            FinancialStatementCache.ticker,
+            FinancialStatementCache.year.desc(),
+        )
+    ).all()
+    if not all_stmts:
         return []
+
+    # Kelompokkan per ticker; baris sudah terurut tahun menurun sehingga
+    # elemen pertama = tahun terbaru, kedua = tahun sebelumnya.
+    by_ticker: Dict[str, List[FinancialStatementCache]] = {}
+    for rec in all_stmts:
+        by_ticker.setdefault(str(rec.ticker), []).append(rec)
 
     rows: List[Dict[str, Any]] = []
 
-    for t in sorted(tickers):
-        stmts = session.exec(
-            select(FinancialStatementCache)
-            .where(FinancialStatementCache.ticker == t)
-            .order_by(FinancialStatementCache.year.desc())
-        ).all()
+    for t in sorted(by_ticker):
+        stmts = by_ticker[t]
         if not stmts:
             continue
 

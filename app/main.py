@@ -120,6 +120,33 @@ RISK_FREE_PCT = 6.0
 # JANGAN pakai /api/health: endpoint itu memanggil Yahoo Finance, dan bila
 # upstream lambat healthcheck timeout -> Railway menganggap app mati padahal
 # sehat. Endpoint ini hanya menyentuh database lokal, tanpa jaringan.
+def _screener_cached(session):
+    """
+    Screener 937 emiten, di-cache di memori per proses.
+
+    KENAPA: build_peer_screener_rows memanggil compute_performance (beta dari
+    data harga) untuk SETIAP emiten, dan compute_wacc ikut query per emiten.
+    Itu ribuan query per render halaman — 13 detik di SQLite lokal, jauh lebih
+    lama di Postgres remote, dan membuat request menggantung.
+
+    Screener hanya bergantung pada laporan keuangan audited + harga EOD yang
+    berubah sekali sehari, jadi cache 10 menit aman. Setelah itu dihitung
+    ulang sekali, bukan di tiap request.
+    """
+    import time as _t
+    global _SCREENER_CACHE
+    now = _t.time()
+    hit = _SCREENER_CACHE
+    if hit and (now - hit[0]) < _SCREENER_TTL_S:
+        return hit[1]
+    rows = build_peer_screener_rows(session)
+    _SCREENER_CACHE = (now, rows)
+    return rows
+
+
+_SCREENER_CACHE = None
+_SCREENER_TTL_S = int(os.getenv("IDX_SCREENER_TTL_S", "600"))  # 10 menit
+
 @app.get("/health")
 def health_lite():
     from sqlalchemy import text
@@ -693,8 +720,8 @@ async def dashboard_home(
         risk = None
         monte_carlo = None
 
-    # Peer Screener Rows
-    screener_rows = build_peer_screener_rows(session)
+    # Peer Screener Rows — di-cache di memori (lihat _screener_cached).
+    screener_rows = _screener_cached(session)
 
     # Baseline SBN FR Benchmark (Tab 5)
     bond_demo_raw = bond_price(face_value=1_000_000, coupon_rate=0.0725, ytm=0.0675, years_to_maturity=5.0)
