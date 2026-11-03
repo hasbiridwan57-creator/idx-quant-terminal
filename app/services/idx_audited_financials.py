@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Dict, List, Optional
 
 _CACHE: Optional[Dict[str, List[dict]]] = None
@@ -91,6 +92,10 @@ def get_row(ticker: str, year: int) -> Optional[dict]:
     return None
 
 
+_USDIDR_CACHE: list = []          # [timestamp, value]
+_USDIDR_TTL_S = 3600
+
+
 def current_usdidr(default: float = 16000.0) -> float:
     """Kurs USD/IDR TUNGGAL untuk seluruh aplikasi.
 
@@ -98,11 +103,21 @@ def current_usdidr(default: float = 16000.0) -> float:
     kurs live (~18.120) -> angka emiten USD (ADMR, ITMG, ADRO) berbeda ~13%
     antara tabel histori di UI dan DB/PDF. Satu sumber kurs menghilangkan
     ketidakcocokan itu.
+
+    DI-CACHE 1 jam. Fungsi ini dipanggil 3.191 kali per render screener, dan
+    tiap panggilan menembak yfinance lewat HTTP (~100-500 ms). Tanpa cache,
+    satu render screener bisa mengirim puluhan request internet dan menggantung
+    ratusan detik di server. Kurs tidak bergerak cukup cepat untuk mengubah
+    keputusan dalam satu jam.
     """
+    now = time.time()
+    if _USDIDR_CACHE and (now - _USDIDR_CACHE[0]) < _USDIDR_TTL_S:
+        return _USDIDR_CACHE[1]
     try:
         from app.services.real_data_registry import get_macro_indicators
         _v = (get_macro_indicators() or {}).get("usd_idr")
         if isinstance(_v, (int, float)) and _v > 0:
+            _USDIDR_CACHE[:] = [now, float(_v)]
             return float(_v)
     except Exception:
         pass

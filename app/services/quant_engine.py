@@ -189,7 +189,48 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
     for rec in all_stmts:
         by_ticker.setdefault(str(rec.ticker), []).append(rec)
 
+    # ── HARGA TERAKHIR: SATU QUERY, BUKAN 1.837 ─────────────────────────────
+    # Loop di bawah memakai harga QuoteLatest di dua tempat (validasi nilai
+    # wajar + margin of safety). Sebelumnya tiap pemakaian menembak query
+    # sendiri: 1.837 round-trip ke Neon = ~110 detik, hanya untuk membaca
+    # kolom `price` yang isinya 937 baris. Diambil sekali di sini.
+    _price_by_ticker: Dict[str, float] = {}
+    try:
+        from app.db.models import QuoteLatest as _QLp
+        for _q in session.exec(select(_QLp)).all():
+            if getattr(_q, "price", None) and _q.price > 0:
+                _price_by_ticker[str(_q.ticker).upper()] = float(_q.price)
+    except Exception as _e:
+        print(f"[price] prefetch dilewati ({_e})")
+
     rows: List[Dict[str, Any]] = []
+
+    # ── FIX PERFORMA REMOTE ─────────────────────────────────────────────────
+    # Tiap emiten memanggil compute_wacc -> _get_beta -> compute_performance,
+    # yang menarik 5 tahun harga lewat SATU query per emiten. Di SQLite lokal
+    # itu ~19 detik total (tanpa jaringan). Di Neon (Postgres remote) satu
+    # query = ~59 ms round-trip, jadi 937 emiten + IHSG = 5.419 round-trip =
+    # 320-465 detik; halaman seolah menggantung. prefetch_betas menarik semua
+    # harga dalam SATU query besar, menghitung beta di memori, lalu mengisi
+    # _BETA_CACHE sehingga loop di bawah tidak menyentuh DB untuk beta lagi.
+    try:
+        from app.services.beta_prefetch import prefetch_betas
+        _n_beta = prefetch_betas(session, list(by_ticker.keys()))
+        if _n_beta:
+            print(f"[beta] prefetch {_n_beta}/{len(by_ticker)} emiten dari satu query")
+    except Exception as _e:
+        # Jangan matikan screener karena optimasi: _get_beta masih punya
+        # jalur lambat (query per emiten) sebagai cadangan.
+        print(f"[beta] prefetch dilewati ({_e})")
+
+    # Market cap: 1.655 query per emiten -> satu query. Dipakai bobot WACC.
+    try:
+        from app.services.cost_of_capital import prefetch_market_caps
+        _n_mc = prefetch_market_caps(session, list(by_ticker.keys()))
+        if _n_mc:
+            print(f"[mcap] prefetch {_n_mc}/{len(by_ticker)} emiten")
+    except Exception as _e:
+        print(f"[mcap] prefetch dilewati ({_e})")
 
     for t in sorted(by_ticker):
         stmts = by_ticker[t]
@@ -370,15 +411,7 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
                 # seperti GGRM 0,17x dan JPFA 5,8x harus ditolak). Tanpa gate
                 # ini screener menyajikan nilai wajar yang ditolak halaman.
                 _fvq = dcf_res.get("price_per_share") if dcf_res else None
-                _cpq = None
-                try:
-                    from app.db.models import QuoteLatest as _QLg
-                    _qg = session.exec(
-                        select(_QLg).where(_QLg.ticker == curr_in.ticker)).first()
-                    if _qg and _qg.price and _qg.price > 0:
-                        _cpq = float(_qg.price)
-                except Exception:
-                    _cpq = None
+                _cpq = _price_by_ticker.get(str(curr_in.ticker).upper())
                 if _fvq and _cpq and not (0.25 <= (_fvq / _cpq) <= 4.0):
                     fair_val = None
                 elif _fvq:
@@ -403,17 +436,8 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             verdict = "ROE tinggi — ekuitas tipis"
 
         # Harga pasar: tanpa ini "fair_value" tidak bisa ditafsirkan (mahal
-        # atau murah?). Diambil dari QuoteLatest yang sudah dipakai halaman.
-        _price_q = None
-        try:
-            from app.db.models import QuoteLatest as _QL_q
-            _qrow_q = session.exec(
-                select(_QL_q).where(_QL_q.ticker == curr_in.ticker)
-            ).first()
-            if _qrow_q and _qrow_q.price and _qrow_q.price > 0:
-                _price_q = float(_qrow_q.price)
-        except Exception:
-            _price_q = None
+        # atau murah?). Dibaca dari prefetch di atas — bukan query per emiten.
+        _price_q = _price_by_ticker.get(str(curr_in.ticker).upper())
         _upside_q = (round((fair_val / _price_q - 1.0) * 100.0, 1)
                      if (fair_val and _price_q) else None)
         rows.append({

@@ -109,6 +109,10 @@ def _get_cost_of_debt(row: dict, etr: float) -> tuple[float, str]:
     return 0.09 * (1.0 - etr), "PROXY (cost of debt 9% pre-tax)"
 
 
+_MCAP_CACHE: Dict[str, tuple] = {}
+_MCAP_TTL_S = 3600
+
+
 def _market_cap_bn(session, ticker: str) -> Optional[float]:
     """Kapitalisasi pasar dalam miliar rupiah, atau None bila tidak dapat dihitung.
 
@@ -118,17 +122,29 @@ def _market_cap_bn(session, ticker: str) -> Optional[float]:
     Tidak memakai `QuoteLatest.shares_outstanding` karena kolom itu tidak ada
     di model; percobaan sebelumnya mengembalikan None untuk semua emiten
     sehingga bobot WACC jatuh ke ekuitas buku.
+
+    DI-CACHE per ticker. Screener memanggil ini 1.655 kali (2x per emiten);
+    ke Postgres remote tiap query = ~60 ms round-trip = ~100 detik per
+    render. Market cap berubah sekali sehari bersama harga EOD, jadi cache
+    satu jam aman.
     """
     if session is None:
         return None
     tk = ticker.upper()
+    hit = _MCAP_CACHE.get(tk)
+    if hit and (time.time() - hit[0]) < _MCAP_TTL_S:
+        # None ikut di-cache: emiten tanpa market_cap tidak perlu ditanyakan
+        # ulang 1.329 kali per render.
+        return hit[1]
     try:
         from sqlmodel import select as _sel
         from app.db.models import QuoteLatest as _QL
         q = session.exec(_sel(_QL).where(_QL.ticker == tk)).first()
         mc = getattr(q, "market_cap", None) if q is not None else None
         if mc and mc > 0:
-            return float(mc) / 1e9        # rupiah penuh -> miliar
+            val = float(mc) / 1e9        # rupiah penuh -> miliar
+            _MCAP_CACHE[tk] = (time.time(), val)
+            return val
         px = float(q.price) if (q and q.price and q.price > 0) else None
         from app.services.idx_audited_financials import five_year_table as _fyt
         hist = _fyt(tk) or []
@@ -137,10 +153,72 @@ def _market_cap_bn(session, ticker: str) -> Optional[float]:
             px = float(_c) if _c else None
         sh = hist[-1].get("shares_outstanding") if hist else None
         if px and sh and float(sh) > 0:
-            return (px * float(sh)) / 1e9
+            val = (px * float(sh)) / 1e9
+            _MCAP_CACHE[tk] = (time.time(), val)
+            return val
         return None
     except Exception:
         return None
+
+
+def prefetch_market_caps(session, tickers) -> int:
+    """
+    Isi _MCAP_CACHE untuk banyak ticker dalam SATU query QuoteLatest.
+
+    Tanpa ini, screener 937 emiten menembak 1.655 query berurutan ke Neon;
+    di SQLite lokal tidak terasa karena tanpa latensi jaringan.
+
+    Untuk emiten tanpa `market_cap` di DB (753 dari 937), cache diisi None
+    dengan TTL lebih pendek supaya jalur fallback (five_year_table + kurs)
+    tidak dihitung berulang kali per render.
+    """
+    if session is None or not tickers:
+        return 0
+    now = time.time()
+    todo = [t.upper() for t in tickers
+            if not ((h := _MCAP_CACHE.get(t.upper())) and (now - h[0]) < _MCAP_TTL_S)]
+    if not todo:
+        return 0
+    try:
+        from sqlmodel import select as _sel
+        from app.db.models import QuoteLatest as _QL
+        rows = session.exec(_sel(_QL).where(_QL.ticker.in_(todo))).all()
+    except Exception:
+        return 0
+    filled = 0
+    found = set()
+    for q in rows:
+        tk = q.ticker.upper()
+        found.add(tk)
+        mc = getattr(q, "market_cap", None)
+        if mc and mc > 0:
+            _MCAP_CACHE[tk] = (now, float(mc) / 1e9)
+            filled += 1
+            continue
+        # market_cap kosong: hitung fallback SEKALI di sini (harga x saham
+        # beredar), lalu simpan hasilnya — termasuk None. Tanpa ini tiap
+        # render mengulang perhitungan 1.329 kali.
+        price = getattr(q, "price", None)
+        px = float(price) if (price and price > 0) else None
+        val = None
+        try:
+            from app.services.idx_audited_financials import five_year_table as _fyt
+            hist = _fyt(tk) or []
+            if px is None and hist:
+                _c = hist[-1].get("close")
+                px = float(_c) if _c else None
+            sh = hist[-1].get("shares_outstanding") if hist else None
+            if px and sh and float(sh) > 0:
+                val = (px * float(sh)) / 1e9
+        except Exception:
+            val = None
+        _MCAP_CACHE[tk] = (now, val)
+
+    # Ticker yang sama sekali tidak ada di QuoteLatest: tandai None juga.
+    for tk in todo:
+        if tk not in found:
+            _MCAP_CACHE[tk] = (now, None)
+    return filled
 
 
 def compute_wacc(session: Optional[Session], ticker: str, row: dict,
