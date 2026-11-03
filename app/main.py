@@ -79,7 +79,13 @@ async def lifespan(app: FastAPI):
         # XBRL audited BEI (4.185 filing, 937 emiten) via idx_audited_financials.
         sync_audited_to_statement_cache(session)
     static_dir = BASE_DIR / "static"
-    static_dir.mkdir(exist_ok=True)
+    try:
+        static_dir.mkdir(exist_ok=True)
+    except OSError as e:
+        # Render/Vercel menaruh kode di filesystem read-only. Static dir
+        # biasanya sudah ada dari repo; kalau tidak, app tetap boleh hidup
+        # ketimbang crash saat cold start.
+        print(f"Static dir tidak bisa dibuat ({e}); pakai yang ada.")
     try:
         tpl_path = static_dir / "template_lapkeu_bei.xlsx"
         if not tpl_path.exists():
@@ -96,7 +102,12 @@ app = FastAPI(
 
 BASE_DIR = Path(__file__).resolve().parent
 static_dir = BASE_DIR / "static"
-static_dir.mkdir(exist_ok=True)
+try:
+    static_dir.mkdir(exist_ok=True)
+except OSError as e:
+    # Filesystem read-only (Render/Vercel): dir statis seharusnya sudah ada
+    # dari repo. Jangan sampai import-time crash hanya karena mkdir gagal.
+    print(f"Static dir tidak bisa dibuat saat import ({e}).")
 # ===============================================================
 # SATU nilai risk-free untuk SELURUH aplikasi.
 # Dulu 6,85% dipakai di DCF, 6,0% di /api/risk, dan label template
@@ -104,6 +115,24 @@ static_dir.mkdir(exist_ok=True)
 # DCF tetap pakai angka ini; horizon & benchmark tidak berubah.
 # ===============================================================
 RISK_FREE_PCT = 6.0
+
+# Healthcheck ringan untuk platform (Railway/Render).
+# JANGAN pakai /api/health: endpoint itu memanggil Yahoo Finance, dan bila
+# upstream lambat healthcheck timeout -> Railway menganggap app mati padahal
+# sehat. Endpoint ini hanya menyentuh database lokal, tanpa jaringan.
+@app.get("/health")
+def health_lite():
+    from sqlalchemy import text
+    try:
+        with engine.connect() as c:
+            c.execute(text("SELECT 1"))
+        return {"status": "ok", "db": engine.dialect.name}
+    except Exception as e:  # noqa: BLE001
+        return Response(
+            content=f'{{"status":"degraded","error":"{type(e).__name__}"}}',
+            media_type="application/json",
+            status_code=503,
+        )
 
 app.mount("/app/static", StaticFiles(directory=str(static_dir)), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: idx-quant-terminal
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Kredensial Neon diisi manual di dashboard Render (jangan di-commit).
+      - key: IDX_DB_URL
+        sync: false
+      # Render Free memberi 512 MB; batasi thread pandas/BLAS agar tidak OOM.
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
