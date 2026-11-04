@@ -4,8 +4,49 @@ Platform riset ekuitas untuk pasar saham Indonesia (BEI/IDX) — dibangun di ata
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
-[![Tests](https://img.shields.io/badge/tests-85%20passed-brightgreen.svg)](#pengujian)
+[![Tests](https://img.shields.io/badge/tests-88%20passed-brightgreen.svg)](#pengujian)
 [![Data](https://img.shields.io/badge/emiten-937-orange.svg)](#cakupan-data)
+
+---
+
+## Tampilan
+
+> **Tidak ada demo yang di-hosting.** Aplikasi ini dijalankan lokal — tiga perintah di bagian [Menjalankan](#menjalankan). Screenshot di bawah diambil dari aplikasi yang benar-benar berjalan dengan data asli, bukan mockup.
+
+### DuPont & Analisis Fundamental
+Penguraian ROE tiga tingkat dengan waterfall jembatan YoY dan audit kualitas laba.
+
+![DuPont](docs/screenshots/02-dupont.png)
+
+### Valuasi Perbankan (Justified PBV)
+BVPS × Justified PBV dengan Ke dan g yang dihitung per emiten — bukan konstanta.
+
+![Valuasi](docs/screenshots/03-valuation.png)
+
+### Screener 937 Emiten
+Satu tabel, dihitung dari engine yang sama dengan halaman per emiten.
+
+![Screener](docs/screenshots/04-screener.png)
+
+### Peer Matrix
+Perbandingan head-to-head antar emiten sejenis.
+
+![Peer Matrix](docs/screenshots/05-peer-matrix.png)
+
+### Quant Risk
+Monte Carlo GBM, VaR, Sharpe, dan ukuran risiko lain dari seri harga harian.
+
+![Quant Risk](docs/screenshots/06-quant-risk.png)
+
+### Fixed Income
+Durasi, convexity, dan YTM untuk obligasi dan SBN.
+
+![Fixed Income](docs/screenshots/07-fixed-income.png)
+
+### Research Paper
+Laporan 5 tahun siap ekspor PDF dan Excel.
+
+![Research Paper](docs/screenshots/08-research-paper.png)
 
 ---
 
@@ -27,7 +68,7 @@ Setiap angka di aplikasi ini bisa dilacak ke sumbernya. Setiap angka yang **dihi
 | Filing laporan keuangan | **4.185** (2021–2025) | XBRL audited BEI |
 | Baris harga harian | **±1,15 juta** | yfinance (EOD) |
 | Endpoint API | **31** | — |
-| Test otomatis | **85** | — |
+| Test otomatis | **88** | — |
 
 Data fundamental berasal dari **XBRL audited** yang dipublikasikan BEI — angka yang sudah diaudit akuntan publik, bukan estimasi. Untuk harga penutupan harian dipakai yfinance (EOD), dipisahkan jelas dari data fundamental.
 
@@ -131,7 +172,7 @@ Dokumentasi API interaktif otomatis tersedia di **http://127.0.0.1:8000/docs**
 pytest -q
 ```
 ```
-85 passed
+88 passed
 ```
 
 ---
