@@ -537,7 +537,13 @@ def compute_performance(session: Session, ticker: str,
         "sortino": round(sortino, 2) if sortino is not None else None,
         "downside_deviation_pct": round(downside_dev_ann * 100.0, 2) if downside_dev_ann else None,
         "calmar": round(calmar, 2) if calmar is not None else None,
-        "beta": round(beta, 2) if beta is not None else None,
+        # Beta TIDAK dibulatkan. Versi lama menyimpan 2 desimal (BBCA 0,98),
+        # sementara jalur prefetch menghitung presisi penuh (0,9753). Dua
+        # pembulatan berbeda untuk angka yang sama membuat Ke berbeda
+        # (13,84% vs 13,80%) dan nilai wajar bank meleset Rp 27 per lembar
+        # di screener dibanding halaman utama. Presisi penuh = satu angka
+        # untuk seluruh aplikasi; pembulatan hanya untuk tampilan.
+        "beta": beta if beta is not None else None,
         "alpha_pct": round(alpha * 100.0, 2) if alpha is not None else None,
         "treynor": round(treynor, 2) if treynor is not None else None,
         "information_ratio": round(info_ratio, 2) if info_ratio is not None else None,

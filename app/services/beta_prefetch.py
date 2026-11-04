@@ -22,7 +22,6 @@ hanya dari mana datanya datang: satu query besar, bukan 937 query kecil.
 
 from __future__ import annotations
 
-import datetime as _dt
 import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -33,8 +32,12 @@ from sqlmodel import Session
 # Ticker benchmark di tabel harga. IHSG disimpan seperti emiten lain.
 BENCH_TICKER = "IHSG"
 
-# Jendela beta: 5 tahun terakhir, sama dengan default compute_performance.
-LOOKBACK_YEARS = 5
+# Jendela beta: TIDAK dibatasi. `load_prices` di performance_engine menarik
+# SELURUH riwayat harga yang ada di DB, jadi prefetch harus melakukan hal yang
+# sama — membatasi 5 tahun di sini membuat beta berbeda (BBCA 0,97527 dengan
+# potongan 5 tahun vs 0,98011 dengan riwayat penuh) sehingga Ke dan nilai
+# wajar bank meleset dari halaman. Fungsi prefetch = sumber data yang identik,
+# hanya jumlah query-nya yang dikurangi.
 
 # Minimum observasi bersama agar regresi dianggap sah. Sama dengan
 # performance_engine.MIN_OBS supaya hasil batch == hasil per-emiten.
@@ -49,7 +52,6 @@ def _fetch_all_prices(session: Session, tickers: List[str]) -> Dict[str, Dict[st
     # Kolom `date` disimpan sebagai VARCHAR (campuran SQLite warisan), jadi
     # perbandingan dilakukan sebagai string ISO: 'YYYY-MM-DD'.
     # ASCII 'YYYY-MM-DD' terurut sama dengan urutan tanggal sebenarnya.
-    cutoff = (_dt.date.today() - _dt.timedelta(days=365 * LOOKBACK_YEARS)).isoformat()
 
     # ANY(array) hanya ada di Postgres. SQLite butuh IN (?,?,...). Keduanya
     # didukung supaya app jalan sama cepat di lokal (SQLite) maupun di server
@@ -59,19 +61,18 @@ def _fetch_all_prices(session: Session, tickers: List[str]) -> Dict[str, Dict[st
     if is_pg:
         q = text(
             "SELECT ticker, date, close FROM quotehistorydaily "
-            "WHERE ticker = ANY(:tk) AND close > 0 AND date >= :cutoff "
+            "WHERE ticker = ANY(:tk) AND close > 0 "
             "ORDER BY ticker, date"
         )
-        params: Dict[str, Any] = {"tk": want, "cutoff": cutoff}
+        params: Dict[str, Any] = {"tk": want}
     else:
         placeholders = ",".join(f":t{i}" for i in range(len(want)))
         q = text(
             "SELECT ticker, date, close FROM quotehistorydaily "
-            f"WHERE ticker IN ({placeholders}) AND close > 0 AND date >= :cutoff "
+            f"WHERE ticker IN ({placeholders}) AND close > 0 "
             "ORDER BY ticker, date"
         )
         params = {f"t{i}": t for i, t in enumerate(want)}
-        params["cutoff"] = cutoff
 
     rows = session.execute(q, params).fetchall()
     out: Dict[str, Dict[str, float]] = {}
@@ -80,6 +81,23 @@ def _fetch_all_prices(session: Session, tickers: List[str]) -> Dict[str, Dict[st
             continue
         key = dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
         out.setdefault(str(tkr).upper(), {})[key] = float(close)
+
+    # ── BERSIHKAN ARTEFAK SPLIT, SAMA SEPERTI JALUR HALAMAN ────────────────
+    # `load_prices` di performance_engine memotong seri pada diskontinuitas
+    # aksi korporasi (reverse split BNBR 3.800 -> 71 terbaca -98%). Tanpa
+    # langkah yang sama, beta hasil prefetch berbeda dari beta halaman:
+    # terukur BBCA 0,97527 (prefetch) vs 0,98011 (halaman) -> Ke 13,80% vs
+    # 13,84% -> nilai wajar bank meleset Rp 27/lembar. Satu fungsi pembersih
+    # dipakai kedua jalur supaya angkanya identik.
+    try:
+        from app.services.performance_engine import _splice_split_artifacts
+        for tk, series in list(out.items()):
+            cleaned = _splice_split_artifacts(sorted(series.items()))
+            out[tk] = dict(cleaned)
+    except Exception:
+        # Pembersih tidak tersedia: pakai seri mentah. Lebih baik beta
+        # sedikit berbeda daripada screener mati.
+        pass
     return out
 
 

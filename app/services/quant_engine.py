@@ -262,20 +262,29 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
         capex_bn = (curr_in.capex * factor_to_bn) if curr_in.capex else (ebit_bn * 0.35)
 
         # Banking check first
-        # ── SATUAN HARUS SERAGAM ────────────────────────────────────────────
-        # Versi lama mengirim `net_income` apa adanya (miliar) tetapi
-        # `total_equity` dikali 1e9 (rupiah penuh). ROE = NI/Equity menjadi
-        # ~0,0002 -> Justified PBV = (ROE-g)/(Ke-g) NEGATIF (-0,9091) dan
-        # nilai wajar bank -Rp2.083. Sekarang SEMUA nominal dalam rupiah penuh,
-        # konsisten dengan `calculate_banking_ratios` yang mengharapkan rupiah.
-        _f_full = 1.0 if (curr_in.revenue or 0) >= 1e9 else (factor_to_bn * 1e9)
-        _ni_full = ((curr_in.net_income_parent or 0) * _f_full) if curr_in.net_income_parent else None
-        _eq_full = ((curr_in.total_equity_parent or 0) * _f_full) if curr_in.total_equity_parent else None
-        _ta_full = ((curr_in.total_assets or 0) * _f_full) if curr_in.total_assets else None
+        # ── SATUAN: PAKAI to_idr, JANGAN HEURISTIK ──────────────────────────
+        # Versi lama menebak skala: `1.0 if revenue >= 1e9 else factor*1e9`.
+        # Untuk BBCA revenue tersimpan dalam RUPIAH PENUH (1,02e14) sementara
+        # unit_multiplier = 1e9, jadi tebakan itu menghasilkan faktor yang
+        # salah dan nilai wajar bank berbeda dari halaman utama
+        # (4.559 vs 4.532). app/services/units.to_idr sudah punya aturan
+        # yang benar dan dipakai main.py — screener harus memakai yang sama.
+        from app.services.units import to_idr as _to_idr
+        _rec_for_units = curr_rec  # FinancialStatementCache punya unit_multiplier
+
+        def _full(v):
+            """Bawa nilai laporan ke rupiah penuh, tanpa heuristik."""
+            r = _to_idr(_rec_for_units, v)
+            return r
+
+        _ni_full = _full(curr_in.net_income_parent)
+        _eq_full = _full(curr_in.total_equity_parent)
+        _ta_full = _full(curr_in.total_assets)
         # Ke & g riil: tanpa ini engine memakai default 10,5% / 5,0% yang
         # menghasilkan Justified PBV berbeda dari halaman utama.
         _ke_q = None
         _g_q = None
+        _wacc_q = None   # diisi hanya untuk non-bank; bank memakai _ke_q
         try:
             from app.services.cost_of_capital import (
                 compute_wacc as _cw_q, compute_sustainable_growth as _csg_q)
@@ -293,17 +302,17 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
         banking_data = {
             "ticker": curr_in.ticker,
             "sector": curr_in.sector,
-            "revenue": (curr_in.revenue or 0) * _f_full,
+            "revenue": _full(curr_in.revenue),
             "net_income": _ni_full,
             "total_assets": _ta_full,
             "total_equity": _eq_full,
-            "total_debt": (curr_in.total_liabilities or 0) * _f_full,
-            "ebit": (curr_in.ebit or 0) * _f_full if curr_in.ebit else None,
-            "ebt": (curr_in.ebt or 0) * _f_full if curr_in.ebt else None,
-            "interest_income": (curr_in.interest_income or 0.0) * _f_full,
-            "interest_expense": (curr_in.interest_expense or 0.0) * _f_full,
-            "tax_provision": (curr_in.tax_provision or 0.0) * _f_full,
-            "pretax_income": (curr_in.ebt or 0.0) * _f_full,
+            "total_debt": _full(curr_in.total_liabilities),
+            "ebit": _full(curr_in.ebit) if curr_in.ebit else None,
+            "ebt": _full(curr_in.ebt) if curr_in.ebt else None,
+            "interest_income": _full(curr_in.interest_income) or 0.0,
+            "interest_expense": _full(curr_in.interest_expense) or 0.0,
+            "tax_provision": _full(curr_in.tax_provision) or 0.0,
+            "pretax_income": _full(curr_in.ebt) or 0.0,
             "shares_outstanding": curr_in.shares_outstanding or 0.0,
             "period": curr_in.year,
             "eps": getattr(curr_in, "eps", None),
@@ -457,6 +466,10 @@ def build_peer_screener_rows(session: Session, *args: Any, **kwargs: Any) -> Lis
             "fair_value": fair_val,
             "price": _price_q,
             "upside_pct": _upside_q,
+            # WACC/Ke dipakai DCF di atas; tanpanya pembaca tidak bisa menilai
+            # apakah nilai wajar masuk akal (diskonto 9% vs 15% = dua dunia).
+            # Sebelumnya dihitung lalu dibuang, sehingga kolom ini kosong.
+            "wacc_pct": _wacc_q if _wacc_q is not None else _ke_q,
             "quality_verdict": verdict,
             "primary_driver": bundle.primary_driver.value,
         })

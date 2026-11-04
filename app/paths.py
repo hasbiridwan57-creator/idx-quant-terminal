@@ -24,8 +24,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Repo root = dua level di atas app/services/
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# Repo root = dua level di atas app/services/.
+# paths.py ada di <root>/app/paths.py -> parents[0]=app, [1]=<root>.
+# Sebelumnya parents[2] dipakai dan hasilnya "/" di container (/app/app/paths.py?),
+# sehingga data/ dicari di /data dan SEMUA data XBRL hilang tanpa error.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_DATA = REPO_ROOT / "data"
 
 HOME = Path.home()

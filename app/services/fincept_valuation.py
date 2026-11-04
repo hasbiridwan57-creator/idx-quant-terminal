@@ -223,12 +223,29 @@ class DCFModel:
         wacc: float,
         terminal_growth: float,
         years: int = 5,
+        fcf_growth: Optional[float] = None,
     ) -> Dict[str, List[List[float]]]:
-        """2D sensitivity: WACC (columns) × Terminal Growth (rows) → EV in Trillion IDR"""
+        """2D sensitivity: WACC (columns) × Terminal Growth (rows) → EV in Trillion IDR
+
+        CATATAN KONSISTENSI: growth proyeksi HARUS sama dengan yang dipakai
+        valuasi utama. Versi lama mengunci 0,03 (3%) di sini, sementara kartu
+        utama dan slider memakai `fcf_growth_rate` dari input (mis. 5%). Akibatnya
+        sel baseline matriks (WACC 11,6% × TG 2,5% = Rp443,4 T) tidak sama dengan
+        Enterprise Value yang ditampilkan di kartu atas (Rp391,3 T) untuk emiten
+        yang SAMA — selisih ~13%, dan pembaca mengira salah satu angkanya keliru.
+
+        `fcf_growth` opsional agar pemanggil lama tetap jalan; bila None, nilai
+        diwarisi dari `self` bila tersedia, selain itu baru jatuh ke 3%.
+        """
+        if fcf_growth is None:
+            fcf_growth = getattr(self, "_fcf_growth", None)
+        if fcf_growth is None:
+            fcf_growth = 0.03
+
         wacc_range = [wacc + d for d in [-0.02, -0.01, 0.0, 0.01, 0.02]]
         tg_range   = [terminal_growth + d for d in [-0.015, -0.0075, 0.0, 0.0075, 0.015]]
 
-        projections = self.project_cash_flows(base_fcf, 0.03, years)
+        projections = self.project_cash_flows(base_fcf, fcf_growth, years)
         rows = []
         for tg in tg_range:
             row = []
@@ -380,6 +397,10 @@ def quick_dcf_valuation(
         result.wacc,
         terminal_growth_rate,
         projection_years,
+        # Growth SAMA dengan valuasi utama (comprehensive_dcf baris 191).
+        # Tanpa ini matriks memakai 3% sementara kartu utama memakai nilai ini,
+        # dan sel baseline tidak cocok dengan EV yang ditampilkan di atasnya.
+        fcf_growth=wacc_inputs.get("fcf_growth_rate", 0.05),
     )
     scenarios = model.scenario_analysis(
         wacc_inputs, fcf_inp, term_inp, bs, shares_in_bn, projection_years

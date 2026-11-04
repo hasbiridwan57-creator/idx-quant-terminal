@@ -1635,7 +1635,7 @@ async def export_research_paper_pdf(ticker: str, session: Session = Depends(get_
             depreciation=_da_bn,
             capex=_capex_bn,
             wc_change=_dwc_bn,
-            fcf_growth_rate=0.05,
+            fcf_growth_rate=_g_rev_dcf,
             terminal_growth_rate=0.025,
             total_assets=ta_bn,
             # XBRL tidak punya tag interest-bearing debt tunggal (st_debt
