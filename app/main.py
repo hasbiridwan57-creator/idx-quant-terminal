@@ -67,7 +67,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, Depends, UploadFile, File, Form, Header, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, Response, FileResponse, StreamingResponse
 from sqlmodel import Session, select
-from app.db.database import init_db, get_session, engine
+from app.db.database import init_db, get_session, engine, safe_commit
 from app.db.models import FinancialStatementCache, Symbol
 from datetime import datetime, timezone
 
@@ -103,7 +103,15 @@ async def lifespan(app: FastAPI):
     with Session(engine) as session:
         # ZERO-DUMMY POLICY: tidak ada seed hardcoded. Semua angka berasal dari
         # XBRL audited BEI (4.185 filing, 937 emiten) via idx_audited_financials.
-        sync_audited_to_statement_cache(session)
+        #
+        # Boleh GAGAL kalau DB read-only (mis. kredensial baca-saja ke Neon):
+        # sync ini cuma menyegarkan cache, sedangkan data sudah ada di DB.
+        # Tanpa try/except, seluruh app mati hanya karena tidak boleh menulis.
+        try:
+            sync_audited_to_statement_cache(session)
+        except Exception as e:
+            print(f"[sync] dilewati — DB tidak bisa ditulis ({type(e).__name__}). "
+                  f"Data yang ada di DB tetap dipakai.")
     static_dir = BASE_DIR / "static"
     try:
         static_dir.mkdir(exist_ok=True)
@@ -202,7 +210,7 @@ async def dashboard_home(
             fin_rows = provider.fetch_financials_multi(ticker_upper, years=4)
             if fin_rows:
                 provider.cache_financials_multi_to_db(session, ticker_upper, fin_rows)
-                session.commit()
+                safe_commit(session)
                 curr_stmt, prev_stmt = load_ticker_pair(session, ticker_upper)
                 notice = (f"📥 {ticker_upper} ({len(fin_rows)} tahun) baru di-pull dari yfinance & di-cache. "
                           f"Analisis DuPont YoY tersedia.")

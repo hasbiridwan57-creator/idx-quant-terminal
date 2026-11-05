@@ -7,6 +7,7 @@ import pandas as pd
 import pdfplumber
 from sqlmodel import Session, select
 from app.db.models import FinancialStatementCache
+from app.db.database import safe_commit
 from app.services.dupont_engine import FinancialStatementInput, PeriodType
 
 # Pos neraca (total_*) HANYA dicocokkan persis setelah normalisasi
@@ -260,8 +261,11 @@ def save_or_get_cached_statement(
             **values,
         )
     session.add(record)
-    session.commit()
-    session.refresh(record)
+    safe_commit(session)
+    try:
+        session.refresh(record)
+    except Exception:
+        pass
     return record
 
 def sync_audited_to_statement_cache(session: Session) -> int:
@@ -380,7 +384,7 @@ def sync_audited_to_statement_cache(session: Session) -> int:
                     file_hash=f"xbrl-audited-{tk}-{fy['year']}", **payload
                 ))
                 synced += 1
-    session.commit()
+    safe_commit(session)
     print(f"[sync] XBRL audited -> statement cache: {synced} baris tersinkron, {skipped} dilewati (komponen inti kosong)")
     return synced
 

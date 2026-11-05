@@ -11,6 +11,7 @@ import os
 import yfinance as yf
 from sqlmodel import Session, select
 from app.db.models import QuoteLatest, QuoteHistoryDaily
+from app.db.database import safe_commit
 
 QUOTE_TTL_S = int(os.getenv("IDX_QUOTE_TTL_S", "3600"))  # 1 jam cache quote
 # 5 menit terlalu pendek untuk production: setiap render halaman memanggil
@@ -98,8 +99,13 @@ def get_quote(session: Session, ticker: str, force: bool = False) -> Tuple[Optio
             row.source = "yfinance"
             row.fetched_at = datetime.now(timezone.utc)
             session.add(row)
-            session.commit()
-            session.refresh(row)
+            # DB boleh read-only: kalau tidak bisa menyimpan, tetap sajikan
+            # harga yang baru diambil (tidak menyimpan, tapi tidak 500).
+            safe_commit(session)
+            try:
+                session.refresh(row)
+            except Exception:
+                pass
             return row, "LIVE"
             
         return (ql, "STALE") if ql else (None, "UNAVAILABLE")
@@ -150,7 +156,7 @@ def ensure_history(session: Session, ticker: str, years: int = 3) -> List[QuoteH
                     )
                     session.add(item)
                     have_dates.add(d_str)
-                session.commit()
+                safe_commit(session)
                 rows = session.exec(q).all()
         except Exception as e:
             pass

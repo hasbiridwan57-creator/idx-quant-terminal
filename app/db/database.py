@@ -157,10 +157,37 @@ def _migrate_schema_add_columns(engine_ref) -> None:
                 print(f"  ⚠ Migration skipped for '{col_name}': {e}")
 
 
+def safe_commit(session) -> bool:
+    """
+    Commit yang tidak menjatuhkan app kalau DB-nya read-only.
+
+    KENAPA INI ADA:
+    Sebagian data di DB ini berasal dari refresh pasar (QuoteLatest, riwayat
+    harga). Aplikasi BOLEH disajikan dengan kredensial baca-saja — mis. repo
+    publik yang diberi akses baca ke Neon — dan itu tidak boleh membuat
+    seluruh halaman 500 hanya karena harga tidak bisa disegarkan. Yang tidak
+    bisa ditulis akan dilewati; data yang sudah ada di DB tetap dipakai.
+
+    Mengembalikan True kalau commit berhasil.
+    """
+    try:
+        session.commit()
+        return True
+    except Exception as e:
+        session.rollback()
+        print(f"[db] commit dilewati — DB read-only ({type(e).__name__}); "
+              f"memakai data yang ada di DB.")
+        return False
+
+
 def init_db() -> None:
     # Import all models explicitly to register with SQLModel.metadata
     from app.db import models  # noqa: F401
-    SQLModel.metadata.create_all(engine)
+    try:
+        SQLModel.metadata.create_all(engine)
+    except Exception as e:
+        # DB read-only sudah punya tabel; create_all tidak diperlukan.
+        print(f"[db] create_all dilewati ({type(e).__name__}) — memakai skema yang ada.")
     # Auto-migrate existing DB (v3.0 → v4.0)
     _migrate_schema_add_columns(engine)
 
