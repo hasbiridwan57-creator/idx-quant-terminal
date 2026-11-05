@@ -199,8 +199,25 @@ Tanpa data harga, bagian fundamental dan screener tetap jalan (937 emiten); yang
 ### Memakai PostgreSQL
 
 ```bash
-export IDX_DB_URL="postgresql://user:password@host:5432/nama_db"
+export IDX_DB_URL="postgresql://user:***@host:5432/nama_db"
 ```
+
+Database proyek ini berisi **937 emiten BEI, 4.185 filing XBRL audited, dan
+1,15 juta baris harga harian**. Akses **baca-saja** tersedia untuk siapa pun
+yang ingin mencoba aplikasinya dengan data penuh:
+
+```bash
+cp .env.example .env
+# isi IDX_DB_URL dari .env.example, lalu:
+set -a && . ./.env && set +a
+uvicorn app.main:app --port 8000
+```
+
+Kredensial di `.env.example` hanya berhak **SELECT**. Kalau aplikasi mencoba
+menyegarkan harga dari yfinance, penulisan itu dilewati dan data yang sudah
+ada di database tetap dipakai — halaman tidak gagal, hanya harga tidak
+diperbarui lokal. Untuk pengalaman penuh (harga selalu baru, screener bisa
+menyimpan), siapkan database sendiri dan jalankan skrip migrasi di bawah.
 
 Skrip migrasi SQLite → Postgres disertakan:
 
