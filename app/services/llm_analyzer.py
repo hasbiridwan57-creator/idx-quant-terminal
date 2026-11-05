@@ -75,7 +75,10 @@ def _pct(v: Optional[float]) -> str:
     return "NM" if v is None else f"{v * 100:.2f}%"
 
 def _mult(v: Optional[float]) -> str:
-    return "NM" if v is None else f"{v:.2f}x"
+    # Tiga desimal, sama dengan kartu DuPont di UI. Dua desimal membuat
+    # Asset Turnover tampil 0,06x di narasi tetapi 0,064x di kartu untuk
+    # emiten yang sama — pembaca mengira ada dua angka berbeda.
+    return "NM" if v is None else f"{v:.3f}x"
 
 def _verdict(bundle: DuPontAnalysisBundle) -> str:
     driver, effect, direction = bundle.primary_driver, bundle.primary_driver_effect, bundle.roe_direction
