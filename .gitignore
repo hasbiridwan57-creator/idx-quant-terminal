@@ -69,3 +69,6 @@ build/
 # Kredensial deploy — JANGAN pernah di-commit
 .env.deploy
 .env.neon
+.hermes/
+skills-lock.json
+railway.toml
